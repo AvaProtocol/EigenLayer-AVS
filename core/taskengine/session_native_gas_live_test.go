@@ -65,7 +65,8 @@ func TestWeeklyEthPayAndUsdcShareNativeCap_Sepolia(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, prepared.EchoPermissions)
 	require.NotNil(t, prepared.EchoPermissions.NativeSpendCap)
-	want := weeklySelfFundedCap(runs, 1, mustWei(t, sendWei), NativeGrantMaxFee(env.chainID))
+	// One native recipient and the USDC target: the shape the merge sizes the install for.
+	want := weeklySelfFundedCap(runs, 1, mustWei(t, sendWei), NativeGrantMaxFee(env.chainID), grantGasShape{nativeRows: 1, targets: 1})
 	require.Equal(t, want.String(), prepared.EchoPermissions.NativeSpendCap.Amount,
 		"cap must be ETH value plus both automations' steady gas and one install")
 	require.Len(t, prepared.EchoPermissions.NativeRecipients, 1)
@@ -227,13 +228,13 @@ func withWeeklyCron(task *avsproto.Task, expiredAt int64) {
 }
 
 // weeklySelfFundedCap is the ETH the loop sends, plus steady gas for one
-// send and one ERC-20 call per recipient per run, plus one install, at fee.
-// The send premium and the payable premium are the same 1.5M units, and the
-// merge keeps only one of them.
-func weeklySelfFundedCap(runs, recipients int64, perSend, fee *big.Int) *big.Int {
+// send and one ERC-20 call per recipient per run, plus one install of a
+// grant of that shape, at fee. The send premium and the payable premium are
+// the same, and the merge keeps only one of them.
+func weeklySelfFundedCap(runs, recipients int64, perSend, fee *big.Int, shape grantGasShape) *big.Int {
 	value := new(big.Int).Mul(big.NewInt(runs*recipients), new(big.Int).Set(perSend))
 	units := runs * recipients * (nativePreflightGasUnitsSteady + nativePreflightGasUnitsValueSteady)
-	units += nativePreflightGasUnitsFirstOp - nativePreflightGasUnitsSteady
+	units += shape.installPremiumUnits()
 	gas := new(big.Int).Mul(big.NewInt(units), fee)
 	return value.Add(value, gas)
 }

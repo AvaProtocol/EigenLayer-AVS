@@ -155,6 +155,7 @@ var (
 
 // SetSessionResolver installs the resolver. Call once at gateway startup.
 func SetSessionResolver(r SessionResolver) {
+	SetSessionSendGuard(nil)
 	sessionResolverMu.Lock()
 	defer sessionResolverMu.Unlock()
 	sessionResolver = r

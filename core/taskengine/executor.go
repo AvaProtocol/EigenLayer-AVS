@@ -217,6 +217,22 @@ func (x *WorkflowExecutor) RunTask(task *model.Workflow, queueData *QueueExecuti
 // propagated to wallet-ownership validation so a cancelled request interrupts
 // in-flight chain-worker derivations.
 func (x *WorkflowExecutor) RunTaskWithContext(ctx context.Context, task *model.Workflow, queueData *QueueExecutionData) (*avsproto.Execution, error) {
+	if x.engine != nil {
+		release, err := x.engine.budgetWorkflowLease(ctx, task)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+	return x.runTaskWithBudgetLease(ctx, task, queueData)
+}
+
+// Caller owns the workflow admission lease through setup and execution.
+// TriggerWorkflow passes its existing admission instead of reacquiring the
+// non-reentrant runner gate after writing a pending execution marker.
+//
+//nolint:gocyclo // Existing execution pipeline; splitting admission ownership does not change its execution branches.
+func (x *WorkflowExecutor) runTaskWithBudgetLease(ctx context.Context, task *model.Workflow, queueData *QueueExecutionData) (*avsproto.Execution, error) {
 	// Load secrets for the task
 	secrets, err := LoadSecretForTask(x.db, task)
 	if err != nil {

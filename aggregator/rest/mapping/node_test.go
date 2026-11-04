@@ -267,3 +267,23 @@ func TestNodeRoundTrip_LoopWithCustomCodeRunner(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "return value;", runnerRoundTrip.Config.Source)
 }
+
+func TestOwnerNativeReserveRoundTripsThroughREST(t *testing.T) {
+	reserve := true
+	typ := generated.EthTransfer
+	inner := generated.ETHTransferNode{Type: &typ, Config: &generated.ETHTransferNodeConfig{
+		Destination: generated.EthereumAddress("0x1234567890123456789012345678901234567890"),
+		Amount:      "1000000000000000000", ChainId: 11155111, ReserveGas: &reserve,
+	}}
+	node := generated.Node{Id: "native", Type: generated.NodeTypeEthTransfer}
+	require.NoError(t, node.FromETHTransferNode(inner))
+	pn, err := OpenAPIToProtoNode(node)
+	require.NoError(t, err)
+	require.True(t, pn.GetEthTransfer().GetConfig().GetReserveGas())
+	out, err := ProtoToOpenAPINode(pn)
+	require.NoError(t, err)
+	decoded, err := out.AsETHTransferNode()
+	require.NoError(t, err)
+	require.NotNil(t, decoded.Config.ReserveGas)
+	require.True(t, *decoded.Config.ReserveGas)
+}

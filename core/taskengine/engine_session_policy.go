@@ -79,6 +79,9 @@ type SessionPolicyInput struct {
 	// Addition set means create-or-update: merge with enabled tasks and
 	// ignore Permissions until the merge replaces them.
 	Addition *PolicyAddition
+	// Budget is never echoed through the stateless signature route.
+	Budget            *WalletBudgetInput
+	ApprovalDiscovery *BudgetApprovalDiscovery
 	// ExpiresInSeconds is the new automation's horizon when Addition is
 	// set and Addition.ValidUntilMs is zero.
 	ExpiresInSeconds int64
@@ -320,6 +323,14 @@ func (n *Engine) lookupOwnedWalletRecord(user *model.User, chainID int64, wallet
 // what lets that path use the non-locking marker: the mutex is not reentrant,
 // and taking it twice wedges the shard instead of failing.
 func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
+	return n.PrepareSessionPolicyWithContext(context.Background(), user, in)
+}
+
+//nolint:gocyclo // Existing legacy compositor; context only adds the separate budget dispatch.
+func (n *Engine) PrepareSessionPolicyWithContext(ctx context.Context, user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
+	if in.Budget != nil || in.ApprovalDiscovery != nil {
+		return n.prepareBudgetPolicy(ctx, user, in)
+	}
 	if in.ExpiresInSeconds < 0 || in.ExpiresInSeconds > MaxSessionExpiresInSeconds {
 		return nil, fmt.Errorf("expiresInSeconds must be between 0 and %d", MaxSessionExpiresInSeconds)
 	}
@@ -361,6 +372,9 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 			return nil, newBaseChanged(preCurrent)
 		}
 		if preCurrent != nil {
+			if isWalletBudget(preCurrent) {
+				return n.prepareBudgetPolicy(ctx, user, in)
+			}
 			readCtx, cancel := context.WithTimeout(context.Background(), occupancyProbeTimeout)
 			rem, readErr := n.resolveGrantRemainder(readCtx, preCurrent, in.Wallet)
 			cancel()
@@ -375,6 +389,17 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
 	lock.Lock()
 	defer lock.Unlock()
+	if err = budgetHoldPresent(n.db, in.ChainID, user.Address, in.Wallet); err != nil {
+		return nil, err
+	}
+	if err := n.refuseBudgetStatelessReplacement(user, in); err != nil {
+		return nil, err
+	}
+
+	teardownTargets, teardowns, teardownErr := n.resolveTeardowns(in.ChainID, user.Address, in.Wallet)
+	if teardownErr != nil {
+		return nil, teardownErr
+	}
 
 	var current *model.SessionPolicy
 	if in.Addition != nil || in.BasePolicyID != nil {
@@ -417,7 +442,7 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 		if priorErr != nil {
 			return nil, priorErr
 		}
-		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second, n.selfFundedGrantFeeOption(in.ChainID), priorOpt)
+		merged, ch, mergeErr := MergeSkillGrantWithRemainder(current, preRemainder, *in.Addition, kept, in.ChainID, preparedAt, time.Duration(in.ExpiresInSeconds)*time.Second, n.selfFundedGrantFeeOption(in.ChainID), priorOpt, WithTeardowns(teardowns))
 		if mergeErr != nil {
 			return nil, mergeErr
 		}
@@ -432,16 +457,18 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 	}
 
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(ulid.Make().String()), SessionGrantRequest{
-		Owner:          user.Address,
-		Wallet:         in.Wallet,
-		AgentLabel:     in.AgentLabel,
-		Justification:  in.Justification,
-		ValidUntil:     in.Permissions.ValidUntilMs,
-		HooksFor:       in.Permissions.HooksFor,
-		TeardownCheck:  n.teardownVerifier(),
-		TeardownCtx:    context.Background(),
-		OccupancyCheck: n.occupancyFor(in.ChainID),
-		OccupancyCtx:   context.Background(),
+		Owner:             user.Address,
+		Wallet:            in.Wallet,
+		AgentLabel:        in.AgentLabel,
+		Justification:     in.Justification,
+		ValidUntil:        in.Permissions.ValidUntilMs,
+		HooksFor:          in.Permissions.HooksFor,
+		TeardownCheck:     n.teardownVerifier(),
+		TeardownCtx:       context.Background(),
+		OccupancyCheck:    n.occupancyFor(in.ChainID),
+		OccupancyCtx:      context.Background(),
+		Teardowns:         teardownTargets,
+		TeardownsResolved: true,
 	})
 	if err != nil {
 		return nil, err
@@ -468,6 +495,18 @@ func (n *Engine) PrepareSessionPolicy(user *model.User, in SessionPolicyInput) (
 // selfFundedGrantFeeOption prices native gas into a grant when this chain
 // does not sponsor UserOps. A sponsored chain, or an engine with no smart
 // wallet config, keeps the cap as the ETH the workflow sends.
+// resolveTeardowns is the set this runner's next install tears down, with
+// already-cleared grants filtered and marked first (resolveTeardownTargets).
+// One prepare or submit prices it into every merge and coverage check and
+// hands the same set to PrepareSessionGrant. Callers hold the runner lock.
+func (n *Engine) resolveTeardowns(chainID int64, owner, runner common.Address) ([]*model.SessionPolicy, []grantGasShape, error) {
+	targets, err := resolveTeardownTargets(context.Background(), n.db, chainID, owner, runner, n.teardownVerifier())
+	if err != nil {
+		return nil, nil, err
+	}
+	return targets, teardownShapes(targets), nil
+}
+
 func (n *Engine) selfFundedGrantFeeOption(chainID int64) mergeOption {
 	return WithSelfFundedGrantFee(chainID, n.selfFundedGrantFee(chainID))
 }
@@ -526,6 +565,9 @@ func (n *Engine) SubmitSessionPolicy(
 	deadline uint64,
 	ownerSignature []byte,
 ) (policy *model.SessionPolicy, superseded []string, err error) {
+	if err := n.refuseLegacyBudgetInput(user, in); err != nil {
+		return nil, nil, err
+	}
 	if err := n.bindAndValidatePermissions(&in); err != nil {
 		return nil, nil, err
 	}
@@ -552,6 +594,18 @@ func (n *Engine) SubmitSessionPolicy(
 	lock := sessionAuthorityLock(in.ChainID, user.Address, in.Wallet)
 	lock.Lock()
 	defer lock.Unlock()
+	if err = budgetHoldPresent(n.db, in.ChainID, user.Address, in.Wallet); err != nil {
+		return nil, nil, err
+	}
+	if err := n.refuseBudgetStatelessReplacement(user, in); err != nil {
+		return nil, nil, err
+	}
+
+	teardownTargets, teardowns, teardownErr := n.resolveTeardowns(in.ChainID, user.Address, in.Wallet)
+	if teardownErr != nil {
+		return nil, nil, teardownErr
+	}
+	teardownOpt := WithTeardowns(teardowns)
 
 	current, err := activeSessionPolicyLocked(n.db, in.ChainID, user.Address, in.Wallet)
 	if err != nil {
@@ -599,20 +653,20 @@ func (n *Engine) SubmitSessionPolicy(
 		if priorErr != nil {
 			return nil, nil, priorErr
 		}
-		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn, feeOpt, priorOpt)
+		merged, _, mergeErr := MergeSkillGrantWithRemainder(current, remPtr, snap.addition, kept, in.ChainID, snap.preparedAt, snap.expiresIn, feeOpt, priorOpt, teardownOpt)
 		if mergeErr != nil {
 			return nil, nil, skillSubmitMergeError(current, mergeErr, snap.tasks, kept)
 		}
 		if !sameSessionPermissions(merged, in.Permissions) {
-			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions, feeOpt, priorOpt)
+			return nil, nil, explainSkillDrift(current, snap, remPtr, kept, in.Permissions, feeOpt, priorOpt, teardownOpt)
 		}
 		if current != nil {
-			dropped, err = classifyCarriedCoverage(current, *remPtr, in, workflowTasks(tasks), time.Now(), feeOpt)
+			dropped, err = classifyCarriedCoverage(current, *remPtr, in, workflowTasks(tasks), time.Now(), feeOpt, teardownOpt)
 		} else {
-			dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, feeOpt)
+			dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, feeOpt, teardownOpt)
 		}
 	} else {
-		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, n.selfFundedGrantFeeOption(in.ChainID), WithGrantApplied(current != nil && current.Grant.Applied()))
+		dropped, err = classifyRunnerCoverage(in, workflowTasks(tasks), time.Now(), usableID, n.selfFundedGrantFeeOption(in.ChainID), teardownOpt)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -622,18 +676,20 @@ func (n *Engine) SubmitSessionPolicy(
 	}
 
 	prepared, err := PrepareSessionGrant(n.db, in.ChainID, signer, strings.ToLower(policyID), SessionGrantRequest{
-		EntityID:       &entityID,
-		Owner:          user.Address,
-		Wallet:         in.Wallet,
-		AgentLabel:     in.AgentLabel,
-		Justification:  in.Justification,
-		ValidUntil:     in.Permissions.ValidUntilMs,
-		HooksFor:       in.Permissions.HooksFor,
-		Deadline:       deadline,
-		TeardownCheck:  n.teardownVerifier(),
-		TeardownCtx:    context.Background(),
-		OccupancyCheck: n.occupancyFor(in.ChainID),
-		OccupancyCtx:   context.Background(),
+		EntityID:          &entityID,
+		Owner:             user.Address,
+		Wallet:            in.Wallet,
+		AgentLabel:        in.AgentLabel,
+		Justification:     in.Justification,
+		ValidUntil:        in.Permissions.ValidUntilMs,
+		HooksFor:          in.Permissions.HooksFor,
+		Deadline:          deadline,
+		TeardownCheck:     n.teardownVerifier(),
+		TeardownCtx:       context.Background(),
+		OccupancyCheck:    n.occupancyFor(in.ChainID),
+		OccupancyCtx:      context.Background(),
+		Teardowns:         teardownTargets,
+		TeardownsResolved: true,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -709,6 +765,9 @@ func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet
 	lock.Lock()
 	defer lock.Unlock()
 
+	if err = budgetHoldPresent(n.db, chainID, user.Address, wallet); err != nil {
+		return false, false, nil, err
+	}
 	policy, err := n.GetSessionPolicyByID(user, chainID, wallet, policyID)
 	if err != nil {
 		return false, false, nil, err

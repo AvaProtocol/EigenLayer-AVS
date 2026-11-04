@@ -32,6 +32,30 @@ func TestNativeGrantMaxFee(t *testing.T) {
 	}
 }
 
+// gasAt1Wei is self-funded gas at 1 wei per unit: steady units for each
+// send and payable op, plus one install when the grant's shape is given.
+func gasAt1Wei(sends, payables int64, install *grantGasShape) *big.Int {
+	units := sends*nativePreflightGasUnitsSteady + payables*nativePreflightGasUnitsValueSteady
+	if install != nil {
+		units += install.installPremiumUnits()
+	}
+	return big.NewInt(units)
+}
+
+// installOf is the install of the grant these permissions describe.
+func installOf(p SessionPermissions) *grantGasShape {
+	shape := shapeOfPermissions(p)
+	return &shape
+}
+
+func plusWei(value string, gas *big.Int) string {
+	v, ok := new(big.Int).SetString(value, 10)
+	if !ok {
+		panic("bad wei " + value)
+	}
+	return v.Add(v, gas).String()
+}
+
 func TestSelfFundedEthPayIncludesGasOnce(t *testing.T) {
 	now := skillNow()
 	fee := big.NewInt(1)
@@ -45,8 +69,8 @@ func TestSelfFundedEthPayIncludesGasOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 1e15 * 12 * 2, plus 24*500k steady and one 1.5M install, at 1 wei per gas.
-	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != "24000000013500000" {
+	// 1e15 * 12 * 2, plus 24 steady sends and one install of this grant, at 1 wei per gas.
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != plusWei("24000000000000000", gasAt1Wei(24, 0, installOf(perms))) {
 		t.Fatalf("self-funded cap = %+v", perms.NativeSpendCap)
 	}
 	if !summaryHas(changes, "self-funded gas") || !summaryHas(changes, "1 wei per gas unit") {
@@ -74,8 +98,8 @@ func TestSelfFundedEthPayIncludesGasOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 36 wei of value plus one install: 36*500k would be two installs over.
-	if both.NativeSpendCap == nil || both.NativeSpendCap.Amount != "19500036" {
+	// 36 wei of value, 36 steady sends and one install, not one per task.
+	if both.NativeSpendCap == nil || both.NativeSpendCap.Amount != plusWei("36", gasAt1Wei(36, 0, installOf(both))) {
 		t.Fatalf("two tasks one install = %+v", both.NativeSpendCap)
 	}
 	in := SessionPolicyInput{ChainID: skillSepolia, Permissions: both}
@@ -106,8 +130,8 @@ func TestSiblingContractWriteGasSharesOneInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ETH value plus 24*500k + 12*1.5M + the larger install (1.5M).
-	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != "24000000031500000" {
+	// ETH value plus 24 steady sends, 12 payable calls and one install.
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != plusWei("24000000000000000", gasAt1Wei(24, 12, installOf(perms))) {
 		t.Fatalf("sibling gas cap = %+v", perms.NativeSpendCap)
 	}
 
@@ -143,8 +167,8 @@ func TestUnknownRunsDoNotInventGas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 12 wei plus 12*500k and one install. The swap's run count is unknown.
-	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != "7500012" {
+	// 12 wei plus 12 steady sends and one install. The swap's run count is unknown.
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != plusWei("12", gasAt1Wei(12, 0, installOf(perms))) {
 		t.Fatalf("cap = %+v", perms.NativeSpendCap)
 	}
 	if !summaryHas(changes, "Open Swap") || !summaryHas(changes, "remaining runs are unknown") {
@@ -166,8 +190,8 @@ func TestCarriedGrantAddsSiblingGasBeforeTheRemainder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// max(remainder 100, 12*1.5M + one install).
-	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != "19500000" {
+	// max(remainder 100, 12 payable calls + one install).
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != gasAt1Wei(0, 12, installOf(perms)).String() {
 		t.Fatalf("carried sibling gas = %+v", perms.NativeSpendCap)
 	}
 	plain, _, err := MergeSkillGrantWithRemainder(current, remainder, PolicyAddition{}, []*avsproto.Task{usdc}, skillSepolia, now, time.Hour)
@@ -309,7 +333,7 @@ func TestSkillAddedAfterNativeGrantPricesGas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "24000000031500000"
+	want := plusWei("24000000000000000", gasAt1Wei(24, 12, installOf(together)))
 
 	ethFirst, _, err := MergeSkillGrantWithRemainder(nil, nil, PolicyAddition{}, []*avsproto.Task{eth}, skillSepolia, now, time.Hour, opt)
 	if err != nil {
@@ -330,7 +354,7 @@ func TestSkillAddedAfterNativeGrantPricesGas(t *testing.T) {
 	// Studio does not echo nativeGasWei yet, so the changes split is the
 	// ETH task's steady gas plus the one install. The USDC steady gas is
 	// inside the addition total.
-	if changes.NativeGasWei != "13500000" {
+	if changes.NativeGasWei != gasAt1Wei(24, 0, installOf(ethThenUSDC)).String() {
 		t.Fatalf("ETH then USDC gas split = %s", changes.NativeGasWei)
 	}
 
@@ -343,7 +367,7 @@ func TestSkillAddedAfterNativeGrantPricesGas(t *testing.T) {
 	}
 	usdcPolicy := permissionsAsPolicy(SessionPolicyInput{ChainID: skillSepolia, Permissions: usdcFirst})
 	ethDraft := studioDraftAddition(t, eth, nil)
-	if ethDraft.NativeSpendCap == nil || ethDraft.NativeSpendCap.Amount != "24000000012000000" {
+	if ethDraft.NativeSpendCap == nil || ethDraft.NativeSpendCap.Amount != plusWei("24000000000000000", gasAt1Wei(24, 0, nil)) {
 		t.Fatalf("ETH draft = %+v, want value plus steady gas and no install", ethDraft.NativeSpendCap)
 	}
 	usdcThenETH, echoed, err := MergeSkillGrantWithRemainder(usdcPolicy, nil, ethDraft, []*avsproto.Task{usdc}, skillSepolia, now, time.Hour, opt)
@@ -353,21 +377,24 @@ func TestSkillAddedAfterNativeGrantPricesGas(t *testing.T) {
 	if usdcThenETH.NativeSpendCap == nil || usdcThenETH.NativeSpendCap.Amount != want {
 		t.Fatalf("USDC then ETH = %+v, want %s", usdcThenETH.NativeSpendCap, want)
 	}
-	if echoed.NativeGasWei != "19500000" {
+	if echoed.NativeGasWei != gasAt1Wei(0, 12, installOf(usdcThenETH)).String() {
 		t.Fatalf("USDC then ETH gas split = %s, want the USDC steady gas plus one install", echoed.NativeGasWei)
 	}
 
-	ethDraft.NativeGasWei = "12000000"
+	ethDraft.NativeGasWei = gasAt1Wei(24, 0, nil).String()
 	_, labeled, err := MergeSkillGrantWithRemainder(usdcPolicy, nil, ethDraft, []*avsproto.Task{usdc}, skillSepolia, now, time.Hour, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if labeled.NativeGasWei != "31500000" {
+	if labeled.NativeGasWei != gasAt1Wei(24, 12, installOf(usdcThenETH)).String() {
 		t.Fatalf("echoed addition gas = %s, want steady gas of both skills plus one install", labeled.NativeGasWei)
 	}
 }
 
-func TestAppliedGrantDoesNotChargeInstallAgain(t *testing.T) {
+// Replacing an applied grant installs a new entity and tears the current one
+// down in the same first operation (#717), so the replacement pays an
+// install too, sized with the teardown it carries.
+func TestReplacingAnAppliedGrantPricesItsInstall(t *testing.T) {
 	now := skillNow()
 	fee := big.NewInt(1)
 	a1 := "0x0000000000000000000000000000000000000001"
@@ -389,26 +416,61 @@ func TestAppliedGrantDoesNotChargeInstallAgain(t *testing.T) {
 	})
 	current.Grant.AppliedAt = 1
 	// The remaining limit has been spent down to the ETH value. Steady gas
-	// for the ETH task is still required. The install is already on chain.
+	// for the ETH task is still required, and so is the replacement's install.
 	remainderNative, ok := new(big.Int).SetString("24000000000000000", 10)
 	if !ok {
 		t.Fatal("remainder")
 	}
+	teardowns := []grantGasShape{shapeOfPolicy(current)}
 	usdcDraft := studioDraftAddition(t, usdc, current)
-	perms, changes, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: remainderNative}, usdcDraft, []*avsproto.Task{eth}, skillSepolia, now, time.Hour, WithSelfFundedGrantFee(skillSepolia, fee))
+	perms, changes, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: remainderNative}, usdcDraft, []*avsproto.Task{eth}, skillSepolia, now, time.Hour, WithSelfFundedGrantFee(skillSepolia, fee), WithTeardowns(teardowns))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != "24000000030000000" {
-		t.Fatalf("applied grant = %+v, want value + ETH steady + USDC steady and no second install", perms.NativeSpendCap)
+	install := shapeOfPermissions(perms)
+	install.teardowns = teardowns
+	if want := plusWei("24000000000000000", gasAt1Wei(24, 12, &install)); perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != want {
+		t.Fatalf("replacement = %+v, want value + ETH steady + USDC steady + one install, %s", perms.NativeSpendCap, want)
 	}
-	// The addition does not echo nativeGasWei, so the split is the ETH
-	// task's steady gas only.
-	if changes.NativeGasWei != "12000000" {
-		t.Fatalf("applied gas split = %s", changes.NativeGasWei)
+	if !summaryHas(changes, "one install") {
+		t.Fatalf("a replacement must claim its install: %#v", changes.Summary)
 	}
-	if summaryHas(changes, "one install") {
-		t.Fatalf("an applied grant must not claim a new install: %#v", changes.Summary)
+	in := SessionPolicyInput{ChainID: skillSepolia, Permissions: perms}
+	if _, err := classifyCarriedCoverage(current, GrantRemainder{Native: remainderNative}, in, []*avsproto.Task{eth}, now, WithSelfFundedGrantFee(skillSepolia, fee), WithTeardowns(teardowns)); err != nil {
+		t.Fatalf("the replacement must cover its own tasks, got %v", err)
+	}
+}
+
+// The reviewed case: an applied one-recipient grant with nothing left, one
+// 1-wei send to go, replaced at 1 wei per gas. The cap is that send plus the
+// replacement's first op, its install and the old grant's teardown.
+func TestReplacingAnAppliedGrantKeepsTheInstallWithNothingLeft(t *testing.T) {
+	now := skillNow()
+	a1 := "0x0000000000000000000000000000000000000001"
+	task := loopEthTask(t, "{{settings.recipients}}", "{{value}}", "{{settings.token_amount.amount}}", 1, map[string]any{
+		"recipients":   []any{a1},
+		"token_amount": map[string]any{"amount": "1"},
+	})
+	current := permissionsAsPolicy(SessionPolicyInput{
+		ChainID: skillSepolia,
+		Permissions: SessionPermissions{
+			NativeSpendCap:   &model.NativeSpendCap{Amount: "1"},
+			NativeRecipients: []*common.Address{ptrAddr(t, a1)},
+		},
+	})
+	current.Grant.AppliedAt = 1
+	teardowns := []grantGasShape{{nativeRows: 1}}
+	perms, _, err := MergeSkillGrantWithRemainder(current, &GrantRemainder{Native: big.NewInt(0)}, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, WithSelfFundedGrantFee(skillSepolia, big.NewInt(1)), WithTeardowns(teardowns))
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := grantGasShape{nativeRows: 1, teardowns: teardowns}
+	want := plusWei("1", big.NewInt(install.firstOpUnits(NativeSend)))
+	if want != "3209281" {
+		t.Fatalf("model changed: expected 3209281 for this case, computed %s", want)
+	}
+	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != want {
+		t.Fatalf("replacement cap = %+v, want %s", perms.NativeSpendCap, want)
 	}
 }
 
@@ -456,8 +518,8 @@ func TestContractWriteCountsEachMethodCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 1 wei, plus 4 value ops and 1 send op, plus one install.
-	if perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != "8000001" {
-		t.Fatalf("per-call gas = %+v, want 8000001", perms.NativeSpendCap)
+	if want := plusWei("1", gasAt1Wei(1, 4, installOf(perms))); perms.NativeSpendCap == nil || perms.NativeSpendCap.Amount != want {
+		t.Fatalf("per-call gas = %+v, want %s", perms.NativeSpendCap, want)
 	}
 }
 
@@ -487,10 +549,10 @@ func TestSimulatePricesAfterObservedSpendAndExistingNativeCap(t *testing.T) {
 	if auth == nil || auth.Required == nil || auth.Required.NativeSpendCap == nil {
 		t.Fatalf("observed native = %#v", auth)
 	}
-	if auth.Required.NativeSpendCap.Amount != "6000012" {
+	if auth.Required.NativeSpendCap.Amount != plusWei("12", gasAt1Wei(12, 0, nil)) {
 		t.Fatalf("observed cap = %s, want 12 wei plus 12 steady sends", auth.Required.NativeSpendCap.Amount)
 	}
-	if auth.Required.NativeGasWei == nil || auth.Required.NativeGasWei.String() != "6000000" {
+	if auth.Required.NativeGasWei == nil || auth.Required.NativeGasWei.String() != gasAt1Wei(12, 0, nil).String() {
 		t.Fatalf("observed gas = %v", auth.Required.NativeGasWei)
 	}
 }
@@ -534,4 +596,38 @@ func summaryHas(changes PolicyChanges, part string) bool {
 		}
 	}
 	return false
+}
+
+// A replace prices the grants it tears down. Merge and coverage given the
+// same teardowns agree, and a grant priced without them doesn't cover.
+func TestReplacePricesItsTeardowns(t *testing.T) {
+	now := skillNow()
+	fee := WithSelfFundedGrantFee(skillSepolia, big.NewInt(1))
+	a1 := "0x0000000000000000000000000000000000000001"
+	task := loopEthTask(t, "{{settings.recipients}}", "{{value}}", "{{settings.token_amount.amount}}", 12, map[string]any{
+		"recipients":   []any{a1},
+		"token_amount": map[string]any{"amount": "1"},
+	})
+	priors := []grantGasShape{{nativeRows: 20}, {nativeRows: 20}, {nativeRows: 20}, {nativeRows: 20}}
+	replace, _, err := MergeSkillGrantWithRemainder(nil, nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, fee, WithTeardowns(priors))
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := shapeOfPermissions(replace)
+	install.teardowns = priors
+	if want := plusWei("12", gasAt1Wei(12, 0, &install)); replace.NativeSpendCap == nil || replace.NativeSpendCap.Amount != want {
+		t.Fatalf("replace cap = %+v, want %s", replace.NativeSpendCap, want)
+	}
+	in := SessionPolicyInput{ChainID: skillSepolia, Permissions: replace}
+	if _, err := classifyRunnerCoverage(in, []*avsproto.Task{task}, now, "", fee, WithTeardowns(priors)); err != nil {
+		t.Fatalf("the same teardowns must cover, got %v", err)
+	}
+	first, _, err := MergeSkillGrantWithRemainder(nil, nil, PolicyAddition{}, []*avsproto.Task{task}, skillSepolia, now, time.Hour, fee)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Permissions = first
+	if _, err := classifyRunnerCoverage(in, []*avsproto.Task{task}, now, "", fee, WithTeardowns(priors)); err == nil {
+		t.Fatal("a cap priced as a first grant must not cover four teardowns")
+	}
 }

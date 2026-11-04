@@ -46,6 +46,7 @@ const (
 )
 
 type policyTestRig struct {
+	db       storage.Storage
 	server   *Server
 	ownerKey *ecdsa.PrivateKey
 	owner    common.Address
@@ -86,6 +87,7 @@ func newPolicyRig(t *testing.T) *policyTestRig {
 	}))
 
 	return &policyTestRig{
+		db:       db,
 		server:   &Server{engine: engine, logger: logger, config: cfg},
 		ownerKey: ownerKey,
 		owner:    owner,

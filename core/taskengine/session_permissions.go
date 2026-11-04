@@ -14,13 +14,20 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
-// MaxNativeRecipients is the product cap Validate and the SDK merge enforce.
-// Keep in sync with OpenAPI nativeRecipients maxItems on PreparePolicyRequest
-// and SubmitPolicyRequest. A0: 20-row first-op install mined at 1.5M VGL, but
-// 20-row deferred replace AA23'd 3/3 at 2.2M. Singleton re-grant is replace,
-// so the max follows replace. Five rows stay inside the 700k + 45k/row seed
-// window.
-const MaxNativeRecipients = 5
+// MaxNativeRecipients is the product cap Validate enforces, the only place it
+// lives: the SDK does not count, since one builder call can't see the rest of
+// the wallet's merged grant. Keep OpenAPI nativeRecipients maxItems on
+// PreparePolicyRequest and SubmitPolicyRequest in step (documentation only).
+//
+// 20 follows the bundler-priced replace (#828), measured on Sepolia with
+// scripts/spike/native_recipient_cap through HooksFor, an install-first
+// replace and SendUserOpMAv2. Every case mined (actual gas):
+// 20-row first install with deploy 4.41M, 20-row replace of a 20-row grant
+// 4.76M, 20-row replace tearing down four 20-row grants (the
+// maxOnChainTeardowns worst case) 6.84M, and 20 rows plus 8 capped ERC-20
+// targets 8.43M. The old 5 came from A0's fixed verification-gas seeds,
+// which #828 removed.
+const MaxNativeRecipients = 20
 
 // SessionPermissions is the declared permission set — allowed actions,
 // ERC-20 spend cap(s), expiry — and its translation into the hook entries a
@@ -40,6 +47,10 @@ const MaxNativeRecipients = 5
 // therefore refuses to cap a token whose allowedActions are not a subset of
 // those two selectors — Uniswap wrap/unwrap on WETH cannot also cap WETH.
 type SessionPermissions struct {
+	// Set only by the server's budget compositor, never by a legacy request.
+	// Budget caps may be exhausted, and removed token actions retain inert cap
+	// storage behind an empty selector allowlist.
+	budgetMode     bool
 	AllowedActions []model.AllowedAction
 	// SpendCap is the one-token alias (OpenAPI erc20SpendCap). SpendCaps is
 	// the full per-token list. Validate accepts either; if both are set they
@@ -61,7 +72,7 @@ type SessionPermissions struct {
 	// is false, including when a recipient is an acknowledged 7702
 	// delegation. Nil is fail-closed. Tests inject a stub; production
 	// prepare/submit bind a pooled chain reader.
-	CodeAt func(common.Address) ([]byte, error)
+	CodeAt func(common.Address) ([]byte, error) `json:"-"`
 }
 
 // Validate rejects a permission set the grant screen could not have produced.
@@ -70,9 +81,9 @@ func (p SessionPermissions) Validate() error {
 }
 
 func (p SessionPermissions) validate(withChain bool) error {
-	erc20Class := len(p.AllowedActions) > 0
+	erc20Class := len(p.AllowedActions) > 0 || p.budgetMode && len(p.SpendCaps) > 0
 	nativeSend := len(p.NativeRecipients) > 0
-	if !erc20Class && !nativeSend {
+	if !erc20Class && !nativeSend && !p.budgetMode {
 		return fmt.Errorf("a grant needs allowedActions and/or nativeRecipients")
 	}
 
@@ -105,7 +116,7 @@ func (p SessionPermissions) validate(withChain bool) error {
 			if cap.Token == nil || *cap.Token == (common.Address{}) {
 				return fmt.Errorf("spend cap %d has no token", i)
 			}
-			if _, err := parseCapAmount(cap.Amount); err != nil {
+			if _, err := p.parseSpendCap(cap.Amount); err != nil {
 				return fmt.Errorf("spend cap %d: %w", i, err)
 			}
 			if _, dup := seen[*cap.Token]; dup {
@@ -119,7 +130,7 @@ func (p SessionPermissions) validate(withChain bool) error {
 					break
 				}
 			}
-			if !covered {
+			if !covered && !p.budgetMode {
 				return fmt.Errorf("the cap token %s is not an allowed-action target; cap a token the agent may actually call", cap.Token.Hex())
 			}
 			if err := spendLimitSelectorsOK(*cap.Token, p.AllowedActions); err != nil {
@@ -131,7 +142,7 @@ func (p SessionPermissions) validate(withChain bool) error {
 	}
 
 	if p.NativeSpendCap != nil {
-		if _, err := parseCapAmount(p.NativeSpendCap.Amount); err != nil {
+		if _, err := p.parseSpendCap(p.NativeSpendCap.Amount); err != nil {
 			return fmt.Errorf("nativeSpendCap: %w", err)
 		}
 	}
@@ -152,6 +163,17 @@ func (p SessionPermissions) validate(withChain bool) error {
 				return fmt.Errorf("native recipient %s is listed twice", rec.Hex())
 			}
 			seenRecipients[*rec] = struct{}{}
+			if p.budgetMode {
+				caps, err := p.resolvedSpendCaps()
+				if err != nil {
+					return err
+				}
+				for _, cap := range caps {
+					if cap.Token != nil && *cap.Token == *rec {
+						return fmt.Errorf("a budget token cannot also be an unrestricted native recipient")
+					}
+				}
+			}
 			if reservedNativeRecipient(*rec) {
 				return fmt.Errorf("native recipient %s is a known module, factory, or EntryPoint", rec.Hex())
 			}
@@ -228,7 +250,7 @@ func (p SessionPermissions) allowlistInputs() ([]aa.AllowlistInput, error) {
 		if cap.Token == nil {
 			continue
 		}
-		amount, err := parseCapAmount(cap.Amount)
+		amount, err := p.parseSpendCap(cap.Amount)
 		if err != nil {
 			return nil, err
 		}
@@ -254,6 +276,22 @@ func (p SessionPermissions) allowlistInputs() ([]aa.AllowlistInput, error) {
 			input.ERC20SpendLimit = limit
 		}
 		inputs = append(inputs, input)
+	}
+	if p.budgetMode {
+		for _, cap := range caps {
+			found := false
+			for _, action := range p.AllowedActions {
+				if action.Target != nil && *action.Target == *cap.Token {
+					found = true
+					break
+				}
+			}
+			if !found {
+				// An empty selector allowlist allows no call, while preserving
+				// the token's remainder and budget accounting after Disable.
+				inputs = append(inputs, aa.AllowlistInput{Target: *cap.Token, HasSelectorAllowlist: true, HasERC20SpendLimit: true, ERC20SpendLimit: limitByToken[*cap.Token], Selectors: [][4]byte{}})
+			}
+		}
 	}
 	for _, rec := range p.NativeRecipients {
 		if rec == nil {
@@ -361,6 +399,13 @@ func parseCapAmount(s string) (*big.Int, error) {
 	return n, nil
 }
 
+func (p SessionPermissions) parseSpendCap(s string) (*big.Int, error) {
+	if p.budgetMode {
+		return parseBudgetAmount(s)
+	}
+	return parseCapAmount(s)
+}
+
 // HooksFor builds the grant's hook entries for its allocated entity:
 // the allowlist validation hook (targets, selectors, and per-token spend
 // limits in one install payload), the allowlist execution hook that enforces
@@ -384,7 +429,11 @@ func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
 		return nil, err
 	}
 
-	allowlistHook, err := aa.AllowlistValidationHook(entityID, inputs)
+	buildAllowlist := aa.AllowlistValidationHook
+	if p.budgetMode {
+		buildAllowlist = aa.BudgetAllowlistValidationHook
+	}
+	allowlistHook, err := buildAllowlist(entityID, inputs)
 	if err != nil {
 		return nil, fmt.Errorf("building the allowlist hook: %w", err)
 	}
@@ -394,11 +443,15 @@ func (p SessionPermissions) HooksFor(entityID uint32) ([][]byte, error) {
 	}
 	hooks := [][]byte{allowlistHook, aa.AllowlistExecHook(entityID)}
 	if p.NativeSpendCap != nil {
-		limit, err := parseCapAmount(p.NativeSpendCap.Amount)
+		limit, err := p.parseSpendCap(p.NativeSpendCap.Amount)
 		if err != nil {
 			return nil, err
 		}
-		ntVal, err := aa.NativeTokenLimitValidationHook(entityID, limit)
+		buildNative := aa.NativeTokenLimitValidationHook
+		if p.budgetMode {
+			buildNative = aa.BudgetNativeTokenLimitValidationHook
+		}
+		ntVal, err := buildNative(entityID, limit)
 		if err != nil {
 			return nil, fmt.Errorf("building the native-token limit hook: %w", err)
 		}

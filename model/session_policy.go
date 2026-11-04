@@ -26,10 +26,12 @@ import (
 //     alter what the owner signed — the signature would then fail, but only
 //     on chain, at execution, for a user who already consented.
 type SessionPolicy struct {
-	ID      string          `json:"id"`
-	Owner   *common.Address `json:"owner"`
-	Runner  *common.Address `json:"runner"` // the smart wallet this grants on
-	ChainID int64           `json:"chain_id"`
+	// Pending owner-signed budgets are visible but never usable before activation.
+	AwaitingBudgetActivation bool            `json:"awaiting_budget_activation,omitempty"`
+	ID                       string          `json:"id"`
+	Owner                    *common.Address `json:"owner"`
+	Runner                   *common.Address `json:"runner"` // the smart wallet this grants on
+	ChainID                  int64           `json:"chain_id"`
 
 	// EntityID is the validation entity this grant occupies on the account.
 	// Unique per ACCOUNT, allocated when the policy is created, never 0 —
@@ -41,6 +43,13 @@ type SessionPolicy struct {
 
 	AgentLabel    string `json:"agent_label,omitempty"`
 	Justification string `json:"justification,omitempty"`
+
+	// Budget metadata is additive. Legacy records omit it and use workflow
+	// sizing. Preparation/activation will populate these in a later slice.
+	Sizing             BudgetSizing    `json:"sizing,omitempty"`
+	BudgetStartedAt    int64           `json:"budget_started_at,omitempty"`
+	BudgetStartAmounts []ERC20SpendCap `json:"budget_start_amounts,omitempty"`
+	BudgetStartNative  *NativeSpendCap `json:"budget_start_native,omitempty"`
 
 	// AllowedActions and ERC20SpendCap are the grant's declared permissions
 	// (master §7.2 P1/P2), stored for the manage screen and for rebuilding
@@ -161,10 +170,39 @@ type SessionGrantAuthorization struct {
 	// installed TimeRangeModule window and found it agrees with ValidUntil.
 	// Cached so the chain read is not paid on every UserOp (#763 C).
 	ChainWindowChecked bool `json:"chain_window_checked,omitempty"`
+
+	// PricedTeardowns are the prior grants whose teardown the native cap's
+	// first operation was priced for, recorded at prepare. The pending-grant
+	// preflight and deploy check rebuild the same install from them, so a
+	// cap prepare accepted can execute. Empty is a first grant, priced with
+	// the deploy, and every grant priced before this field. Additive storage
+	// field.
+	PricedTeardowns []GrantGasShape `json:"priced_teardowns,omitempty"`
+}
+
+// GrantGasShape is the allowlist rows of a grant, as its native-gas pricing
+// counts them: one per native recipient and one per allowed-action target.
+type GrantGasShape struct {
+	NativeRows int `json:"native_rows"`
+	Targets    int `json:"targets"`
 }
 
 // SessionPolicyStatus tracks how far a grant has got.
 type SessionPolicyStatus string
+
+type BudgetSizing string
+
+const (
+	BudgetSizingWorkflow BudgetSizing = "workflow"
+	BudgetSizingBudget   BudgetSizing = "budget"
+)
+
+func (p *SessionPolicy) EffectiveSizing() BudgetSizing {
+	if p.Sizing == "" {
+		return BudgetSizingWorkflow
+	}
+	return p.Sizing
+}
 
 const (
 	// SessionPolicyPending is signed and stored but not yet on chain.
@@ -182,7 +220,8 @@ func (g *SessionGrantAuthorization) Applied() bool {
 	return g != nil && g.AppliedAt > 0
 }
 
-// TornDown reports whether the entity was recorded as cleared on chain.
+// TornDown reports whether the account registration was recorded as cleared.
+// Module residue is tracked separately by the budget read.
 func (g *SessionGrantAuthorization) TornDown() bool {
 	return g != nil && g.TornDownAt > 0
 }
@@ -195,7 +234,7 @@ func (g *SessionGrantAuthorization) NeedsOnChainCleanup() bool {
 
 // Usable reports whether this policy can authorize an operation right now.
 func (p *SessionPolicy) Usable() bool {
-	if p == nil || p.Grant == nil {
+	if p == nil || p.Grant == nil || p.AwaitingBudgetActivation {
 		return false
 	}
 	return p.Status == SessionPolicyPending || p.Status == SessionPolicyActive
@@ -255,7 +294,14 @@ func (p *SessionPolicy) Validate() error {
 	if len(p.Grant.InstallCall) == 0 {
 		return fmt.Errorf("session policy %s has no install calldata", p.ID)
 	}
-	if len(p.Grant.OwnerSignature) == 0 {
+	// An activated budget was installed by a separately owner-signed operation.
+	// There is no deferred signature to replay. Pending records may never use
+	// this exception, even if their claimed sizing is budget.
+	ownerInstalledBudget := p.EffectiveSizing() == BudgetSizingBudget &&
+		p.Status == SessionPolicyActive && !p.AwaitingBudgetActivation && p.Grant.Applied() &&
+		len(common.FromHex(p.Grant.AppliedUserOpHash)) == common.HashLength &&
+		common.HexToHash(p.Grant.AppliedUserOpHash) != (common.Hash{})
+	if len(p.Grant.OwnerSignature) == 0 && !ownerInstalledBudget {
 		return fmt.Errorf("session policy %s has no owner signature", p.ID)
 	}
 	if p.Grant.CarrierNonce == nil {

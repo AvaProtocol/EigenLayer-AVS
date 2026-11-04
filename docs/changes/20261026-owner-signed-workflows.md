@@ -1,5 +1,7 @@
 # Owner-signed Manual workflow handoff
 
+Native support was added later; see [Native owner sweeps](20261028-native-owner-sweeps.md). The original limits below describe the initial implementation.
+
 Date: 2026-10-26
 Status: Owner-signed HTTP execution verified on Sepolia; SDK/browser integration pending
 Branch: `feat/1987-owner-signed-workflows`
@@ -117,11 +119,12 @@ hash. Alchemy's later 1.1.0 source removes that wrapping and is incompatible
 with this recipe. The implementation guard prevents offering `personal_sign`
 for an unverified build; it does not silently select another signing method.
 
-Before first relay, the persisted definition is run again in read/check capture
-mode. It must resolve to byte-identical calls; changed balances or branch
-conditions cause refusal, not substitution of new amounts. Pricing is not run
-again. The account identity, nonce and source funding are also rechecked. State
-can still change between these checks and on-chain inclusion.
+Before first relay, the persisted captured batch must resolve to byte-identical
+calls using the stored operation's fee fields. Workflow reads and branch
+conditions are not run again; their prepare-time results determine the amounts
+reviewed by the owner. Pricing is not run again. The account identity, nonce and
+source funding are still rechecked. State can change before on-chain inclusion,
+in which case the exact signed operation may fail rather than change its amounts.
 
 `SendUserOpV07` submits the exact priced fields with the owner signature. The
 server-key `SendUserOpV07WithRetry` path is not called. Verification-gas or nonce
@@ -136,15 +139,17 @@ A read-only Sepolia identity probe confirmed the factory implementation above,
 its 1.0.0 account ID and runtime code hash
 `0x3612f3fa5ac5e89b87b284024977e6082441e30ff05f9f8497cd280131a27e16`.
 This probe signed and broadcast nothing. The gateway checks the configured
-chain's actual contract reads during both prepare and the first submit; graph
-simulation mode prevents the captured write from being submitted, not these
-read-only RPC calls.
+chain's actual authority/nonce/funding reads during both prepare and the first
+submit. Workflow read/check nodes run only during prepare; simulation mode prevents
+captured writes from being submitted, not those prepare-time read RPC calls.
 
 ## Persistence and uncertain broadcasts
 
 Preparations are owner-scoped TTL records under additive
 `ownerexec:<owner>:<executionId>` keys. They contain the unsigned operation,
-integrity hash, account identity, source salt and read/check definition/input.
+integrity hash, account identity, source salt and captured batch. Legacy unsigned
+records without a captured batch require a new preparation; cached or uncertain
+submissions keep their existing reconciliation behavior.
 They contain no owner private key or signature. Existing task/execution/storage
 keys and persisted model fields are unchanged.
 
@@ -193,7 +198,8 @@ and existing wallet association, without an owner transaction signature.
 
 Focused race-enabled tests cover the complete local HTTP flow, real graph data
 flow into two transfer calls, raw-hash signatures and framing, exact priced
-fields on keyless relay, owner/account/nonce/funding changes, stale read results,
+fields on keyless relay, owner/account/nonce/funding changes, captured reads across
+balance changes and read-endpoint outages,
 wrong signer, malformed/extra submit fields, expiration, feature rollback,
 storage failure before and after send, concurrent retries, restart/uncertain
 broadcasts, bundler reconcile of a `submitting` marker, a canceled client during

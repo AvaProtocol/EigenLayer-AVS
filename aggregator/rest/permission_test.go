@@ -53,11 +53,15 @@ var expectedPermissionLevels = map[string]Level{
 	OpSubmitEoaDelegation:  LevelUserRefusePartner,
 	OpGetEoaDelegation:     LevelUserRefusePartner,
 
-	OpPrepareWalletPolicy: LevelUserRefusePartner,
-	OpSubmitWalletPolicy:  LevelUserRefusePartner,
-	OpListWalletPolicies:  LevelUserRefusePartner,
-	OpGetWalletPolicy:     LevelUserRefusePartner,
-	OpRevokeWalletPolicy:  LevelUserRefusePartner,
+	OpPrepareWalletPolicy:           LevelUserRefusePartner,
+	OpSubmitWalletPolicy:            LevelUserRefusePartner,
+	OpListWalletPolicies:            LevelUserRefusePartner,
+	OpGetWalletPolicy:               LevelUserRefusePartner,
+	OpGetWalletBudget:               LevelUserRefusePartner,
+	OpGetWalletBudgetPreparation:    LevelUserRefusePartner,
+	OpSubmitWalletBudgetPreparation: LevelUserRefusePartner,
+	OpPrepareWalletBudgetCancel:     LevelUserRefusePartner,
+	OpRevokeWalletPolicy:            LevelUserRefusePartner,
 }
 
 func TestPermissionMap_CoversAllOperationsAndLevels(t *testing.T) {

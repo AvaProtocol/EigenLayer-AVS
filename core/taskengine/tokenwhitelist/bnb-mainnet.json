@@ -1,14 +1,104 @@
 [
   {
+    "id": "0x1bdd3cf7f79cfb8edbb955f20ad99211551ba275",
+    "name": "Liquid Staking BNB",
+    "symbol": "BNBx",
+    "decimals": 18
+  },
+  {
+    "id": "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c",
+    "name": "Binance-Peg BTCB Token",
+    "symbol": "BTCB",
+    "decimals": 18
+  },
+  {
+    "id": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",
+    "name": "PancakeSwap Token",
+    "symbol": "Cake",
+    "decimals": 18
+  },
+  {
+    "id": "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
+    "name": "Binance-Peg Ethereum Token",
+    "symbol": "ETH",
+    "decimals": 18
+  },
+  {
+    "id": "0xc5f0f7b66764f6ec8c8dff7ba683102295e16409",
+    "name": "First Digital USD",
+    "symbol": "FDUSD",
+    "decimals": 18
+  },
+  {
+    "id": "0xecac9c5f704e954931349da37f60e39f515c11c1",
+    "name": "Lombard Staked Bitcoin",
+    "symbol": "LBTC",
+    "decimals": 8
+  },
+  {
+    "id": "0x404460c6a5ede2d891e8297795264fde62adbb75",
+    "name": "Chainlink",
+    "symbol": "LINK",
+    "decimals": 18
+  },
+  {
+    "id": "0xb0b84d294e0c75a6abe60171b70edeb2efd14a1b",
+    "name": "Staked Lista BNB",
+    "symbol": "slisBNB",
+    "decimals": 18
+  },
+  {
+    "id": "0x4aae823a6a0b376de6a78e74ecc5b079d38cbcf7",
+    "name": "Solv BTC",
+    "symbol": "SolvBTC",
+    "decimals": 18
+  },
+  {
+    "id": "0x211cc4dd073734da055fbf44a2b4667d5e5fe5d2",
+    "name": "Staked USDe",
+    "symbol": "sUSDe",
+    "decimals": 18
+  },
+  {
+    "id": "0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d",
+    "name": "World Liberty Financial USD",
+    "symbol": "USD1",
+    "decimals": 18
+  },
+  {
     "id": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
     "name": "Binance-Peg USD Coin",
     "symbol": "USDC",
     "decimals": 18
   },
   {
+    "id": "0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34",
+    "name": "USDe",
+    "symbol": "USDe",
+    "decimals": 18
+  },
+  {
     "id": "0x55d398326f99059ff775485246999027b3197955",
     "name": "Binance-Peg Tether USD",
     "symbol": "USDT",
+    "decimals": 18
+  },
+  {
+    "id": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "name": "Wrapped BNB",
+    "symbol": "WBNB",
+    "decimals": 18
+  },
+  {
+    "id": "0x26c5e01524d2e6280a48f2c50ff6de7e52e9611c",
+    "name": "Wrapped liquid staked Ether 2.0",
+    "symbol": "wstETH",
+    "decimals": 18
+  },
+  {
+    "id": "0xcf6bb5389c92bdda8a3747ddb454cb7a64626c63",
+    "name": "Venus",
+    "symbol": "XVS",
     "decimals": 18
   }
 ]

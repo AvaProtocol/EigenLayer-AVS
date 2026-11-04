@@ -1,5 +1,11 @@
 [
   {
+    "id": "0x111111111117dc0aa78b770fa6a738034120c302",
+    "name": "1inch",
+    "symbol": "1INCH",
+    "decimals": 18
+  },
+  {
     "id": "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9",
     "name": "Aave",
     "symbol": "AAVE",
@@ -36,6 +42,12 @@
     "decimals": 18
   },
   {
+    "id": "0xba100000625a3754423978a60c9317c58a424e3d",
+    "name": "Balancer",
+    "symbol": "BAL",
+    "decimals": 18
+  },
+  {
     "id": "0x19de6b897ed14a376dda0fe53a5420d2ac828a28",
     "name": "BitgetToken",
     "symbol": "BGB",
@@ -52,6 +64,12 @@
     "name": "Bonk",
     "symbol": "Bonk",
     "decimals": 5
+  },
+  {
+    "id": "0xb0f70c0bd6fd87dbeb7c10dc692a2a6106817072",
+    "name": "BTC.b (Lombard)",
+    "symbol": "BTC.b",
+    "decimals": 8
   },
   {
     "id": "0xc669928185dbce49d2230cc9b0979be6dc797957",
@@ -76,6 +94,12 @@
     "name": "Coinbase Wrapped BTC",
     "symbol": "cbBTC",
     "decimals": 8
+  },
+  {
+    "id": "0xbe9895146f7af43049ca1c1ae358b0541ea49704",
+    "name": "Coinbase Wrapped Staked ETH",
+    "symbol": "cbETH",
+    "decimals": 18
   },
   {
     "id": "0xc60a9145d9e9f1152218e7da6df634b7a74ae444",
@@ -114,6 +138,12 @@
     "decimals": 18
   },
   {
+    "id": "0xf939e0a03fb07f59a73314e73794be0e57ac1b4e",
+    "name": "Curve.Fi USD Stablecoin",
+    "symbol": "crvUSD",
+    "decimals": 18
+  },
+  {
     "id": "0x6b175474e89094c44da98b954eedeac495271d0f",
     "name": "Dai",
     "symbol": "DAI",
@@ -130,6 +160,12 @@
     "name": "dYdX",
     "symbol": "DYDX",
     "decimals": 18
+  },
+  {
+    "id": "0x657e8c867d8b37dcc18fa4caead9c45eb088c642",
+    "name": "ether.fi BTC",
+    "symbol": "eBTC",
+    "decimals": 8
   },
   {
     "id": "0x35fa164735182de50811e8e2e824cfb9b6118ac2",
@@ -162,6 +198,36 @@
     "decimals": 18
   },
   {
+    "id": "0xa35b1b31ce002fbf2058d22f30f95d405200a15b",
+    "name": "Stader ETHx",
+    "symbol": "ETHx",
+    "decimals": 18
+  },
+  {
+    "id": "0x1abaea1f7c830bd89acc67ec4af516284b1bc33c",
+    "name": "EURC",
+    "symbol": "EURC",
+    "decimals": 6
+  },
+  {
+    "id": "0x90d2af7d622ca3141efa4d8f1f24d86e5974cc8f",
+    "name": "Ethereal Pre-deposit Vault",
+    "symbol": "eUSDe",
+    "decimals": 18
+  },
+  {
+    "id": "0xbf5495efe5db9ce00f80364c8b423567e58d2110",
+    "name": "Renzo Restaked ETH",
+    "symbol": "ezETH",
+    "decimals": 18
+  },
+  {
+    "id": "0xc96de26018a54d51c097160568752c4e3bd6c364",
+    "name": "Fire Bitcoin",
+    "symbol": "FBTC",
+    "decimals": 8
+  },
+  {
     "id": "0xc5f0f7b66764f6ec8c8dff7ba683102295e16409",
     "name": "First Digital USD",
     "symbol": "FDUSD",
@@ -186,9 +252,21 @@
     "decimals": 18
   },
   {
+    "id": "0x5e8422345238f34275888049021821e8e08caa1f",
+    "name": "Frax Ether",
+    "symbol": "frxETH",
+    "decimals": 18
+  },
+  {
     "id": "0xaedf386b755465871ff874e3e37af5976e247064",
     "name": "Fasttoken",
     "symbol": "FTN",
+    "decimals": 18
+  },
+  {
+    "id": "0x3432b6a60d23ca0dfca7761b7ab56459d9c964d0",
+    "name": "Frax Share",
+    "symbol": "FXS",
     "decimals": 18
   },
   {
@@ -196,6 +274,12 @@
     "name": "Gala",
     "symbol": "GALA",
     "decimals": 8
+  },
+  {
+    "id": "0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f",
+    "name": "GHO",
+    "symbol": "GHO",
+    "decimals": 18
   },
   {
     "id": "0xc944e90c64b2c07662a292be6244bdf05cda44a7",
@@ -225,6 +309,12 @@
     "id": "0x7420b4b9a0110cdc71fb720908340c03f9bc03ec",
     "name": "JasmyCoin",
     "symbol": "JASMY",
+    "decimals": 18
+  },
+  {
+    "id": "0xdefa4e8a7bcba345f687a2f1456f5edd9ce97202",
+    "name": "Kyber Network Crystal v2",
+    "symbol": "KNC",
     "decimals": 18
   },
   {
@@ -258,6 +348,12 @@
     "decimals": 18
   },
   {
+    "id": "0x5f98805a4e8be255a32880fdec7f6728c6568ba0",
+    "name": "LUSD Stablecoin",
+    "symbol": "LUSD",
+    "decimals": 18
+  },
+  {
     "id": "0x0f5d2fb29fb7d3cfee444a200298f468908cc942",
     "name": "Decentraland MANA",
     "symbol": "MANA",
@@ -280,6 +376,12 @@
     "name": "Mantle",
     "symbol": "MNT",
     "decimals": 18
+  },
+  {
+    "id": "0xaca92e438df0b2401ff60da7e4337b687a2435da",
+    "name": "MetaMask USD",
+    "symbol": "mUSD",
+    "decimals": 6
   },
   {
     "id": "0x85f17cf997934a597031b2e18a9ab6ebd4b9f6a4",
@@ -372,6 +474,12 @@
     "decimals": 18
   },
   {
+    "id": "0x8292bb45bf1ee4d140127049757c2e0ff06317ed",
+    "name": "Ripple USD",
+    "symbol": "RLUSD",
+    "decimals": 18
+  },
+  {
     "id": "0x6de037ef9ad2725eb40118bb1702ebb27e4aeb24",
     "name": "Render Token",
     "symbol": "RNDR",
@@ -402,9 +510,27 @@
     "decimals": 18
   },
   {
+    "id": "0x83f20f44975d03b1b09e64809b757c47f942beea",
+    "name": "Savings Dai",
+    "symbol": "sDAI",
+    "decimals": 18
+  },
+  {
+    "id": "0xac3e018457b222d93114458476f3e3416abbe38f",
+    "name": "Staked Frax Ether",
+    "symbol": "sfrxETH",
+    "decimals": 18
+  },
+  {
     "id": "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce",
     "name": "SHIBA INU",
     "symbol": "SHIB",
+    "decimals": 18
+  },
+  {
+    "id": "0x56072c95faa701256059aa122697b133aded9279",
+    "name": "SKY Governance Token",
+    "symbol": "SKY",
     "decimals": 18
   },
   {
@@ -420,12 +546,6 @@
     "decimals": 18
   },
   {
-    "id": "0xd9d920aa40f578ab794426f5c90f6c731d159def",
-    "name": "SolvBTC Babylon",
-    "symbol": "SolvBTC.BBN",
-    "decimals": 18
-  },
-  {
     "id": "0xe0f63a424a4439cbe457d80e4f4b51ad25b2c56c",
     "name": "SPX6900",
     "symbol": "SPX",
@@ -435,6 +555,12 @@
     "id": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
     "name": "stETH",
     "symbol": "stETH",
+    "decimals": 18
+  },
+  {
+    "id": "0xaf5191b0de278c7286d6c7cc6ab6bb8a73ba2cd6",
+    "name": "Stargate",
+    "symbol": "STG",
     "decimals": 18
   },
   {
@@ -468,6 +594,12 @@
     "decimals": 6
   },
   {
+    "id": "0x356b8d89c1e1239cbbb9de4815c39a1474d5ba7d",
+    "name": "Syrup USDT",
+    "symbol": "syrupUSDT",
+    "decimals": 6
+  },
+  {
     "id": "0x18084fba666a33d37592fa2633fd49a74dd93a88",
     "name": "tBTC v2",
     "symbol": "tBTC",
@@ -478,6 +610,12 @@
     "name": "Telcoin",
     "symbol": "TEL",
     "decimals": 2
+  },
+  {
+    "id": "0xd11c452fc99cf405034ee446803b6f6c1f6d5ed8",
+    "name": "Treehouse ETH",
+    "symbol": "tETH",
+    "decimals": 18
   },
   {
     "id": "0x667102bd3413bfeaa3dffb48fa8288819e480a88",
@@ -534,6 +672,12 @@
     "decimals": 18
   },
   {
+    "id": "0xe343167631d89b6ffc58b88d6b7fb0228795491d",
+    "name": "Global Dollar",
+    "symbol": "USDG",
+    "decimals": 6
+  },
+  {
     "id": "0xdc035d45d973e3ec169d2276ddab16f1e407384f",
     "name": "USDS Stablecoin",
     "symbol": "USDS",
@@ -544,6 +688,12 @@
     "name": "Tether",
     "symbol": "USDT",
     "decimals": 6
+  },
+  {
+    "id": "0xc139190f447e929f090edeb554d95abb8b18ac1c",
+    "name": "USDtb",
+    "symbol": "USDtb",
+    "decimals": 18
   },
   {
     "id": "0xf3527ef8de265eaa3716fb312c12847bfba66cef",
@@ -615,6 +765,12 @@
     "id": "0xa2cd3d43c775978a96bdbf12d733d5a1ed94fb18",
     "name": "Chain",
     "symbol": "XCN",
+    "decimals": 18
+  },
+  {
+    "id": "0xd9d920aa40f578ab794426f5c90f6c731d159def",
+    "name": "xSolvBTC",
+    "symbol": "xSolvBTC",
     "decimals": 18
   },
   {

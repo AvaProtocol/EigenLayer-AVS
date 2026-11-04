@@ -106,7 +106,7 @@ func createMockMoralisServer(t *testing.T, tokens []MoralisTokenBalance) *httpte
 			}
 		}
 		if len(addressList) > 0 {
-			var filtered []MoralisTokenBalance
+			filtered := make([]MoralisTokenBalance, 0)
 			for _, token := range tokens {
 				for _, addr := range addressList {
 					if strings.EqualFold(strings.TrimSpace(addr), token.TokenAddress) {
@@ -856,61 +856,22 @@ func TestBalanceNode_OutputStructure(t *testing.T) {
 }
 
 func TestBalanceNode_MissingAPIKey(t *testing.T) {
-	// Skip this test if real Moralis API key is available
-	// This test can only run in environments without the real API key
-	if testutil.GetTestMoralisApiKey() != "" {
-		t.Skip("Skipping missing API key test - real API key is configured")
-	}
-
-	// Clear macro secrets to simulate missing API key
-	SetMacroSecrets(map[string]string{})
-
 	config := &avsproto.BalanceNode_Config{
 		Address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
 		Chain:   "sepolia",
 	}
-
-	node := &avsproto.BalanceNode{
-		Config: config,
+	vm, node := setupBalanceVM(t, config)
+	previous := macroSecrets
+	SetMacroSecrets(map[string]string{})
+	t.Cleanup(func() { SetMacroSecrets(previous) })
+	taskNode := &avsproto.TaskNode{Id: "balance-node-1", Name: "balances", Type: avsproto.NodeType_NODE_TYPE_BALANCE, TaskType: &avsproto.TaskNode_Balance{Balance: node}}
+	step, err := vm.RunNodeWithInputs(taskNode, nil)
+	if err == nil || step.GetSuccess() {
+		t.Fatal("expected the Balance node to refuse a missing API key")
 	}
-
-	taskNode := &avsproto.TaskNode{
-		Id:   "balance-node-1",
-		Name: "balance-node-1",
-		TaskType: &avsproto.TaskNode_Balance{
-			Balance: node,
-		},
+	if !strings.Contains(step.GetError(), "moralis API key is not configured") {
+		t.Fatalf("expected the API key refusal, got %s", step.GetError())
 	}
-
-	vm, err := NewVMWithData(
-		&model.Workflow{
-			Task: &avsproto.Task{
-				SmartWalletAddress: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-				Nodes:              []*avsproto.TaskNode{taskNode},
-			},
-		},
-		nil, // triggerData
-		nil, // smartWalletConfig
-		nil, // secrets
-	)
-	if err != nil {
-		t.Fatalf("failed to create VM: %v", err)
-	}
-
-	step, err := vm.runBalance(taskNode)
-
-	if err == nil {
-		t.Error("expected error for missing API key but got none")
-	}
-
-	if step.Success {
-		t.Error("expected step to fail for missing API key")
-	}
-
-	// Restore API key for other tests
-	SetMacroSecrets(map[string]string{
-		platformSecretMoralisAPIKey: "test-api-key",
-	})
 }
 
 func TestBalanceNode_TokenAddressesWithTemplateVariables(t *testing.T) {

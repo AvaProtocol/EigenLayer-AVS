@@ -22,14 +22,16 @@ import (
 // 601,275 gas with success=true and left the prior entity holding both its
 // signer and its full 100-token spend cap.
 //
-// So anything that reports a grant revoked on chain has to read the chain.
+// Module residue is not live authority: the account clears its registration
+// even when module cleanup fails. Use EntityRegisteredOnChain for revocation
+// and these module getters for cleanup/occupancy only.
 
 // EntitySignerOnChain returns the SingleSignerValidationModule signer for
 // (entity, account), or the zero address when the entity holds none.
 //
 // A read failure is returned rather than folded into the zero address: zero
-// means "this entity is clear", and a caller acting on a transient RPC error
-// would report a grant revoked that is still live.
+// means only that this module's signer storage is clear. It does not answer
+// whether the account still registers the entity.
 func EntitySignerOnChain(ctx context.Context, client ContractCaller, account common.Address, entity uint32) (common.Address, error) {
 	if client == nil {
 		return common.Address{}, fmt.Errorf("no chain client")

@@ -6,8 +6,51 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 )
+
+func TestBudgetHooksPreserveZeroAndRejectInvalidLimits(t *testing.T) {
+	row := AllowlistInput{Target: common.HexToAddress("0x1234"), HasSelectorAllowlist: true, HasERC20SpendLimit: true, ERC20SpendLimit: big.NewInt(0)}
+	_, err := AllowlistValidationHook(7, []AllowlistInput{row})
+	require.Error(t, err, "the legacy zero-cap guard stays in place")
+	hook, err := BudgetAllowlistValidationHook(7, []AllowlistInput{row})
+	require.NoError(t, err)
+	// Decode the installed tuple, rather than comparing the encoder to itself.
+	decoded, err := allowlistDataArgs.Unpack(hook[25:])
+	require.NoError(t, err)
+	require.EqualValues(t, 7, decoded[0])
+	targets := abi.ConvertType(decoded[1], new([]abiAllowlistInput)).(*[]abiAllowlistInput)
+	require.Len(t, *targets, 1)
+	require.True(t, (*targets)[0].HasSelectorAllowlist)
+	require.Empty(t, (*targets)[0].Selectors)
+	require.True(t, (*targets)[0].HasERC20SpendLimit)
+	require.Zero(t, (*targets)[0].Erc20SpendLimit.Sign())
+	_, err = NativeTokenLimitValidationHook(7, big.NewInt(0))
+	require.Error(t, err)
+	hook, err = BudgetNativeTokenLimitValidationHook(7, big.NewInt(0))
+	require.NoError(t, err)
+	decoded, err = nativeTokenLimitInstallArgs.Unpack(hook[25:])
+	require.NoError(t, err)
+	require.Zero(t, decoded[1].(*big.Int).Sign())
+	for _, amount := range []*big.Int{nil, big.NewInt(-1), new(big.Int).Lsh(big.NewInt(1), 256)} {
+		row.ERC20SpendLimit = amount
+		_, err := BudgetAllowlistValidationHook(7, []AllowlistInput{row})
+		require.Error(t, err)
+		_, err = BudgetNativeTokenLimitValidationHook(7, amount)
+		require.Error(t, err)
+	}
+	_, err = AllowlistValidationHook(7, nil)
+	require.Error(t, err)
+	hook, err = BudgetAllowlistValidationHook(7, nil)
+	require.NoError(t, err)
+	decoded, err = allowlistDataArgs.Unpack(hook[25:])
+	require.NoError(t, err)
+	targets = abi.ConvertType(decoded[1], new([]abiAllowlistInput)).(*[]abiAllowlistInput)
+	require.Empty(t, *targets, "Disable of the last capability installs no allowed target")
+}
 
 // Golden vector produced by
 //

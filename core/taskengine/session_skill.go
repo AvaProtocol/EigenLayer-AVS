@@ -243,11 +243,13 @@ type PolicyChanges struct {
 
 // SessionAuthorization is the opt-in simulate verdict.
 type SessionAuthorization struct {
-	Status   string
-	PolicyID string
-	Missing  []model.AllowedAction
-	Required *WorkflowNeed
-	Detail   string
+	Status        string
+	PolicyID      string
+	Missing       []model.AllowedAction
+	MissingTokens []common.Address
+	NeedsUntil    int64
+	Required      *WorkflowNeed
+	Detail        string
 }
 
 // SimulateAuth travels on the simulate context. Report false leaves the
@@ -701,12 +703,14 @@ func MergeSkillGrantWithRemainder(current *model.SessionPolicy, remainder *Grant
 	if declaredErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, declaredErr
 	}
-	gasAdded, gasNotes, gasErr := priceWalletNativeGas(taskNeeds, fee, native.Sign() > 0, true)
+	// The install is sized for the grant this merge produces.
+	shape := mergeCfg.installShape(grantGasShape{nativeRows: len(dedupeRecipients(recipients)), targets: len(actions)})
+	gasAdded, gasNotes, gasErr := priceWalletNativeGas(taskNeeds, fee, native.Sign() > 0, &shape)
 	if gasErr != nil {
 		return SessionPermissions{}, PolicyChanges{}, gasErr
 	}
 	native.Add(native, gasAdded)
-	extra := foldMissingInstall(native, taskNeeds, fee, false, native.Sign() > 0)
+	extra := foldMissingInstall(native, taskNeeds, fee, native.Sign() > 0, shape)
 	gasNotes = noteMissingInstall(gasNotes, extra, fee)
 	gasAdded.Add(gasAdded, extra)
 	if native.Cmp(maxUint256) > 0 {
@@ -957,7 +961,7 @@ func priceDraftNativeGas(need *WorkflowNeed, policy *model.SessionPolicy) error 
 	if policy != nil {
 		policyCap = policy.NativeSpendCap
 	}
-	_, _, err := priceWalletNativeGas([]*WorkflowNeed{need}, need.priceFee, positiveNativeAmount(policyCap), false)
+	_, _, err := priceWalletNativeGas([]*WorkflowNeed{need}, need.priceFee, positiveNativeAmount(policyCap), nil)
 	return err
 }
 
@@ -973,6 +977,9 @@ func BuildAuthorization(policy *model.SessionPolicy, need *WorkflowNeed, report 
 	repPolicy, noGrant, saw, missingCalls, nativeMiss, nativeDetail, tokenSpend, nativeSpend, planned := report.snapshot()
 	if policy == nil {
 		policy = repPolicy
+	}
+	if isWalletBudget(policy) {
+		return BuildBudgetAuthorization(BudgetAuthorizationInput{Policy: policy, Need: need, Report: report, Schedule: sched})
 	}
 	if (need == nil || !need.HasFundMove) && !saw {
 		return &SessionAuthorization{Status: AuthCovered}
@@ -2398,8 +2405,11 @@ func classifyRunnerCoverage(in SessionPolicyInput, tasks []*avsproto.Task, now t
 	// One price for the whole wallet. Per task would count an install twice
 	// and refuse a grant that merged with a single install. An applied
 	// grant already paid that install.
+	// The permissions are the grant being prepared or submitted: a new
+	// entity whose first operation installs it, whatever the current grant.
 	cfg := applyMergeOptions(opts)
-	if _, _, priceErr := priceWalletNativeGas(priced, cfg.fee(in.ChainID), positiveNativeAmount(in.Permissions.NativeSpendCap), !cfg.applied); priceErr != nil {
+	install := cfg.installShape(shapeOfPermissions(in.Permissions))
+	if _, _, priceErr := priceWalletNativeGas(priced, cfg.fee(in.ChainID), positiveNativeAmount(in.Permissions.NativeSpendCap), &install); priceErr != nil {
 		return nil, priceErr
 	}
 	var blocking []string
@@ -2773,7 +2783,12 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		if chain == chainID || len(needs) == 1 {
 			chainReport = report
 		}
-		got := BuildAuthorization(policy, need, chainReport, sched)
+		var got *SessionAuthorization
+		if isWalletBudget(policy) {
+			got = n.buildBudgetAuthorization(policy, task.Task, settings, chainReport, sched)
+		} else {
+			got = BuildAuthorization(policy, need, chainReport, sched)
+		}
 		// BuildAuthorization judges coverage only. A grant made for a signer
 		// this gateway no longer holds cannot execute, so it is no usable
 		// grant: the client's grant step, with the same requirement.
@@ -2939,7 +2954,17 @@ func (n *Engine) enforceSessionPolicyDeployCheck(user *model.User, task *model.W
 			policyCap = policy.NativeSpendCap
 		}
 		force := positiveNativeAmount(policyCap) || needsInstallNative([]*WorkflowNeed{item.need})
-		if _, _, priceErr := priceWalletNativeGas([]*WorkflowNeed{item.need}, n.selfFundedGrantFee(item.chain), force, !applied); priceErr != nil {
+		var install *grantGasShape
+		if !applied {
+			// The pending grant's install as prepare priced it, or this
+			// automation's own when no grant exists.
+			shape := pendingInstallShape(policy)
+			if policy == nil {
+				shape = shapeOfNeed(item.need)
+			}
+			install = &shape
+		}
+		if _, _, priceErr := priceWalletNativeGas([]*WorkflowNeed{item.need}, n.selfFundedGrantFee(item.chain), force, install); priceErr != nil {
 			unlock()
 			return noop, priceErr
 		}

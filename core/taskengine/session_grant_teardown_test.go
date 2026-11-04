@@ -21,8 +21,9 @@ import (
 // indistinguishable from a receipt — 601,275 gas with the entity still holding
 // its signer and full spend cap, against 636,341 gas and a clean teardown.
 //
-// So these tests pin the one rule that follows: never report an entity revoked
-// on the strength of a transaction.
+// Registration and module residue now have separate reads. These verifier
+// stubs represent the account's registration; residue is covered by the budget
+// read and the failing-onUninstall fork regression.
 
 func teardownFixture(t *testing.T) (storage.Storage, *model.SessionPolicy) {
 	t.Helper()

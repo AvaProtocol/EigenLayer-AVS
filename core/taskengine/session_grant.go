@@ -102,6 +102,13 @@ type SessionGrantRequest struct {
 	OccupancyCheck EntityOccupancyChecker
 	// OccupancyCtx bounds occupancy reads. Ignored when OccupancyCheck is nil.
 	OccupancyCtx context.Context
+	// Teardowns, when TeardownsResolved is set, is the set
+	// resolveTeardownTargets returned for this request. The engine prices the
+	// native cap from it and passes it here, so the batch, the pricing and
+	// the grant's recorded PricedTeardowns are one set. Unset,
+	// PrepareSessionGrant resolves it.
+	Teardowns         []*model.SessionPolicy
+	TeardownsResolved bool
 }
 
 // defaultSigningWindow bounds the gap between signing a grant and its first
@@ -114,6 +121,7 @@ const defaultSigningWindow = 30 * 24 * time.Hour
 // PreparedSessionGrant is what the wallet signs, plus everything the gateway
 // must remember to accept the signature back.
 type PreparedSessionGrant struct {
+	BudgetPreparation *BudgetPolicyPreparation
 	// Digest is the EIP-712 hash the owner signs. Signed RAW — the account's
 	// fallback path skips the replay-safe rewrap during validateUserOp, so
 	// this is exactly what eth_signTypedData_v4 must produce.
@@ -147,6 +155,31 @@ type PreparedSessionGrant struct {
 type SupersededGrant struct {
 	PolicyID string
 	EntityID uint32
+}
+
+// resolveTeardownTargets is the set a new install on the runner tears down:
+// its applied grants that need cleanup, minus those the chain says are
+// already clear (marked torn down here), capped at maxOnChainTeardowns.
+// Anything past the cap waits for the next grant (#716's self-heal), and
+// because the filter runs first, the ones left behind are genuinely still
+// installed rather than slots already retired. The engine prices the native
+// cap from this set before PrepareSessionGrant packs it, so a prepare's own
+// cleanup can't change what its submit recalculates.
+//
+// CALLERS MUST HOLD the runner's write lock (dropClearedTeardownTargets).
+func resolveTeardownTargets(ctx context.Context, db storage.Storage, chainID int64, owner, wallet common.Address, check TeardownVerifier) ([]*model.SessionPolicy, error) {
+	targets, err := onChainTeardownTargets(db, chainID, owner, wallet)
+	if err != nil {
+		return nil, err
+	}
+	targets, err = dropClearedTeardownTargets(ctx, db, chainID, owner, wallet, targets, check)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) > maxOnChainTeardowns {
+		targets = targets[:maxOnChainTeardowns]
+	}
+	return targets, nil
 }
 
 // PrepareSessionGrant allocates the grant and returns the payload to sign.
@@ -215,21 +248,12 @@ func PrepareSessionGrant(
 	// composes with the NEW entity as the outer validation and needs no second
 	// owner signature. N-way is the same composition with more uninstalls.
 	deferredCall := installCall
-	teardownTargets, err := onChainTeardownTargets(db, chainID, req.Owner, req.Wallet)
-	if err != nil {
-		return nil, err
-	}
-	teardownTargets, err = dropClearedTeardownTargets(
-		req.TeardownCtx, db, chainID, req.Owner, req.Wallet, teardownTargets, req.TeardownCheck)
-	if err != nil {
-		return nil, err
-	}
-	// Cap what actually rides the batch, now that the cleared ones are gone.
-	// Anything past the cap waits for the next grant (#716's self-heal), and
-	// because the filter ran first, the ones left behind are genuinely still
-	// installed rather than slots already retired.
-	if len(teardownTargets) > maxOnChainTeardowns {
-		teardownTargets = teardownTargets[:maxOnChainTeardowns]
+	teardownTargets := req.Teardowns
+	if !req.TeardownsResolved {
+		teardownTargets, err = resolveTeardownTargets(req.TeardownCtx, db, chainID, req.Owner, req.Wallet, req.TeardownCheck)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var supersedes []SupersededGrant
 	if len(teardownTargets) > 0 {
@@ -305,6 +329,7 @@ func PrepareSessionGrant(
 				CarrierNonce:          carrierNonce,
 				Deadline:              deadline,
 				RequiresExecuteUserOp: grant.HasExecutionHook(),
+				PricedTeardowns:       recordedTeardowns(teardownShapes(teardownTargets)),
 			},
 		},
 	}, nil
@@ -634,7 +659,8 @@ func dropClearedTeardownTargets(
 	return kept, nil
 }
 
-// TeardownVerifier reads back whether a validation entity is clear on chain.
+// TeardownVerifier reads whether the account's registration is gone. Residual
+// module storage is cleanup, not authority; the budget read reports it separately.
 // Supplied by the aggregator, which owns the chain client; nil in tests and in
 // any process without one, where verification is skipped rather than faked.
 type TeardownVerifier func(ctx context.Context, chainID int64, account common.Address, entity uint32) (cleared bool, err error)
@@ -644,14 +670,10 @@ type TeardownVerifier func(ctx context.Context, chainID int64, account common.Ad
 // fails or is inconclusive. On success it records TornDownAt on the storage
 // policy that owns that entity so the next replace batch does not re-target it.
 //
-// This is not belt-and-braces. A replace batch that mines proves the operation
-// executed, NOT that the uninstall did anything: the account catches a hook
-// module's onUninstall revert and strands the state. Sepolia showed the two
-// outcomes are indistinguishable from a receipt — 601,275 gas and success=true
-// with the entity still holding its signer and its full spend cap, against
-// 636,341 gas and a clean teardown. Without this read, the product would
-// report an entity revoked on the strength of a transaction that removed
-// nothing.
+// The account clears registration even if a module's onUninstall fails. The
+// old key then has no authority, although signer/limit storage may remain.
+// This check concerns registration only. Do not repeat uninstallValidation for
+// residual storage after its hook lists have been removed.
 //
 // Callers on the send path must not fail the operation on this error: the new
 // grant is already installed and usable, and there is nothing to roll back.
@@ -687,12 +709,12 @@ func VerifySupersededTeardown(
 		}
 	}
 	if !cleared {
-		// Mined, and cleared nothing. The entity is still live authority.
+		// The account still registers the entity: this is live authority.
 		if logger != nil {
 			logger.Error("a replaced grant is still installed on chain after its teardown mined",
 				"policy", strandedPolicyID, "runner", superseded.Runner.Hex(),
 				"entity", superseded.EntityID,
-				"hint", "the account catches onUninstall reverts and strands module state; this entity needs an explicit uninstall")
+				"hint", "account registration remains; this entity needs an explicit uninstall")
 		}
 		return fmt.Errorf("entity %d on %s survived its teardown (policy %s)",
 			superseded.EntityID, superseded.Runner.Hex(), strandedPolicyID)

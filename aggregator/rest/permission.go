@@ -75,11 +75,15 @@ const (
 	OpSubmitEoaDelegation  = "submitEoaDelegation"
 	OpGetEoaDelegation     = "getEoaDelegation"
 
-	OpPrepareWalletPolicy = "prepareWalletPolicy"
-	OpSubmitWalletPolicy  = "submitWalletPolicy"
-	OpListWalletPolicies  = "listWalletPolicies"
-	OpGetWalletPolicy     = "getWalletPolicy"
-	OpRevokeWalletPolicy  = "revokeWalletPolicy"
+	OpPrepareWalletPolicy           = "prepareWalletPolicy"
+	OpSubmitWalletPolicy            = "submitWalletPolicy"
+	OpListWalletPolicies            = "listWalletPolicies"
+	OpGetWalletPolicy               = "getWalletPolicy"
+	OpGetWalletBudget               = "getWalletBudget"
+	OpGetWalletBudgetPreparation    = "getWalletBudgetPreparation"
+	OpSubmitWalletBudgetPreparation = "submitWalletBudgetPreparation"
+	OpPrepareWalletBudgetCancel     = "prepareWalletBudgetCancel"
+	OpRevokeWalletPolicy            = "revokeWalletPolicy"
 
 	OpListSecrets  = "listSecrets"
 	OpPutSecret    = "putSecret"
@@ -146,11 +150,15 @@ var permissionMap = map[string]Level{
 	OpGetEoaDelegation:     LevelUserRefusePartner,
 
 	// Fund authority: user JWT + explicit partner refusal.
-	OpPrepareWalletPolicy: LevelUserRefusePartner,
-	OpSubmitWalletPolicy:  LevelUserRefusePartner,
-	OpListWalletPolicies:  LevelUserRefusePartner,
-	OpGetWalletPolicy:     LevelUserRefusePartner,
-	OpRevokeWalletPolicy:  LevelUserRefusePartner,
+	OpPrepareWalletPolicy:           LevelUserRefusePartner,
+	OpSubmitWalletPolicy:            LevelUserRefusePartner,
+	OpListWalletPolicies:            LevelUserRefusePartner,
+	OpGetWalletPolicy:               LevelUserRefusePartner,
+	OpGetWalletBudget:               LevelUserRefusePartner,
+	OpGetWalletBudgetPreparation:    LevelUserRefusePartner,
+	OpSubmitWalletBudgetPreparation: LevelUserRefusePartner,
+	OpPrepareWalletBudgetCancel:     LevelUserRefusePartner,
+	OpRevokeWalletPolicy:            LevelUserRefusePartner,
 
 	// Monitoring: remains open (matches today's handler; product may lock later).
 	OpListOperators: LevelPublic,

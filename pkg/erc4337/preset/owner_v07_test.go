@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -69,20 +70,23 @@ func TestOwnerSignatureIsRawHashPersonalSign(t *testing.T) {
 }
 
 type ownerRPCFixture struct {
-	sender, owner, implementation                 common.Address
-	chainID                                       int64
-	deployed, disabled, changedImpl, ownerHasCode bool
-	ownerCode, delegateCode                       []byte
-	fallbackOwner                                 *common.Address
-	wrongEntry                                    bool
-	factoryReads                                  int
-	nonce                                         *big.Int
-	balance                                       string
-	sendError                                     string
-	sendCount                                     int
-	expectedHash                                  string
-	sent                                          map[string]interface{}
-	sponsorRefused                                bool
+	sender, owner, implementation                      common.Address
+	chainID                                            int64
+	deployed, disabled, changedImpl, ownerHasCode      bool
+	ownerCode, delegateCode                            []byte
+	fallbackOwner                                      *common.Address
+	wrongEntry                                         bool
+	factoryReads                                       int
+	balanceReads, estimateReads, tipReads, headerReads int
+	balanceUnavailable, risingBaseFee                  bool
+	nonce                                              *big.Int
+	balance                                            string
+	sendError                                          string
+	sendCount                                          int
+	expectedHash                                       string
+	sent                                               map[string]interface{}
+	sponsorRefused                                     bool
+	estimatePrefundRefused                             bool
 }
 
 func newOwnerRPCFixture(t *testing.T) (*ownerRPCFixture, *config.SmartWalletConfig) {
@@ -136,11 +140,22 @@ func newOwnerRPCFixture(t *testing.T) (*ownerRPCFixture, *config.SmartWalletConf
 			}
 			result = hexutil.Encode(common.LeftPadBytes(address.Bytes(), 32))
 		case "eth_getBalance":
+			f.balanceReads++
+			if f.balanceUnavailable {
+				rpcError = "balance unavailable"
+				break
+			}
 			result = f.balance
 		case "eth_maxPriorityFeePerGas", "rundler_maxPriorityFeePerGas":
+			f.tipReads++
 			result = "0x3b9aca00"
 		case "eth_getBlockByNumber":
-			result = &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(0), GasLimit: 30000000, BaseFee: big.NewInt(1), Extra: []byte{}}
+			f.headerReads++
+			baseFee := big.NewInt(1)
+			if f.risingBaseFee {
+				baseFee.SetInt64(int64(f.headerReads) * 1_000_000_000)
+			}
+			result = &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(0), GasLimit: 30000000, BaseFee: baseFee, Extra: []byte{}}
 		case "eth_call":
 			var call map[string]string
 			require.NoError(t, json.Unmarshal(req.Params[0], &call))
@@ -182,6 +197,11 @@ func newOwnerRPCFixture(t *testing.T) (*ownerRPCFixture, *config.SmartWalletConf
 				t.Errorf("unexpected eth_call selector %s", selector)
 			}
 		case "eth_estimateUserOperationGas":
+			if f.estimatePrefundRefused {
+				rpcError = "AA21 didn't pay prefund"
+				break
+			}
+			f.estimateReads++
 			var operation map[string]interface{}
 			require.NoError(t, json.Unmarshal(req.Params[0], &operation))
 			for _, field := range []string{"callGasLimit", "verificationGasLimit", "preVerificationGas"} {
@@ -265,7 +285,7 @@ func TestOwnerPrepareAndKeylessRelayKeepPricedFields(t *testing.T) {
 }
 
 func TestOwnerPrepareCompatibilityAndFundingGuards(t *testing.T) {
-	for _, scenario := range []string{"undeployed", "insufficient prefund", "disabled owner", "different signer", "changed implementation", "wrong chain", "delegated owner", "wrong nonce key", "native value"} {
+	for _, scenario := range []string{"undeployed", "insufficient prefund", "disabled owner", "different signer", "changed implementation", "wrong chain", "delegated owner", "wrong nonce key"} {
 		t.Run(scenario, func(t *testing.T) {
 			f, sw := newOwnerRPCFixture(t)
 			owner := f.owner
@@ -287,8 +307,6 @@ func TestOwnerPrepareCompatibilityAndFundingGuards(t *testing.T) {
 				f.ownerHasCode = true
 			case "wrong nonce key":
 				f.nonce = big.NewInt(0)
-			case "native value":
-				calls[0].Value = big.NewInt(1)
 			}
 			prepared, err := PrepareOwnerUserOp(context.Background(), sw, owner, f.sender, big.NewInt(0), calls, nil)
 			if scenario == "undeployed" {
@@ -364,6 +382,8 @@ func TestOwnerSponsorshipIsFinalizedBeforeSigning(t *testing.T) {
 	chain := ethclient.NewClient(client)
 	op := testOp()
 	op.Sender, op.Nonce = f.sender, f.nonce
+	op.CallData, err = aa.PackExecuteBatchMAv2(ownerTestCalls())
+	require.NoError(t, err)
 	err = priceOperationV07(context.Background(), chain, client, op, EntryPointV07(), sw, logger.EnsureLogger(nil))
 	require.NoError(t, err)
 	require.NoError(t, checkOwnerPrefund(context.Background(), chain, op))
@@ -379,5 +399,54 @@ func TestOwnerSponsorshipIsFinalizedBeforeSigning(t *testing.T) {
 	err = priceOperationV07(context.Background(), chain, client, testOp(), EntryPointV07(), sw, logger.EnsureLogger(nil))
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "sponsor"))
+	require.Zero(t, f.sendCount)
+}
+
+func TestBudgetSelfFundedOwnerPricingNeverSponsorsOrSends(t *testing.T) {
+	for _, deployed := range []bool{false, true} {
+		for _, balance := range []string{"0x0", "0x1", "0xde0b6b3a7640000"} {
+			t.Run(fmt.Sprintf("deployed=%v/balance=%s", deployed, balance), func(t *testing.T) {
+				f, sw := newOwnerRPCFixture(t)
+				f.deployed = deployed
+				f.balance = balance
+				sw.AlchemyPaymasterPolicyID = "must-not-use"
+				sw.DisableGasSponsorship = false
+				f.sponsorRefused = true
+				p, err := PrepareSelfFundedOwnerBatch(context.Background(), sw, f.owner, f.sender, big.NewInt(0), OwnerBatch{Calls: ownerTestCalls()}, nil)
+				require.Greater(t, f.estimateReads, 0, "even a zero wallet must get an exact gas quote: %v", err)
+				if balance != "0xde0b6b3a7640000" {
+					var fee *OwnerFundingError
+					require.ErrorAs(t, err, &fee)
+					require.Positive(t, fee.Required.Sign())
+					want, ok := new(big.Int).SetString(balance[2:], 16)
+					require.True(t, ok)
+					require.Equal(t, want, fee.Available)
+				} else {
+					require.NoError(t, err)
+					require.Nil(t, p.Operation.Paymaster)
+					require.Empty(t, p.Operation.Signature)
+					if deployed {
+						require.Nil(t, p.Operation.Factory)
+					} else {
+						require.NotNil(t, p.Operation.Factory)
+						require.NotEmpty(t, p.Operation.FactoryData)
+					}
+				}
+				require.False(t, sw.DisableGasSponsorship)
+				require.Equal(t, "must-not-use", sw.AlchemyPaymasterPolicyID)
+				require.Zero(t, f.sendCount)
+			})
+		}
+	}
+}
+
+func TestBudgetSelfFundedPrefundRefusalBeforeQuote(t *testing.T) {
+	f, sw := newOwnerRPCFixture(t)
+	f.estimatePrefundRefused = true
+	_, err := PrepareSelfFundedOwnerBatch(context.Background(), sw, f.owner, f.sender, big.NewInt(0), OwnerBatch{Calls: ownerTestCalls()}, nil)
+	var fee *OwnerFundingError
+	require.ErrorAs(t, err, &fee)
+	require.Nil(t, fee.Required, "never make up gas when estimation refused")
+	require.Nil(t, fee.Available)
 	require.Zero(t, f.sendCount)
 }

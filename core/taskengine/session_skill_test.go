@@ -1071,7 +1071,7 @@ func TestEthPaySettingsListBindsValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := widePerms.Validate(); err == nil || !strings.Contains(err.Error(), "at most 5") {
+	if err := widePerms.Validate(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("at most %d", MaxNativeRecipients)) {
 		t.Fatalf("a list longer than %d native recipients must still fail validation, got %v", MaxNativeRecipients, err)
 	}
 }

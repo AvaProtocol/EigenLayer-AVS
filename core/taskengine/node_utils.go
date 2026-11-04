@@ -173,14 +173,20 @@ func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorM
 	if err == nil && !success && strings.TrimSpace(errorMessage) != "" {
 		// Create a structured error with INVALID_REQUEST code for validation errors
 		// This ensures proper error code propagation to the response
-		err = NewInvalidRequestError(errorMessage)
+		if code := permissionRefusalCode(fmt.Errorf("%s", errorMessage)); code != avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+			err = NewStructuredError(code, errorMessage)
+		} else {
+			err = NewInvalidRequestError(errorMessage)
+		}
 	}
 
 	step.EndAt = time.Now().UnixMilli()
 	step.Success = success
+	step.ErrorDetails = nil
 	if err != nil {
 		step.Error = err.Error()
 		step.ErrorCode = GetErrorCode(err)
+		step.ErrorDetails = structuredErrorDetails(err)
 	} else if !success {
 		// If step failed but no error was provided, use errorMessage directly
 		// This ensures error message is always set when step fails
@@ -200,6 +206,22 @@ func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorM
 		}
 	}
 	step.Log = logContent
+}
+
+func structuredErrorDetails(err error) *structpb.Struct {
+	structured, ok := IsStructuredError(err)
+	if !ok || len(structured.Details) == 0 {
+		return nil
+	}
+	fields := make(map[string]*structpb.Value, len(structured.Details))
+	for key, value := range structured.Details {
+		field, conversionErr := structpb.NewValue(value)
+		if conversionErr != nil {
+			field = structpb.NewStringValue(fmt.Sprint(value))
+		}
+		fields[key] = field
+	}
+	return &structpb.Struct{Fields: fields}
 }
 
 // formatNodeExecutionLogHeader generates a standardized log header for node execution

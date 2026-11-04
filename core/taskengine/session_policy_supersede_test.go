@@ -157,6 +157,8 @@ func TestSupersedeIsScopedToTheRunner(t *testing.T) {
 // in the wild — are repaired by granting again. No migration, no cleanup call.
 func TestGrantingAgainRepairsAWalletThatAlreadyStacked(t *testing.T) {
 	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	// These synthetic applied grants are registered in the chain fixture.
+	engine.config.SmartWallet.EthRpcUrl = budgetRegistrationRPC(t).URL
 
 	seedUsablePolicy(t, db, owner, wallet, "01legacygrantaaaaaaaaaaaaa", 1)
 	seedUsablePolicy(t, db, owner, wallet, "01legacygrantbbbbbbbbbbbbb", 2)
@@ -525,6 +527,8 @@ func TestReplacingAnAppliedGrantBatchesItsTeardown(t *testing.T) {
 // Storage supersede still collapses usable to one; the batch clears the chain.
 func TestStackedInstalledGrantsBatchAllTeardowns(t *testing.T) {
 	engine, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	rpc := budgetRegistrationRPC(t)
+	engine.config.SmartWallet.EthRpcUrl = rpc.URL
 
 	seedUsablePolicy(t, db, owner, wallet, "01stackedaaaaaaaaaaaaaaaaa", 1)
 	seedUsablePolicy(t, db, owner, wallet, "01stackedbbbbbbbbbbbbbbbbb", 2)

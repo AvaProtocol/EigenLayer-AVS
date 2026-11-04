@@ -6,6 +6,12 @@
     "decimals": 18
   },
   {
+    "id": "0x08210f9170f89ab7658f0b5e3ff39b0e03c594d4",
+    "name": "EURC",
+    "symbol": "EURC",
+    "decimals": 6
+  },
+  {
     "id": "0x779877a7b0d9e8603169ddbd7836e478b4624789",
     "name": "ChainLink Token",
     "symbol": "LINK",

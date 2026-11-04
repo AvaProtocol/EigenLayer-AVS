@@ -26,7 +26,6 @@ import (
 	"github.com/oklog/ulid/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -92,9 +91,12 @@ type ownerExecutionRecord struct {
 	UserOpHash      common.Hash                 `json:"userOpHash"`
 	ExpiresAt       int64                       `json:"expiresAt"`
 	SubmissionState string                      `json:"submissionState"`
-	Definition      []byte                      `json:"definition"`
-	InputJSON       []byte                      `json:"inputJson"`
-	WriteNodeID     string                      `json:"writeNodeId"`
+	Batch           *preset.OwnerBatch          `json:"batch,omitempty"`
+	// Legacy fields are retained for decoding pending/reconciled records. An
+	// unsigned preparation without a captured batch must be prepared again.
+	Definition  []byte `json:"definition,omitempty"`
+	InputJSON   []byte `json:"inputJson,omitempty"`
+	WriteNodeID string `json:"writeNodeId"`
 }
 
 func ownerExecutionPrefix(owner common.Address) []byte {
@@ -106,7 +108,7 @@ func ownerExecutionKey(owner common.Address, executionID string) []byte {
 }
 
 type ownerExecutionBackend interface {
-	Prepare(context.Context, *config.SmartWalletConfig, common.Address, common.Address, *big.Int, []aa.Call, logger.Logger) (*preset.PreparedOwnerUserOp, error)
+	Prepare(context.Context, *config.SmartWalletConfig, common.Address, common.Address, *big.Int, preset.OwnerBatch, logger.Logger) (*preset.PreparedOwnerUserOp, error)
 	Validate(context.Context, *config.SmartWalletConfig, common.Address, *big.Int, *preset.PreparedOwnerUserOp) error
 	Submit(context.Context, *config.SmartWalletConfig, *userop.UserOperationV07) (common.Hash, error)
 	// UserOpKnown reports whether the bundler already has this hash.
@@ -117,8 +119,8 @@ type ownerExecutionBackend interface {
 
 type defaultOwnerExecutionBackend struct{}
 
-func (defaultOwnerExecutionBackend) Prepare(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, calls []aa.Call, l logger.Logger) (*preset.PreparedOwnerUserOp, error) {
-	return preset.PrepareOwnerUserOp(ctx, sw, owner, sender, salt, calls, l)
+func (defaultOwnerExecutionBackend) Prepare(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, batch preset.OwnerBatch, l logger.Logger) (*preset.PreparedOwnerUserOp, error) {
+	return preset.PrepareOwnerBatch(ctx, sw, owner, sender, salt, batch, l)
 }
 func (defaultOwnerExecutionBackend) Validate(ctx context.Context, sw *config.SmartWalletConfig, owner common.Address, salt *big.Int, p *preset.PreparedOwnerUserOp) error {
 	return preset.ValidateOwnerUserOp(ctx, sw, owner, salt, p)
@@ -154,13 +156,49 @@ func (n *Engine) ownerBackend() ownerExecutionBackend {
 }
 
 type ownerWorkflowCollector struct {
-	source      common.Address
-	writeNodeID string
-	calls       []aa.Call
+	source            common.Address
+	calls             []aa.Call
+	contractID        string
+	nativeID          string
+	reserveGas        bool
+	contractCollected bool
+	nativeCollected   bool
 }
 
-// validateOwnerGraph bounds the first generic handoff: one chain, Manual,
-// read/check nodes, and exactly one terminal write. Unsupported graph shapes
+func newOwnerCollector(source common.Address, nodes []*avsproto.TaskNode) *ownerWorkflowCollector {
+	c := &ownerWorkflowCollector{source: source}
+	for _, node := range nodes {
+		if node.Type == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE {
+			c.contractID = node.Id
+		}
+		if node.Type == avsproto.NodeType_NODE_TYPE_ETH_TRANSFER {
+			c.nativeID = node.Id
+		}
+	}
+	return c
+}
+func (c *ownerWorkflowCollector) batch() preset.OwnerBatch {
+	return preset.OwnerBatch{Calls: c.calls, ReserveNativeGas: c.reserveGas}
+}
+func (c *ownerWorkflowCollector) complete() bool {
+	return (c.contractID == "" || c.contractCollected) && (c.nativeID == "" || c.nativeCollected)
+}
+
+// Stored/session workflows cannot honor an owner preparation's captured cap.
+// Check at creation rather than persisting a task that fails on every trigger.
+func rejectOwnerReserveGas(nodes []*avsproto.TaskNode) error {
+	for _, node := range nodes {
+		for _, transfer := range []*avsproto.ETHTransferNode{node.GetEthTransfer(), node.GetLoop().GetEthTransfer()} {
+			if transfer.GetConfig().GetReserveGas() {
+				return status.Errorf(codes.InvalidArgument, "node %q uses reserveGas, which is only supported by owner workflow preparation", node.GetId())
+			}
+		}
+	}
+	return nil
+}
+
+// validateOwnerGraph bounds the owner handoff: one chain, Manual, read/check
+// nodes, at most one ContractWrite and one terminal ETHTransfer. Unsupported graph shapes
 // fail before any runner executes; Auto and ordinary simulate are unaffected.
 func validateOwnerGraph(trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, chainID int64) (string, error) {
 	if trigger == nil || trigger.Id == "" || trigger.GetManual() == nil || trigger.GetType() != avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
@@ -171,6 +209,7 @@ func validateOwnerGraph(trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNod
 	}
 	ids := map[string]bool{trigger.Id: true}
 	writeID := ""
+	nativeID := ""
 	for _, node := range nodes {
 		if node == nil || node.Id == "" || ids[node.Id] {
 			return "", fmt.Errorf("owner workflow node ids must be unique and nonempty")
@@ -179,12 +218,17 @@ func validateOwnerGraph(trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNod
 		switch node.Type {
 		case avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE:
 			if writeID != "" || node.GetContractWrite().GetConfig() == nil {
-				return "", fmt.Errorf("owner execution requires exactly one ContractWrite node")
+				return "", fmt.Errorf("owner execution supports at most one ContractWrite node")
 			}
 			writeID = node.Id
 			if node.GetContractWrite().GetConfig().GetChainId() != chainID {
 				return "", fmt.Errorf("owner write chain must match the prepared chain")
 			}
+		case avsproto.NodeType_NODE_TYPE_ETH_TRANSFER:
+			if nativeID != "" || node.GetEthTransfer().GetConfig() == nil || node.GetEthTransfer().GetConfig().GetChainId() != chainID {
+				return "", fmt.Errorf("owner execution supports one terminal ETHTransfer on the prepared chain")
+			}
+			nativeID = node.Id
 		case avsproto.NodeType_NODE_TYPE_CONTRACT_READ:
 			if node.GetContractRead().GetConfig() == nil || node.GetContractRead().GetConfig().GetChainId() != chainID {
 				return "", fmt.Errorf("owner read chain must match the prepared chain")
@@ -209,27 +253,41 @@ func validateOwnerGraph(trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNod
 			return "", fmt.Errorf("node type %s is not supported by owner preparation", node.Type)
 		}
 	}
-	if writeID == "" {
-		return "", fmt.Errorf("owner execution requires exactly one ContractWrite node")
+	if writeID == "" && nativeID == "" {
+		return "", fmt.Errorf("owner execution requires a ContractWrite or ETHTransfer")
 	}
+	terminalID := writeID
+	if nativeID != "" {
+		terminalID = nativeID
+	}
+	connected := writeID == "" || nativeID == ""
 	for _, edge := range edges {
 		// A branch or filter output is "nodeId.port". The node id is the
 		// segment before the first dot; a plain source is the whole string.
 		if edge == nil || !ids[edge.Target] || !ids[strings.SplitN(edge.Source, ".", 2)[0]] {
 			return "", fmt.Errorf("invalid owner workflow edge")
 		}
-		if edge.Source == writeID || strings.HasPrefix(edge.Source, writeID+".") {
-			return "", fmt.Errorf("the owner ContractWrite must be terminal")
+		if edge.Source == terminalID || strings.HasPrefix(edge.Source, terminalID+".") {
+			return "", fmt.Errorf("the final owner write must be terminal")
+		}
+		if writeID != "" && (edge.Source == writeID || strings.HasPrefix(edge.Source, writeID+".")) {
+			if edge.Target != nativeID {
+				return "", fmt.Errorf("only ETHTransfer may follow the owner ContractWrite")
+			}
+			connected = true
 		}
 	}
-	return writeID, nil
+	if !connected {
+		return "", fmt.Errorf("owner ETHTransfer must follow ContractWrite")
+	}
+	return terminalID, nil
 }
 
 // collectOwnerWrite runs through the same template/ABI encoder as ordinary
 // ContractWrite, then stops before session checks, Tenderly or submission.
 func (r *ContractWriteProcessor) collectOwnerWrite(stepID string, node *avsproto.ContractWriteNode, parsedABI *abi.ABI, methods []*avsproto.ContractWriteNode_MethodCall, targets []common.Address) error {
 	collector := r.vm.ownerPreparation
-	if collector.writeNodeID != stepID || len(collector.calls) != 0 {
+	if collector.contractID != stepID || collector.contractCollected || collector.nativeCollected {
 		return fmt.Errorf("unexpected additional owner write")
 	}
 	if len(methods) == 0 || len(methods) > ownerBatchMaxCalls {
@@ -244,7 +302,7 @@ func (r *ContractWriteProcessor) collectOwnerWrite(stepID string, node *avsproto
 	if raw := r.extractTransactionValue(node); raw != "" {
 		value, err := bigint.Parse(raw)
 		if err != nil || value.Sign() != 0 {
-			return fmt.Errorf("native-value owner calls are not supported yet")
+			return fmt.Errorf("native ContractWrite values are unsupported; use an ETHTransfer node")
 		}
 	}
 	calls := make([]aa.Call, len(methods))
@@ -266,11 +324,12 @@ func (r *ContractWriteProcessor) collectOwnerWrite(stepID string, node *avsproto
 		calls[i] = aa.Call{Target: targets[i], Value: big.NewInt(0), Data: data}
 	}
 	collector.calls = calls
+	collector.contractCollected = true
 	return nil
 }
 
 // PrepareOwnerWorkflow reuses the existing graph runner in read/check mode;
-// only the terminal ContractWrite is intercepted to build an owner batch.
+// ContractWrite and terminal ETHTransfer are intercepted to build one owner batch.
 func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, input map[string]interface{}, chainID int64) (*OwnerWorkflowPreparation, error) {
 	if user == nil || user.Address == (common.Address{}) {
 		return nil, status.Error(codes.Unauthenticated, "owner JWT required")
@@ -314,27 +373,24 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	definition, err := proto.Marshal(&avsproto.Task{Trigger: trigger, Nodes: nodes, Edges: edges})
-	if err != nil {
-		return nil, err
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		return nil, err
-	}
-	collector := &ownerWorkflowCollector{source: *wallet.Address, writeNodeID: writeID}
+	collector := newOwnerCollector(*wallet.Address, nodes)
 	execution, err := n.SimulateWorkflowWithContext(context.WithValue(ctx, ownerPreparationContextKey{}, collector), user, trigger, nodes, edges, input, chainID)
 	if err != nil {
 		return nil, err
 	}
-	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS || len(collector.calls) == 0 {
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS || len(collector.calls) == 0 || !collector.complete() {
 		return nil, status.Error(codes.FailedPrecondition, "owner workflow checks failed or did not reach its terminal write; refresh and simulate again")
 	}
-	prepared, err := n.ownerBackend().Prepare(ctx, sw, user.Address, *wallet.Address, wallet.Salt, collector.calls, n.logger)
+	batch := collector.batch()
+	prepared, err := n.ownerBackend().Prepare(ctx, sw, user.Address, *wallet.Address, wallet.Salt, batch, n.logger)
 	if err != nil {
 		return nil, ownerPreconditionError(err, "owner operation could not be prepared: %v")
 	}
-	packed, err := aa.PackExecuteBatchMAv2(collector.calls)
+	resolvedCalls, err := batch.Resolve(prepared.Operation)
+	if err != nil {
+		return nil, err
+	}
+	packed, err := aa.PackExecuteBatchMAv2(resolvedCalls)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +403,12 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 		return nil, err
 	}
 	expires := time.Now().Add(ownerPreparationTTL).UnixMilli()
-	record := &ownerExecutionRecord{Owner: user.Address, ChainID: chainID, Salt: wallet.Salt, Operation: (*storedOwnerOperation)(op), Identity: prepared.Identity, UserOpHash: hash, ExpiresAt: expires, SubmissionState: ownerSubmissionPrepared, Definition: definition, InputJSON: inputJSON, WriteNodeID: writeID}
+	record := &ownerExecutionRecord{
+		Owner: user.Address, ChainID: chainID, Salt: wallet.Salt,
+		Operation: (*storedOwnerOperation)(op), Identity: prepared.Identity,
+		UserOpHash: hash, ExpiresAt: expires, SubmissionState: ownerSubmissionPrepared,
+		Batch: &batch, WriteNodeID: writeID,
+	}
 	if err := n.saveOwnerExecution(execution.Id, record, ownerPreparationTTL); err != nil {
 		return nil, err
 	}
@@ -355,7 +416,7 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 	// blockchain steps, nor return a fabricated simulation receipt for them.
 	steps := execution.Steps[:0]
 	for _, step := range execution.Steps {
-		if step.Id != writeID {
+		if step.Id != collector.contractID && step.Id != collector.nativeID {
 			steps = append(steps, step)
 		}
 	}
@@ -554,24 +615,16 @@ func (n *Engine) SubmitOwnerExecution(ctx context.Context, user *model.User, id 
 	if err := checkOwnerWalletConfig(sw, wallet, record.ChainID); err != nil {
 		return nil, ownerPreconditionError(err, "")
 	}
-	// Re-run only read/check preparation and require byte-identical calls. The
-	// original operation is never replaced or repriced after the owner signs.
-	// This catches changed balances/branch conditions before the relay; state
-	// can still change between this check and eventual on-chain inclusion.
-	var definition avsproto.Task
-	if err := proto.Unmarshal(record.Definition, &definition); err != nil {
-		return nil, err
+	// Continue the captured preparation. Never re-run reads or branch checks:
+	// incoming funds must not alter the amounts the owner already reviewed.
+	if record.Batch == nil {
+		return nil, status.Error(codes.FailedPrecondition, "owner preparation has no captured batch; prepare and review again")
 	}
-	var input map[string]interface{}
-	if err := json.Unmarshal(record.InputJSON, &input); err != nil {
-		return nil, err
+	resolvedCalls, err := record.Batch.Resolve(op)
+	if err != nil {
+		return nil, status.Error(codes.FailedPrecondition, "stored owner batch is invalid; prepare again")
 	}
-	collector := &ownerWorkflowCollector{source: op.Sender, writeNodeID: record.WriteNodeID}
-	checked, err := n.SimulateWorkflowWithContext(context.WithValue(ctx, ownerPreparationContextKey{}, collector), user, definition.Trigger, definition.Nodes, definition.Edges, input, record.ChainID)
-	if err != nil || checked.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS || len(collector.calls) == 0 {
-		return nil, status.Error(codes.FailedPrecondition, "owner workflow checks changed; prepare and review again")
-	}
-	resolved, err := aa.PackExecuteBatchMAv2(collector.calls)
+	resolved, err := aa.PackExecuteBatchMAv2(resolvedCalls)
 	if err != nil || !bytes.Equal(resolved, op.CallData) {
 		return nil, status.Error(codes.FailedPrecondition, "owner workflow calls changed; prepare and review again")
 	}
