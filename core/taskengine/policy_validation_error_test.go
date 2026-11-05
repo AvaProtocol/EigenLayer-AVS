@@ -14,7 +14,7 @@ import (
 )
 
 func TestPolicyInputAndDeadlineFailuresKeepPublicValidationReasons(t *testing.T) {
-	for _, name := range []string{"expiry range", "expired signature", "invalid policy ID", "empty agent label", "invalid cap"} {
+	for _, name := range []string{"expiry range", "expired signature", "invalid policy ID", "empty agent label", "invalid cap", "malformed signature", "short signature"} {
 		t.Run(name, func(t *testing.T) {
 			n, _, _, owner, wallet := newPolicyTestEngine(t)
 			in := SessionPolicyInput{Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Test", Permissions: testPermissions()}
@@ -39,6 +39,14 @@ func TestPolicyInputAndDeadlineFailuresKeepPublicValidationReasons(t *testing.T)
 			case "invalid cap":
 				in.Permissions.SpendCap.Amount = "not an amount"
 				_, err = n.PrepareSessionPolicy(&model.User{Address: owner}, in)
+			case "malformed signature", "short signature":
+				prepared, prepErr := n.PrepareSessionPolicy(&model.User{Address: owner}, in)
+				require.NoError(t, prepErr)
+				signature := make([]byte, 65)
+				if name == "short signature" {
+					signature = signature[:64]
+				}
+				_, _, err = n.SubmitSessionPolicy(&model.User{Address: owner}, in, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline, signature)
 			}
 			var validation *PolicyValidationError
 			require.ErrorAs(t, err, &validation)
