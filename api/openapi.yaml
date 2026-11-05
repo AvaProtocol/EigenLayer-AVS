@@ -301,7 +301,8 @@ components:
             Absent means unknown, including older gateways. A lost response
             also means unknown. Never infer this from HTTP status or prose.
         ownerDelegate:
-          $ref: '#/components/schemas/EthereumAddress'
+          allOf:
+            - $ref: '#/components/schemas/EthereumAddress'
           description: |
             Observed EIP-7702 delegate of the owner, only on
             EOA_DELEGATION_MISSING from owner execution or budget preparation
@@ -311,9 +312,10 @@ components:
             OWNER_ACCOUNT_UNAVAILABLE (503), never owner delegation advice.
             A delegated owner on a chain other than Sepolia or Base is a
             permanent EOA_DELEGATION_MISSING refusal even without a configured
-            pin; ownerDelegate still names the observed designation. A confirmed unsupported account
-            implementation, fallback owner or EntryPoint is
-            OWNER_ACCOUNT_UNSUPPORTED (409); preparing again does not fix it.
+            pin; ownerDelegate still names the observed designation.
+            A confirmed unsupported account implementation, fallback owner or
+            EntryPoint is OWNER_ACCOUNT_UNSUPPORTED (409); preparing again
+            does not fix it.
         legacyGrantDeadline:
           type: integer
           format: int64
