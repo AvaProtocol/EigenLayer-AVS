@@ -2621,7 +2621,7 @@ components:
 
     SessionPolicy:
       type: object
-      required: [id, runner, chainId, status, entityId, sessionSigner, agentLabel, validUntil, createdAt]
+      required: [id, runner, chainId, status, entityId, sessionSigner, agentLabel, validUntil, createdAt, onChainCleanupRequired]
       properties:
         id: { $ref: '#/components/schemas/Ulid' }
         runner: { $ref: '#/components/schemas/EthereumAddress' }
@@ -2686,13 +2686,24 @@ components:
           type: integer
           format: int64
           description: Unix milliseconds.
+        onChainCleanupRequired:
+          type: boolean
+          description: |
+            True when this policy is revoked and its grant was applied on
+            chain without a recorded verified teardown. Has the same meaning
+            as RevokePolicyResponse.onChainCleanupRequired. False for active
+            or pending policies, grants never applied, or verified teardown.
+            Independent of payload availability: onChainCleanup may be absent
+            even when this is true, if the cleanup payload cannot be built.
         onChainCleanup:
           allOf:
             - $ref: '#/components/schemas/OnChainRevokeCleanup'
           description: |
-            Present when status is revoked and the validation entity is still
-            installed on chain. Owner-executable uninstallValidation so clients
-            can finish teardown without re-calling DELETE (#717).
+            Owner-executable uninstallValidation so clients can finish teardown
+            without re-calling DELETE (#717). Present only when
+            onChainCleanupRequired is true and the payload can be built.
+            When the payload cannot be built, onChainCleanupRequired remains
+            true and this field is absent.
 
     BudgetApprovalPair:
       type: object

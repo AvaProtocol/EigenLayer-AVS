@@ -14,6 +14,7 @@ package rest
 import (
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/labstack/echo/v4"
@@ -59,6 +60,10 @@ type Server struct {
 	smartWalletRpcByChain map[int64]*ethclient.Client
 	priceService          taskengine.PriceService
 	withdraws             avsclient.WithdrawService
+	// NewServer is constructed once at startup. Suppress repeated cleanup
+	// build warnings per policy for this server's lifetime; never cache the
+	// cleanup state or payload, which may recover on a later request.
+	policyCleanupWarnings sync.Map // policyCleanupWarningKey -> struct{}
 }
 
 // NewServer wires the REST handler with its dependencies. Constructed once

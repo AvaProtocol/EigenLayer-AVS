@@ -672,9 +672,10 @@ func TestSubmitPolicyResponseCarriesEverySessionPolicyField(t *testing.T) {
 		CreatedAt:              1785441743000,
 	}
 
-	asPolicy, err := json.Marshal(policyToAPI(policy))
+	server := &Server{}
+	asPolicy, err := json.Marshal(server.policyToAPI(policy))
 	require.NoError(t, err)
-	asSubmit, err := json.Marshal(submitPolicyToAPI(policy, []string{"01replacedgrantaaaaaaaaaa"}))
+	asSubmit, err := json.Marshal(server.submitPolicyToAPI(policy, []string{"01replacedgrantaaaaaaaaaa"}))
 	require.NoError(t, err)
 
 	var policyFields, submitFields map[string]any

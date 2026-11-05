@@ -208,7 +208,7 @@ func (s *Server) SubmitWalletPolicy(ctx echo.Context, address generated.Ethereum
 		}
 		return mapPolicyError(err)
 	}
-	resp := submitPolicyToAPI(policy, superseded)
+	resp := s.submitPolicyToAPI(policy, superseded)
 	if len(affected) > 0 {
 		resp.AffectedTaskIds = &affected
 	}
@@ -232,7 +232,7 @@ func (s *Server) ListWalletPolicies(ctx echo.Context, address generated.Ethereum
 	}
 	items := make([]generated.SessionPolicy, 0, len(policies))
 	for _, p := range policies {
-		items = append(items, policyToAPI(p))
+		items = append(items, s.policyToAPI(p))
 	}
 	return ctx.JSON(http.StatusOK, generated.SessionPolicyList{Items: items})
 }
@@ -252,7 +252,7 @@ func (s *Server) GetWalletPolicy(ctx echo.Context, address generated.EthereumAdd
 	if err != nil {
 		return mapPolicyError(err)
 	}
-	return ctx.JSON(http.StatusOK, policyToAPI(policy))
+	return ctx.JSON(http.StatusOK, s.policyToAPI(policy))
 }
 
 // onChainCleanupAPI maps the engine cleanup payload to the OpenAPI type.
@@ -400,32 +400,25 @@ func erc20SpendCapFromAPI(spendCap generated.Erc20SpendCap) (*model.ERC20SpendCa
 // policyToAPI renders a policy for responses. Grant material — install
 // calldata, carrier nonce, owner signature — is secret-grade and never leaves
 // storage. Revoked+applied policies may include onChainCleanup (derived
-// uninstall only) so clients can finish teardown without re-revoking.
-func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
+// uninstall only) so clients can finish teardown without re-revoking. The
+// cleanup requirement survives even when that payload cannot be built.
+func (s *Server) policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 	out := generated.SessionPolicy{
-		Id:         generated.Ulid(p.ID),
-		ChainId:    generated.ChainId(p.ChainID),
-		Status:     generated.SessionPolicyStatus(p.Status),
-		EntityId:   int64(p.EntityID),
-		AgentLabel: p.AgentLabel,
-		ValidUntil: p.ValidUntil,
-		CreatedAt:  p.CreatedAt,
-	}
-	// Only when still believed installed. TornDownAt means a prior replace
-	// (or cleanup) already verified the entity clear — do not re-advertise.
-	if p.Status == model.SessionPolicyRevoked && p.Grant != nil && p.Grant.NeedsOnChainCleanup() {
-		if c, err := taskengine.BuildOnChainRevokeCleanup(p); err == nil {
-			out.OnChainCleanup = onChainCleanupAPI(c)
-		}
-		// Build failure: omit field. Callers that need diagnostics use revoke,
-		// which surfaces the error. Silent omit is better than claiming no
-		// cleanup is needed when the record is corrupt.
+		Id:                     p.ID,
+		ChainId:                p.ChainID,
+		Status:                 generated.SessionPolicyStatus(p.Status),
+		EntityId:               int64(p.EntityID),
+		AgentLabel:             p.AgentLabel,
+		ValidUntil:             p.ValidUntil,
+		CreatedAt:              p.CreatedAt,
+		OnChainCleanupRequired: p.Status == model.SessionPolicyRevoked && p.Grant.NeedsOnChainCleanup(),
 	}
 	if p.Runner != nil {
-		out.Runner = generated.EthereumAddress(p.Runner.Hex())
+		out.Runner = p.Runner.Hex()
 	}
+	s.applyPolicyCleanup(&out, p)
 	if p.SessionSigner != nil {
-		out.SessionSigner = generated.EthereumAddress(p.SessionSigner.Hex())
+		out.SessionSigner = p.SessionSigner.Hex()
 	}
 	if p.Justification != "" {
 		out.Justification = &p.Justification
@@ -449,63 +442,50 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 	if p.BudgetStartNative != nil {
 		out.BudgetStartNative = &generated.NativeSpendCap{Amount: p.BudgetStartNative.Amount}
 	}
-	if len(p.AllowedActions) > 0 {
-		actions := make([]generated.AllowedAction, 0, len(p.AllowedActions))
-		for _, a := range p.AllowedActions {
-			if a.Target == nil {
-				continue
-			}
-			actions = append(actions, generated.AllowedAction{
-				Target:    generated.EthereumAddress(a.Target.Hex()),
-				Selectors: a.Selectors,
-			})
-		}
-		out.AllowedActions = &actions
-	}
-	if p.ERC20SpendCap != nil && p.ERC20SpendCap.Token != nil {
-		out.Erc20SpendCap = &generated.Erc20SpendCap{
-			Token:  generated.EthereumAddress(p.ERC20SpendCap.Token.Hex()),
-			Amount: p.ERC20SpendCap.Amount,
-		}
-	}
-	if len(p.ERC20SpendCaps) > 0 {
-		caps := make([]generated.Erc20SpendCap, 0, len(p.ERC20SpendCaps))
-		for _, cap := range p.ERC20SpendCaps {
-			if cap.Token == nil {
-				continue
-			}
-			caps = append(caps, generated.Erc20SpendCap{
-				Token:  generated.EthereumAddress(cap.Token.Hex()),
-				Amount: cap.Amount,
-			})
-		}
-		if len(caps) > 0 {
-			out.Erc20SpendCaps = &caps
-		}
-	}
-	if len(p.NativeRecipients) > 0 {
-		recs := make([]generated.EthereumAddress, 0, len(p.NativeRecipients))
-		for _, rec := range p.NativeRecipients {
-			if rec == nil {
-				continue
-			}
-			recs = append(recs, generated.EthereumAddress(rec.Hex()))
-		}
-		if len(recs) > 0 {
-			out.NativeRecipients = &recs
-		}
-	}
-	if p.NativeSpendCap != nil {
-		out.NativeSpendCap = &generated.NativeSpendCap{Amount: p.NativeSpendCap.Amount}
-	}
-	if p.AllowContractRecipient {
-		allow := true
-		out.AllowContractRecipient = &allow
-	}
-	if acks := delegatedNativeRecipientsToAPI(p.DelegatedNativeRecipients); len(acks) > 0 {
-		out.DelegatedNativeRecipients = &acks
+	out.AllowedActions, out.Erc20SpendCap, out.Erc20SpendCaps, out.NativeRecipients,
+		out.NativeSpendCap, out.AllowContractRecipient, out.DelegatedNativeRecipients = permissionsFieldsToAPI(taskengine.SessionPermissions{
+		AllowedActions: p.AllowedActions, SpendCap: p.ERC20SpendCap, SpendCaps: p.ERC20SpendCaps,
+		NativeRecipients: p.NativeRecipients, NativeSpendCap: p.NativeSpendCap,
+		AllowContractRecipient: p.AllowContractRecipient, DelegatedNativeRecipients: p.DelegatedNativeRecipients,
+	})
+	// Retain the existing empty-array response for stored action rows whose
+	// targets are all missing; the shared converter normally omits that case.
+	if len(p.AllowedActions) > 0 && out.AllowedActions == nil {
+		empty := []generated.AllowedAction{}
+		out.AllowedActions = &empty
 	}
 	return out
+}
+
+func (s *Server) applyPolicyCleanup(out *generated.SessionPolicy, p *model.SessionPolicy) {
+	// TornDownAt records a verified teardown: never rebuild or advertise it.
+	if !out.OnChainCleanupRequired {
+		return
+	}
+	cleanup, err := taskengine.BuildOnChainRevokeCleanup(p)
+	if err != nil {
+		s.logPolicyCleanupUnavailable(*out, err)
+		return
+	}
+	out.OnChainCleanup = onChainCleanupAPI(cleanup)
+}
+
+type policyCleanupWarningKey struct {
+	chainID  generated.ChainId
+	wallet   generated.EthereumAddress
+	policyID generated.Ulid
+}
+
+func (s *Server) logPolicyCleanupUnavailable(policy generated.SessionPolicy, err error) {
+	if s.logger == nil {
+		return
+	}
+	key := policyCleanupWarningKey{chainID: policy.ChainId, wallet: policy.Runner, policyID: policy.Id}
+	if _, logged := s.policyCleanupWarnings.LoadOrStore(key, struct{}{}); logged {
+		return
+	}
+	s.logger.Warn("Policy on-chain cleanup payload unavailable", "policy_id", policy.Id,
+		"chain_id", policy.ChainId, "wallet", policy.Runner, "error", err)
 }
 
 // submitPolicyToAPI renders the submit response: the stored policy plus the
@@ -515,8 +495,8 @@ func policyToAPI(p *model.SessionPolicy) generated.SessionPolicy {
 // which oapi-codegen flattens into a separate struct rather than an embedded
 // one — hence the field-by-field copy. TestSubmitPolicyResponseCarriesEverySessionPolicyField
 // fails if the two schemas ever drift apart.
-func submitPolicyToAPI(p *model.SessionPolicy, superseded []string) generated.SubmitPolicyResponse {
-	base := policyToAPI(p)
+func (s *Server) submitPolicyToAPI(p *model.SessionPolicy, superseded []string) generated.SubmitPolicyResponse {
+	base := s.policyToAPI(p)
 	out := generated.SubmitPolicyResponse{
 		Id:                        base.Id,
 		Runner:                    base.Runner,
@@ -535,6 +515,8 @@ func submitPolicyToAPI(p *model.SessionPolicy, superseded []string) generated.Su
 		AllowContractRecipient:    base.AllowContractRecipient,
 		ValidUntil:                base.ValidUntil,
 		CreatedAt:                 base.CreatedAt,
+		OnChainCleanupRequired:    base.OnChainCleanupRequired,
+		OnChainCleanup:            base.OnChainCleanup,
 	}
 	// Required in the schema and always emitted, empty on a first grant: a
 	// client asking "did this replace anything" reads an empty array rather
