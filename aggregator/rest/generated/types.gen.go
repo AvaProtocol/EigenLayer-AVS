@@ -1874,7 +1874,18 @@ type Problem struct {
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
 	NeededWei      *string          `json:"neededWei,omitempty"`
 
-	// OwnerDelegate Lowercase or checksummed hex EOA / contract address.
+	// OwnerDelegate Observed EIP-7702 delegate of the owner, only on
+	// EOA_DELEGATION_MISSING from owner execution or budget preparation
+	// and submission, and policy checks of an eoa_7702 runner. Absent
+	// for non-designation code or unknown state. Gateway pin, reader or
+	// implementation-hash failures on supported chains are
+	// OWNER_ACCOUNT_UNAVAILABLE (503), never owner delegation advice.
+	// A delegated owner on a chain other than Sepolia or Base is a
+	// permanent EOA_DELEGATION_MISSING refusal even without a configured
+	// pin; ownerDelegate still names the observed designation.
+	// A confirmed unsupported account implementation, fallback owner or
+	// EntryPoint is OWNER_ACCOUNT_UNSUPPORTED (409); preparing again
+	// does not fix it.
 	OwnerDelegate *EthereumAddress `json:"ownerDelegate,omitempty"`
 
 	// PolicyId Usable session grant involved in this failure, when there is one.
