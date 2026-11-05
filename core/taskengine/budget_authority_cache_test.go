@@ -258,3 +258,36 @@ func TestBudgetInventoryConcurrentChecksShareOnlyHistory(t *testing.T) {
 	require.Equal(t, 4, queries, "only one request warms the history")
 	require.Equal(t, 8, registered, "every request checks current registration")
 }
+
+func TestBudgetInventoryMidScanReorgCannotPersistMixedForkPrefix(t *testing.T) {
+	v, f := newBudgetInventoryView(t, 20, 11, 3)
+	f.onLogQuery = func(from uint64) {
+		if from != 14 {
+			return
+		}
+		// The first page was scanned on fork A. Fork B contains an install
+		// in that earlier page, before this request's range. Saving this
+		// page under a B checkpoint would conceal the missing B install.
+		f.block.Hash = common.BytesToHash([]byte{0xbb, 20})
+		f.blockHashes = map[uint64]common.Hash{}
+		for block := uint64(11); block < 20; block++ {
+			f.blockHashes[block] = common.BytesToHash([]byte{0xbb, byte(block)})
+		}
+		log := budgetInstallLog(f, 12)
+		log.BlockHash = f.blockHashes[12]
+		f.logs = []types.Log{log}
+		f.registered = true
+		f.onLogQuery = nil
+	}
+	owner := common.HexToAddress("0xb1")
+	require.ErrorIs(t, v.CheckAuthorities(context.Background(), owner, f.wallet), ErrBudgetReadUnavailable)
+	cached := readBudgetInventory(t, v, f.wallet)
+	require.EqualValues(t, 13, cached.Cursor.Number, "do not promote an A prefix to a B checkpoint")
+	// The next view must invalidate the orphaned A checkpoint, rebuild,
+	// and find B's earlier install instead of trusting an empty cache.
+	v.block = f.block
+	err := v.CheckAuthorities(context.Background(), owner, f.wallet)
+	var refusal *BudgetPolicyError
+	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, BudgetAuthorityUnknownCode, refusal.Code)
+}

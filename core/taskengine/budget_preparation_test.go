@@ -39,6 +39,7 @@ func newBudgetPrepareFixture(t *testing.T) *budgetPrepareFixture {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	n.config.WalletBudgetPreparationEnabled = true
+	n.budgetChangeBackend = &budgetChangeFake{} // Offline authority preflight.
 	n.config.WalletBudgetDiscoverySigner = crypto.PubkeyToAddress(key.PublicKey).Hex()
 	f := &budgetPrepareFixture{n: n, user: &model.User{Address: owner}, key: key, ownerKey: ownerKey, backend: &ownerBackendFixture{}}
 	n.budgetOwnerPrepareOverride = func(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, batch preset.OwnerBatch, l logger.Logger) (*preset.PreparedOwnerUserOp, error) {

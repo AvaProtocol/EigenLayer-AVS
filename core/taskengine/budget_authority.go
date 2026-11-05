@@ -16,6 +16,15 @@ import (
 // ERC-6900 v0.8 IModularAccount / Alchemy ModularAccount v2.0.1.
 var budgetValidationInstalled = crypto.Keccak256Hash([]byte("ValidationInstalled(address,uint32)"))
 
+func (n *Engine) warmBudgetAuthorityInventory(ctx context.Context, owner, wallet common.Address, chain int64) error {
+	view, err := n.budgetBackend().View(ctx, chain, nil)
+	if err != nil {
+		return fmt.Errorf("%w: budget authority preflight: %w", ErrBudgetReadUnavailable, err)
+	}
+	defer view.Close()
+	return view.CheckAuthorities(ctx, owner, wallet)
+}
+
 func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet common.Address) error {
 	code, err := v.CodeAt(ctx, wallet)
 	if err != nil {

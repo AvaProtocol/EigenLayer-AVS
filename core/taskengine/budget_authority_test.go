@@ -42,6 +42,7 @@ type budgetInventoryRPC struct {
 	finalized         *uint64
 	blockReadError    *uint64
 	blockHashes       map[uint64]common.Hash
+	onLogQuery        func(uint64)
 }
 
 func (f *budgetInventoryRPC) GetCode(_ context.Context, address common.Address, at rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
@@ -110,6 +111,9 @@ func (f *budgetInventoryRPC) GetLogs(_ context.Context, query struct {
 	defer f.mu.Unlock()
 	from, to := uint64(query.FromBlock), uint64(query.ToBlock)
 	f.queries = append(f.queries, [2]uint64{from, to})
+	if f.onLogQuery != nil {
+		f.onLogQuery(from)
+	}
 	if to < from || to-from >= f.logLimit {
 		return nil, errors.New("eth_getLogs range exceeds provider limit")
 	}

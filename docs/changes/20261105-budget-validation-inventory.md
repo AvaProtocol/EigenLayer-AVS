@@ -25,6 +25,10 @@ session runs, so the problem was not limited to first installation.
   per chain and wallet. Every complete finalized page stores its cursor and all
   candidates together, so a timeout or restart resumes from the last complete
   page instead of rescanning the wallet's lifetime.
+- Warm that inventory during unsigned budget preparation, after validating the
+  owner operation and before returning a signable review. This takes no wallet
+  run/send gate. A failed warmup returns no review or hold; submit still checks
+  current authority under its final send gate.
 - On subsequent checks, verify the cached checkpoint's canonical hash, scan only
   new finalized blocks and re-read the unfinalized tail through the pinned head.
   A reorged or malformed checkpoint is rebuilt. An older pinned view cannot
@@ -71,6 +75,15 @@ but completed finalized pages survive failures and restarts. Warm checks do no
 deployment search and query only blocks since the saved cursor plus the
 unfinalized tail; cost scales with new blocks and candidates, not wallet age.
 
+The per-page canonical confirmation is intentional. A finalized range is saved
+before the scan's final check. If a reorg changes the prefix between two pages,
+dropping that confirmation can save old-fork candidates under a new-fork
+checkpoint; the final refusal would not undo that saved record. A regression
+test reproduces this failure when the check is removed. The extra request is
+retained for resumable backfills; first setup now does that work before the
+owner signs. A later cold repair can still delay a budget run until its safety
+check completes.
+
 ## Regression coverage
 
 - Undeployed wallet at a 12-million-block snapshot makes no `eth_getLogs` call.
@@ -94,6 +107,10 @@ unfinalized tail; cost scales with new blocks and candidates, not wallet age.
   checkpoint read failures and storage failures never authorize a send.
 - Older snapshots cannot regress the stored cursor; concurrent checks backfill
   once and independently recheck current registration.
+- Preparation warms before returning a review, without taking wallet run/send
+  gates; submit still refuses a newly live authority after a successful warmup.
+- A mid-scan reorg cannot promote a mixed-fork prefix to a canonical checkpoint,
+  even if the final check would have refused the send.
 
 The original implementation fails the undeployed-wallet, later-page-authority
 and later-page-owner-operation regression tests against the capped RPC fixture.
@@ -103,7 +120,7 @@ the wallet-code boundary lookup at genesis; owner identity, nonce and fee reads
 retain their final-snapshot assertions.
 
 The complete affected config, task-engine (including subpackages), and REST
-suites pass with the race detector: 1,323 top-level tests, 2,805 including
+suites pass with the race detector: 1,327 top-level tests, 2,812 including
 subtests. Vet, lint, formatting, diff checks and the storage compatibility
 check against `origin/main` pass.
 

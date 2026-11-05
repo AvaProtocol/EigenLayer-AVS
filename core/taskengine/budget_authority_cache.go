@@ -164,6 +164,9 @@ func (v *pinnedBudgetView) extendBudgetAuthorityInventory(ctx context.Context, i
 			if checkpointErr != nil {
 				return checkpointErr
 			}
+			// This page is persisted before the final check. Confirm its
+			// snapshot now so a mid-scan reorg cannot mix an old prefix with
+			// a new canonical checkpoint that a later run would trust.
 			if canonicalErr := v.VerifyCanonical(ctx); canonicalErr != nil {
 				return canonicalErr
 			}

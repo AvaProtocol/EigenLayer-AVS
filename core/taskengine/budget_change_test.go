@@ -31,6 +31,7 @@ type budgetChangeFake struct {
 	canonicalError  error
 	changed         bool
 	authorityError  error
+	authorityCheck  func(context.Context, common.Address, common.Address) error
 	caller          func(ethereum.CallMsg) ([]byte, error)
 	sending         chan struct{}
 	releaseSend     chan struct{}
@@ -73,7 +74,10 @@ func (v *budgetFakeView) VerifyCanonical(context.Context) error { return v.f.can
 func (v *budgetFakeView) ValidateOwner(context.Context, *BudgetPolicyPreparation) error {
 	return v.f.validationError
 }
-func (v *budgetFakeView) CheckAuthorities(context.Context, common.Address, common.Address) error {
+func (v *budgetFakeView) CheckAuthorities(ctx context.Context, owner, wallet common.Address) error {
+	if v.f.authorityCheck != nil {
+		return v.f.authorityCheck(ctx, owner, wallet)
+	}
 	return v.f.authorityError
 }
 func (v *budgetFakeView) Nonce(context.Context, common.Address) (*big.Int, error) {
