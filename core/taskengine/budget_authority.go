@@ -1,12 +1,12 @@
 package taskengine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 )
@@ -16,39 +16,71 @@ import (
 // ERC-6900 v0.8 IModularAccount / Alchemy ModularAccount v2.0.1.
 var budgetValidationInstalled = crypto.Keccak256Hash([]byte("ValidationInstalled(address,uint32)"))
 
-func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet common.Address) error {
-	logs, err := v.chain.FilterLogs(ctx, ethereum.FilterQuery{
-		FromBlock: big.NewInt(0), ToBlock: new(big.Int).SetUint64(v.block.Number),
-		Addresses: []common.Address{wallet}, Topics: [][]common.Hash{{budgetValidationInstalled}},
-	})
+func (n *Engine) warmBudgetAuthorityInventory(ctx context.Context, owner, wallet common.Address, chain int64) error {
+	view, err := n.budgetBackend().View(ctx, chain, nil)
 	if err != nil {
-		return fmt.Errorf("%w: account validation inventory: %w", ErrBudgetReadUnavailable, err)
+		return fmt.Errorf("%w: budget authority preflight: %w", ErrBudgetReadUnavailable, err)
+	}
+	defer view.Close()
+	return view.CheckAuthorities(ctx, owner, wallet)
+}
+
+func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet common.Address) error {
+	code, err := v.CodeAt(ctx, wallet)
+	if err != nil {
+		return fmt.Errorf("%w: account validation code: %w", ErrBudgetReadUnavailable, err)
+	}
+	if len(code) == 0 {
+		// Counterfactual accounts have no installed validation state. Still
+		// verify the snapshot before treating its absence as established.
+		return v.VerifyCanonical(ctx)
+	}
+	candidates, err := v.budgetAuthorityCandidates(ctx, wallet, code)
+	if err != nil {
+		return err
 	}
 	known, err := v.knownBudgetAuthorities(owner, wallet)
 	if err != nil {
 		return err
 	}
-	seen := map[[24]byte]bool{}
-	for _, log := range logs {
-		if log.Removed || log.Address != wallet || len(log.Topics) != 3 || log.Topics[0] != budgetValidationInstalled || log.Topics[2].Big().BitLen() > 32 {
-			return fmt.Errorf("%w: malformed validation inventory", ErrBudgetReadUnavailable)
-		}
-		module := common.BytesToAddress(log.Topics[1].Bytes())
-		entity := uint32(log.Topics[2].Big().Uint64())
-		key := aa.PackModuleEntity(module, entity)
-		if known[key] || seen[key] {
+	for key, candidate := range candidates {
+		if known[key] {
 			continue
 		}
-		seen[key] = true
-		registered, err := aa.ModuleEntityRegisteredOnChain(ctx, v, wallet, module, entity)
+		registered, err := aa.ModuleEntityRegisteredOnChain(ctx, v, wallet, candidate.Module, candidate.Entity)
 		if err != nil {
 			return fmt.Errorf("%w: unknown entity registration: %w", ErrBudgetReadUnavailable, err)
 		}
 		if registered {
-			return &BudgetPolicyError{Code: BudgetAuthorityUnknownCode, Detail: fmt.Sprintf("Remove the unrecognized validation authority %s, entity %d, in your wallet, then check again. Ava's runs remain paused.", module.Hex(), entity)}
+			return &BudgetPolicyError{Code: BudgetAuthorityUnknownCode, Detail: fmt.Sprintf("Remove the unrecognized validation authority %s, entity %d, in your wallet, then check again. Ava's runs remain paused.", candidate.Module.Hex(), candidate.Entity)}
 		}
 	}
 	return v.VerifyCanonical(ctx)
+}
+
+// Normal account creation begins with empty code/storage. Binary-searching
+// code history gives a safe lower bound for that account's surviving state,
+// including its constructor's install events. An EIP-7702 authorization can
+// clear code without clearing storage, so its code history is NOT such a
+// boundary: delegated accounts must retain the complete event history.
+func (v *pinnedBudgetView) budgetAuthorityFromBlock(ctx context.Context, wallet common.Address, code []byte) (uint64, error) {
+	if bytes.HasPrefix(code, []byte{0xef, 0x01, 0x00}) {
+		return 0, nil
+	}
+	low, high := uint64(0), v.block.Number
+	for low < high {
+		mid := low + (high-low)/2
+		historical, err := v.chain.CodeAt(ctx, wallet, new(big.Int).SetUint64(mid))
+		if err != nil {
+			return 0, fmt.Errorf("%w: account deployment history at block %d: %w", ErrBudgetReadUnavailable, mid, err)
+		}
+		if len(historical) == 0 {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	return low, nil
 }
 
 func (v *pinnedBudgetView) knownBudgetAuthorities(owner, wallet common.Address) (map[[24]byte]bool, error) {

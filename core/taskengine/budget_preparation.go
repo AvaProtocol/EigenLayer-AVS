@@ -263,6 +263,12 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if err != nil {
 		return nil, err
 	}
+	// Backfill before returning a signable review, with only the unsigned
+	// preparation lock held. Preserve pricing/identity refusals above, and
+	// recheck current authority again under the send gate at submit.
+	if err = n.warmBudgetAuthorityInventory(ctx, user.Address, in.Wallet, in.ChainID); err != nil {
+		return nil, err
+	}
 	expires := time.Now().Add(ownerPreparationTTL).UnixMilli()
 	policyID := strings.ToLower(ulid.Make().String())
 	policy := &model.SessionPolicy{ID: policyID, Owner: &user.Address, Runner: &in.Wallet, ChainID: in.ChainID, EntityID: entity, SessionSigner: &signer, AgentLabel: in.AgentLabel, Justification: in.Justification,
