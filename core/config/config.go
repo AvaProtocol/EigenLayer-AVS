@@ -37,6 +37,10 @@ const DefaultMaxWalletsPerOwner = 5
 // Any configured value above this will be clamped down to this hard limit.
 const HardMaxWalletsPerOwner = 2000
 
+// DefaultBudgetLogBlockRange bounds each inclusive eth_getLogs request made
+// while checking wallet-budget authorities or reconciling owner operations.
+const DefaultBudgetLogBlockRange uint64 = 10_000
+
 // EntryPointV07AddressHex is the canonical ERC-4337 v0.7 EntryPoint, the same
 // address on every chain that has one. It is deliberately NOT configurable:
 // unlike the v0.6 deployment there is nothing per-chain to point at, and a
@@ -233,6 +237,9 @@ type NotificationsSummaryConfig struct {
 type SmartWalletConfig struct {
 	EthRpcUrl string
 	EthWsUrl  string
+	// BudgetLogBlockRange is this chain RPC's maximum inclusive log-query
+	// range. Zero uses DefaultBudgetLogBlockRange.
+	BudgetLogBlockRange uint64
 	// BundlerURL is the self-hosted (Voltaire) bundler endpoint. Used only when
 	// BundlerProvider is "self_hosted".
 	BundlerURL string
@@ -503,6 +510,7 @@ func validatePeriodicBackup(dir string, interval time.Duration) error {
 type SmartWalletConfigRaw struct {
 	EthRpcUrl            string   `yaml:"eth_rpc_url"`
 	EthWsUrl             string   `yaml:"eth_ws_url"`
+	BudgetLogBlockRange  uint64   `yaml:"budget_log_block_range"`
 	BundlerURL           string   `yaml:"bundler_url"`
 	BundlerProvider      string   `yaml:"bundler_provider"`
 	AlchemyAPIKey        string   `yaml:"alchemy_api_key"`
@@ -866,6 +874,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		SmartWallet: &SmartWalletConfig{
 			EthRpcUrl:                configRaw.SmartWallet.EthRpcUrl,
 			EthWsUrl:                 configRaw.SmartWallet.EthWsUrl,
+			BudgetLogBlockRange:      configRaw.SmartWallet.BudgetLogBlockRange,
 			BundlerURL:               configRaw.SmartWallet.BundlerURL,
 			BundlerProvider:          configRaw.SmartWallet.BundlerProvider,
 			AlchemyAPIKey:            configRaw.SmartWallet.AlchemyAPIKey,
@@ -1267,6 +1276,7 @@ func parseChainConfig(raw ChainConfigRaw, logger sdklogging.Logger) (*ChainConfi
 		SmartWallet: &SmartWalletConfig{
 			EthRpcUrl:            sw.EthRpcUrl,
 			EthWsUrl:             wsURL,
+			BudgetLogBlockRange:  sw.BudgetLogBlockRange,
 			BundlerURL:           sw.BundlerURL,
 			BundlerProvider:      sw.BundlerProvider,
 			AlchemyAPIKey:        sw.AlchemyAPIKey,

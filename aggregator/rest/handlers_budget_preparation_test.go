@@ -42,6 +42,7 @@ func TestBudgetPreparationHTTPStorageAndSignedLifecycle(t *testing.T) {
 			spender := common.HexToAddress("0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E")
 			var sends, estimates atomic.Int32
 			var pinnedOwnerReads atomic.Int32
+			var historicalWalletReads atomic.Int32
 			zeroBalance := atomic.Bool{}
 			sendEnabled := atomic.Bool{}
 			mined := atomic.Bool{}
@@ -56,11 +57,23 @@ func TestBudgetPreparationHTTPStorageAndSignedLifecycle(t *testing.T) {
 					Params []json.RawMessage `json:"params"`
 				}
 				require.NoError(t, json.NewDecoder(req.Body).Decode(&rpcReq))
+				// This account is created in block 1. Only the inventory's
+				// wallet-code lookup may read genesis; identity/nonce/fee
+				// reads below must still use the final pinned snapshot.
+				historicalWalletCode := false
+				if rpcReq.Method == "eth_getCode" && string(rpcReq.Params[1]) == `"0x0"` {
+					var address common.Address
+					require.NoError(t, json.Unmarshal(rpcReq.Params[0], &address))
+					historicalWalletCode = address == r.wallet
+					if historicalWalletCode {
+						historicalWalletReads.Add(1)
+					}
+				}
 				if sendEnabled.Load() && !mined.Load() {
 					switch rpcReq.Method {
 					case "eth_getCode", "eth_getStorageAt", "eth_getBalance", "eth_call":
 						last := string(rpcReq.Params[len(rpcReq.Params)-1])
-						if !strings.Contains(last, "blockHash") {
+						if !strings.Contains(last, "blockHash") && !historicalWalletCode {
 							require.Equal(t, `"0x1"`, last, "all owner identity/nonce/fee reads must use the final canonical block")
 							pinnedOwnerReads.Add(1)
 						}
@@ -74,7 +87,7 @@ func TestBudgetPreparationHTTPStorageAndSignedLifecycle(t *testing.T) {
 					var address common.Address
 					require.NoError(t, json.Unmarshal(rpcReq.Params[0], &address))
 					result = "0x6000"
-					if address == r.owner || address == r.wallet && !deployed {
+					if address == r.owner || address == r.wallet && (!deployed || historicalWalletCode) {
 						result = "0x"
 					}
 				case "eth_getStorageAt":
@@ -265,6 +278,11 @@ func TestBudgetPreparationHTTPStorageAndSignedLifecycle(t *testing.T) {
 			sent := call(http.MethodPost, path+"/preparations/"+id+":submit?chainId=11155111", map[string]interface{}{"signature": hexutil.Encode(ownerSignature)}, 200)
 			require.Equal(t, "submitted", sent["state"])
 			require.Positive(t, pinnedOwnerReads.Load())
+			if deployed {
+				require.Positive(t, historicalWalletReads.Load())
+			} else {
+				require.Zero(t, historicalWalletReads.Load(), "an undeployed account needs no historical scan")
+			}
 			require.EqualValues(t, 1, sends.Load())
 			pending := call(http.MethodGet, path+"/preparations/"+id+"?chainId=11155111", nil, 200)
 			require.Equal(t, "submitted", pending["state"])
