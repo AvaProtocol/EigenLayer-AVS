@@ -4064,6 +4064,8 @@ paths:
         An outstanding legacy signature found by the submit-time recheck returns
         409 BUDGET_LEGACY_GRANT_PENDING with legacyGrantDeadline, the latest
         outstanding signature deadline in unix milliseconds.
+        A live unrecognized validation authority returns 409 BUDGET_AUTHORITY_UNKNOWN;
+        remove it in the wallet, then check again.
         Errors include submissionStarted when the send boundary is known.
         False means this completed request never attempted its first-send marker
         or relay; the client may prepare a fresh review. True or an

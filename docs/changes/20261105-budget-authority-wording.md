@@ -11,7 +11,8 @@ refusals, instead of placing the machine-readable error code or wrapper text in
 the run's prose. Its `BUDGET_CHANGING` code and five-second retry stay unchanged.
 
 OpenAPI explicitly documents 409 `BUDGET_AUTHORITY_UNKNOWN` at both prepare and
-submit. Existing HTTP statuses, error codes and submission-boundary metadata are
+submit, including the submit operation's own description. Existing HTTP statuses,
+error codes and submission-boundary metadata are
 unchanged. SDK and Studio changes are outside this PR.
 
 Regression coverage exercises the actual authority check through prepare and
