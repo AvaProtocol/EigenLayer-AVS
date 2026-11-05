@@ -2695,6 +2695,8 @@ components:
             or pending policies, grants never applied, or verified teardown.
             Independent of payload availability: onChainCleanup may be absent
             even when this is true, if the cleanup payload cannot be built.
+            List and single-policy reads recheck the account registration and
+            record verified removals. Failed checks leave the requirement set.
         onChainCleanup:
           allOf:
             - $ref: '#/components/schemas/OnChainRevokeCleanup'
@@ -4490,7 +4492,13 @@ paths:
     get:
       tags: [Policies]
       summary: List the wallet's session policies
-      description: Grant material (calldata, signatures) is never echoed.
+      description: |
+        Grant material (install calldata, signatures) is never echoed.
+        Revoked, applied policies without verified teardown are checked on their
+        chain. A cleared registration records teardown and removes the cleanup
+        requirement and payload. Failed checks leave the stored requirement
+        unchanged; the list remains available. Registration reads share a
+        ten-second request budget.
       operationId: listWalletPolicies
       responses:
         '200':
@@ -4516,6 +4524,12 @@ paths:
     get:
       tags: [Policies]
       summary: Get one session policy
+      description: |
+        A revoked, applied policy without verified teardown is checked on its
+        chain before rendering. A cleared registration records teardown and
+        removes the cleanup requirement and payload. A failed check leaves
+        the stored requirement unchanged. The registration read is bounded
+        to ten seconds.
       operationId: getWalletPolicy
       responses:
         '200':

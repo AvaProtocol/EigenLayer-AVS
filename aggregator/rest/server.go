@@ -61,7 +61,7 @@ type Server struct {
 	priceService          taskengine.PriceService
 	withdraws             avsclient.WithdrawService
 	// NewServer is constructed once at startup. Suppress repeated cleanup
-	// build warnings per policy for this server's lifetime; never cache the
+	// warnings per policy/stage for this server's lifetime; never cache the
 	// cleanup state or payload, which may recover on a later request.
 	policyCleanupWarnings sync.Map // policyCleanupWarningKey -> struct{}
 }

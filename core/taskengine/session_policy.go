@@ -561,9 +561,8 @@ func (n *Engine) InstallSessionResolver() {
 
 // teardownVerifier reads the account's registration, not residual module
 // storage. Cleared hook lists must not be targeted by another account uninstall.
-// Dialled per check rather than held open: verification runs once
-// per replacement, and the alternative is a pool of long-lived clients for
-// every configured chain to serve a call that happens rarely.
+// Dialled per check rather than held open. Used by replacements and revoked
+// policy reads; a confirmed teardown is persisted so future reads skip it.
 func (n *Engine) teardownVerifier() TeardownVerifier {
 	return func(ctx context.Context, chainID int64, account common.Address, entity uint32) (bool, error) {
 		swCfg := n.ResolveSmartWalletConfig(chainID)

@@ -2196,6 +2196,8 @@ type SessionPolicy struct {
 	// or pending policies, grants never applied, or verified teardown.
 	// Independent of payload availability: onChainCleanup may be absent
 	// even when this is true, if the cleanup payload cannot be built.
+	// List and single-policy reads recheck the account registration and
+	// record verified removals. Failed checks leave the requirement set.
 	OnChainCleanupRequired bool `json:"onChainCleanupRequired"`
 
 	// Runner Lowercase or checksummed hex EOA / contract address.
@@ -2562,6 +2564,8 @@ type SubmitPolicyResponse struct {
 	// or pending policies, grants never applied, or verified teardown.
 	// Independent of payload availability: onChainCleanup may be absent
 	// even when this is true, if the cleanup payload cannot be built.
+	// List and single-policy reads recheck the account registration and
+	// record verified removals. Failed checks leave the requirement set.
 	OnChainCleanupRequired bool `json:"onChainCleanupRequired"`
 
 	// Runner Lowercase or checksummed hex EOA / contract address.

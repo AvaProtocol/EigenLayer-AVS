@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -231,8 +232,10 @@ func (s *Server) ListWalletPolicies(ctx echo.Context, address generated.Ethereum
 		return mapPolicyError(err)
 	}
 	items := make([]generated.SessionPolicy, 0, len(policies))
+	readCtx, cancel := context.WithTimeout(ctx.Request().Context(), 10*time.Second)
+	defer cancel()
 	for _, p := range policies {
-		items = append(items, s.policyToAPI(p))
+		items = append(items, s.policyReadToAPI(readCtx, p))
 	}
 	return ctx.JSON(http.StatusOK, generated.SessionPolicyList{Items: items})
 }
@@ -252,7 +255,7 @@ func (s *Server) GetWalletPolicy(ctx echo.Context, address generated.EthereumAdd
 	if err != nil {
 		return mapPolicyError(err)
 	}
-	return ctx.JSON(http.StatusOK, s.policyToAPI(policy))
+	return ctx.JSON(http.StatusOK, s.policyReadToAPI(ctx.Request().Context(), policy))
 }
 
 // onChainCleanupAPI maps the engine cleanup payload to the OpenAPI type.
@@ -397,6 +400,17 @@ func erc20SpendCapFromAPI(spendCap generated.Erc20SpendCap) (*model.ERC20SpendCa
 	return &model.ERC20SpendCap{Token: &token, Amount: spendCap.Amount}, nil
 }
 
+// policyReadToAPI reconciles owner cleanup on list/detail requests only. Grant
+// writes and internal engine lookups keep their existing locking and reads.
+func (s *Server) policyReadToAPI(ctx context.Context, p *model.SessionPolicy) generated.SessionPolicy {
+	err := s.engine.RefreshSessionPolicyCleanup(ctx, p)
+	out := s.policyToAPI(p)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		s.logPolicyCleanupUnavailable(out, "verification", err)
+	}
+	return out
+}
+
 // policyToAPI renders a policy for responses. Grant material — install
 // calldata, carrier nonce, owner signature — is secret-grade and never leaves
 // storage. Revoked+applied policies may include onChainCleanup (derived
@@ -464,7 +478,7 @@ func (s *Server) applyPolicyCleanup(out *generated.SessionPolicy, p *model.Sessi
 	}
 	cleanup, err := taskengine.BuildOnChainRevokeCleanup(p)
 	if err != nil {
-		s.logPolicyCleanupUnavailable(*out, err)
+		s.logPolicyCleanupUnavailable(*out, "payload", err)
 		return
 	}
 	out.OnChainCleanup = onChainCleanupAPI(cleanup)
@@ -474,18 +488,19 @@ type policyCleanupWarningKey struct {
 	chainID  generated.ChainId
 	wallet   generated.EthereumAddress
 	policyID generated.Ulid
+	stage    string
 }
 
-func (s *Server) logPolicyCleanupUnavailable(policy generated.SessionPolicy, err error) {
+func (s *Server) logPolicyCleanupUnavailable(policy generated.SessionPolicy, stage string, err error) {
 	if s.logger == nil {
 		return
 	}
-	key := policyCleanupWarningKey{chainID: policy.ChainId, wallet: policy.Runner, policyID: policy.Id}
+	key := policyCleanupWarningKey{chainID: policy.ChainId, wallet: policy.Runner, policyID: policy.Id, stage: stage}
 	if _, logged := s.policyCleanupWarnings.LoadOrStore(key, struct{}{}); logged {
 		return
 	}
-	s.logger.Warn("Policy on-chain cleanup payload unavailable", "policy_id", policy.Id,
-		"chain_id", policy.ChainId, "wallet", policy.Runner, "error", err)
+	s.logger.Warn("Policy on-chain cleanup unavailable", "policy_id", policy.Id,
+		"chain_id", policy.ChainId, "wallet", policy.Runner, "stage", stage, "error", err)
 }
 
 // submitPolicyToAPI renders the submit response: the stored policy plus the
