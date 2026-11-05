@@ -20,6 +20,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestUnknownBudgetAuthorityProblemKeepsCodesAndNeutralDetail(t *testing.T) {
+	detail := "This wallet has an unrecognized validation authority (module 0x123, entity 99). Remove it, then check again."
+	refusal := &taskengine.BudgetPolicyError{Code: taskengine.BudgetAuthorityUnknownCode, Detail: detail}
+	for _, stage := range []string{"prepare", "submit"} {
+		t.Run(stage, func(t *testing.T) {
+			err := fmt.Errorf("internal authority check: %w", refusal)
+			mapper := mapPolicyError
+			input := err
+			if stage == "submit" {
+				mapper = mapBudgetSubmitError
+				input = &taskengine.BudgetSubmitError{SubmissionStarted: false, Cause: err}
+			}
+			e := echo.New()
+			e.HTTPErrorHandler = restmw.ProblemErrorHandler(nil)
+			e.POST("/"+stage, func(echo.Context) error { return mapper(input) })
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/"+stage, nil))
+			require.Equal(t, http.StatusConflict, rec.Code)
+			var body generated.Problem
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.NotNil(t, body.Code)
+			require.NotNil(t, body.Detail)
+			require.Equal(t, taskengine.BudgetAuthorityUnknownCode, *body.Code)
+			require.Equal(t, detail, *body.Detail)
+			require.NotContains(t, *body.Detail, "paused")
+			if stage == "submit" {
+				require.NotNil(t, body.SubmissionStarted)
+				require.False(t, *body.SubmissionStarted)
+			} else {
+				require.Nil(t, body.SubmissionStarted)
+			}
+		})
+	}
+}
+
 func TestBudgetSubmitProblemKeepsServerCauseAndSendBoundary(t *testing.T) {
 	cause := errors.New("private RPC endpoint is behind block 123")
 	for _, started := range []bool{false, true} {

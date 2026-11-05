@@ -52,7 +52,7 @@ func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet c
 			return fmt.Errorf("%w: unknown entity registration: %w", ErrBudgetReadUnavailable, err)
 		}
 		if registered {
-			return &BudgetPolicyError{Code: BudgetAuthorityUnknownCode, Detail: fmt.Sprintf("Remove the unrecognized validation authority %s, entity %d, in your wallet, then check again. Ava's runs remain paused.", candidate.Module.Hex(), candidate.Entity)}
+			return &BudgetPolicyError{Code: BudgetAuthorityUnknownCode, Detail: fmt.Sprintf("This wallet has a validation authority Ava doesn't recognize (module %s, entity %d). Remove it, then check again.", candidate.Module.Hex(), candidate.Entity)}
 		}
 	}
 	return v.VerifyCanonical(ctx)

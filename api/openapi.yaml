@@ -4171,8 +4171,9 @@ paths:
         A quote above wallet_budget_max_fee_wei (default 0.005 ETH) returns
         409 BUDGET_FEE_CEILING_EXCEEDED. Unsupported Permit2, NFT/operator or
         unaudited spending targets return 409 BUDGET_ROUTE_UNSUPPORTED.
-        A live unknown validation authority returns BUDGET_AUTHORITY_UNKNOWN;
-        remove it in the wallet and check again. Ava's session operations are
+        Budget preparation and submission return 409 BUDGET_AUTHORITY_UNKNOWN
+        for a live unrecognized validation authority; remove it in the wallet,
+        then check again. Ava's session operations are
         refused with BUDGET_CHANGING while the wallet/chain hold is open;
         scheduled runs wait without consuming an execution.
         A known, unexpired legacy deferred signature returns 409
