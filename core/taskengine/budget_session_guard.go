@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -202,6 +203,10 @@ func (n *Engine) budgetWorkflowLease(ctx context.Context, task *model.Workflow) 
 		}
 		if e = n.checkBudgetAuthorities(ctx, chain, owner, wallet); e != nil {
 			unlock()
+			var refusal *BudgetPolicyError
+			if errors.As(e, &refusal) && refusal.Code == BudgetAuthorityUnknownCode {
+				return nil, budgetChanging(refusal.Detail + " Ava's runs for this wallet are paused.")
+			}
 			return nil, budgetChanging(e.Error())
 		}
 	}

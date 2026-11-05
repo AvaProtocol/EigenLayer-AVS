@@ -39,6 +39,10 @@ func TestBudgetPrepareWarmsInventoryBeforeOwnerReviewAndSubmitRechecks(t *testin
 	var refusal *BudgetPolicyError
 	require.ErrorAs(t, err, &refusal)
 	require.Equal(t, BudgetAuthorityUnknownCode, refusal.Code)
+	require.NotContains(t, refusal.Detail, "runs")
+	require.NotContains(t, refusal.Detail, "paused")
+	require.Contains(t, refusal.Detail, common.HexToAddress("0x123").Hex())
+	require.Contains(t, refusal.Detail, "entity 99")
 	var submitError *BudgetSubmitError
 	require.ErrorAs(t, err, &submitError)
 	require.False(t, submitError.SubmissionStarted)
@@ -46,6 +50,27 @@ func TestBudgetPrepareWarmsInventoryBeforeOwnerReviewAndSubmitRechecks(t *testin
 	historyAfter, queriesAfter, _ := budgetInventoryReadCounts(rpcFixture)
 	require.Equal(t, history, historyAfter)
 	require.Equal(t, queries, queriesAfter, "submit uses the warmed history but reads registration live")
+}
+
+func TestBudgetPrepareUnknownAuthorityDetailDoesNotClaimRunsArePaused(t *testing.T) {
+	f := newBudgetPrepareFixture(t)
+	inventory, rpcFixture := newBudgetInventoryView(t, 20, 11, 10_000)
+	inventory.n = f.n
+	rpcFixture.wallet = f.in.Wallet
+	rpcFixture.logs = []types.Log{budgetInstallLog(rpcFixture, 11)}
+	rpcFixture.registered = true
+	backend := &budgetChangeFake{}
+	f.n.budgetChangeBackend = &budgetInventoryBackend{budgetChangeBackend: backend, inventory: inventory}
+	review, err := f.n.PrepareSessionPolicyWithContext(context.Background(), f.user, f.in)
+	require.Nil(t, review)
+	var refusal *BudgetPolicyError
+	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, BudgetAuthorityUnknownCode, refusal.Code)
+	require.NotContains(t, refusal.Detail, "runs")
+	require.NotContains(t, refusal.Detail, "paused")
+	require.Contains(t, refusal.Detail, common.HexToAddress("0x123").Hex())
+	require.Contains(t, refusal.Detail, "entity 99")
+	require.Zero(t, backend.sent.Load())
 }
 
 func TestBudgetPrepareAuthorityFailureReturnsNoSignableReview(t *testing.T) {
