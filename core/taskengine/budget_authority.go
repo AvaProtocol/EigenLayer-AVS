@@ -7,9 +7,7 @@ import (
 	"math/big"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -28,7 +26,7 @@ func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet c
 		// verify the snapshot before treating its absence as established.
 		return v.VerifyCanonical(ctx)
 	}
-	from, err := v.budgetAuthorityFromBlock(ctx, wallet, code)
+	candidates, err := v.budgetAuthorityCandidates(ctx, wallet, code)
 	if err != nil {
 		return err
 	}
@@ -36,32 +34,17 @@ func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet c
 	if err != nil {
 		return err
 	}
-	seen := map[[24]byte]bool{}
-	err = v.forEachBudgetLog(ctx, ethereum.FilterQuery{
-		FromBlock: new(big.Int).SetUint64(from), ToBlock: new(big.Int).SetUint64(v.block.Number),
-		Addresses: []common.Address{wallet}, Topics: [][]common.Hash{{budgetValidationInstalled}},
-	}, func(log types.Log) error {
-		if log.Removed || log.Address != wallet || len(log.Topics) != 3 || log.Topics[0] != budgetValidationInstalled || log.Topics[2].Big().BitLen() > 32 {
-			return fmt.Errorf("%w: malformed validation inventory", ErrBudgetReadUnavailable)
+	for key, candidate := range candidates {
+		if known[key] {
+			continue
 		}
-		module := common.BytesToAddress(log.Topics[1].Bytes())
-		entity := uint32(log.Topics[2].Big().Uint64())
-		key := aa.PackModuleEntity(module, entity)
-		if known[key] || seen[key] {
-			return nil
-		}
-		seen[key] = true
-		registered, err := aa.ModuleEntityRegisteredOnChain(ctx, v, wallet, module, entity)
+		registered, err := aa.ModuleEntityRegisteredOnChain(ctx, v, wallet, candidate.Module, candidate.Entity)
 		if err != nil {
 			return fmt.Errorf("%w: unknown entity registration: %w", ErrBudgetReadUnavailable, err)
 		}
 		if registered {
-			return &BudgetPolicyError{Code: BudgetAuthorityUnknownCode, Detail: fmt.Sprintf("Remove the unrecognized validation authority %s, entity %d, in your wallet, then check again. Ava's runs remain paused.", module.Hex(), entity)}
+			return &BudgetPolicyError{Code: BudgetAuthorityUnknownCode, Detail: fmt.Sprintf("Remove the unrecognized validation authority %s, entity %d, in your wallet, then check again. Ava's runs remain paused.", candidate.Module.Hex(), candidate.Entity)}
 		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("account validation inventory: %w", err)
 	}
 	return v.VerifyCanonical(ctx)
 }

@@ -79,6 +79,17 @@ func budgetBlockAt(ctx context.Context, client *ethclient.Client, number *big.In
 	if number != nil {
 		tag = hexutil.EncodeBig(number)
 	}
+	block, err := budgetBlockAtTag(ctx, client, tag)
+	if err != nil {
+		return BudgetBlock{}, err
+	}
+	if number != nil && new(big.Int).SetUint64(block.Number).Cmp(number) != 0 {
+		return BudgetBlock{}, fmt.Errorf("%w: wrong canonical block number", ErrBudgetReadUnavailable)
+	}
+	return block, nil
+}
+
+func budgetBlockAtTag(ctx context.Context, client *ethclient.Client, tag string) (BudgetBlock, error) {
 	var block struct {
 		Number *hexutil.Big `json:"number"`
 		Hash   common.Hash  `json:"hash"`
@@ -88,9 +99,6 @@ func budgetBlockAt(ctx context.Context, client *ethclient.Client, number *big.In
 	}
 	if block.Number == nil || (*big.Int)(block.Number).Sign() < 0 || (*big.Int)(block.Number).BitLen() > 64 || block.Hash == (common.Hash{}) {
 		return BudgetBlock{}, fmt.Errorf("%w: invalid canonical block", ErrBudgetReadUnavailable)
-	}
-	if number != nil && (*big.Int)(block.Number).Cmp(number) != 0 {
-		return BudgetBlock{}, fmt.Errorf("%w: wrong canonical block number", ErrBudgetReadUnavailable)
 	}
 	return BudgetBlock{Number: (*big.Int)(block.Number).Uint64(), Hash: block.Hash}, nil
 }

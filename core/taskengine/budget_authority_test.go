@@ -39,6 +39,9 @@ type budgetInventoryRPC struct {
 	registrationError bool
 	logErrorFrom      *uint64
 	canonicalHash     common.Hash
+	finalized         *uint64
+	blockReadError    *uint64
+	blockHashes       map[uint64]common.Hash
 }
 
 func (f *budgetInventoryRPC) GetCode(_ context.Context, address common.Address, at rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
@@ -49,7 +52,8 @@ func (f *budgetInventoryRPC) GetCode(_ context.Context, address common.Address, 
 		return nil, errors.New("wrong inventory wallet")
 	}
 	if hash, ok := at.Hash(); ok {
-		if f.pinnedCodeError || hash != f.block.Hash {
+		number := new(big.Int).Sub(hash.Big(), big.NewInt(1000))
+		if f.pinnedCodeError || hash != f.block.Hash && (!number.IsUint64() || number.Uint64() > f.block.Number) {
 			return nil, errors.New("pinned code unavailable")
 		}
 		return f.code, nil
@@ -67,14 +71,33 @@ func (f *budgetInventoryRPC) GetCode(_ context.Context, address common.Address, 
 	return f.code, nil
 }
 
-func (f *budgetInventoryRPC) GetBlockByNumber(_ context.Context, _ rpc.BlockNumber, _ bool) map[string]interface{} {
+func budgetInventoryBlockHash(number uint64) common.Hash {
+	return common.BigToHash(new(big.Int).Add(new(big.Int).SetUint64(number), big.NewInt(1000)))
+}
+
+func (f *budgetInventoryRPC) GetBlockByNumber(_ context.Context, requested rpc.BlockNumber, _ bool) (map[string]interface{}, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	hash := f.block.Hash
-	if f.canonicalHash != (common.Hash{}) {
-		hash = f.canonicalHash
+	number := f.block.Number
+	if requested >= 0 {
+		number = uint64(requested)
+	} else if requested == rpc.FinalizedBlockNumber && f.finalized != nil {
+		number = *f.finalized
 	}
-	return map[string]interface{}{"number": hexutil.EncodeUint64(f.block.Number), "hash": hash}
+	if f.blockReadError != nil && number == *f.blockReadError {
+		return nil, errors.New("canonical checkpoint unavailable")
+	}
+	hash := budgetInventoryBlockHash(number)
+	if override, ok := f.blockHashes[number]; ok {
+		hash = override
+	}
+	if number == f.block.Number {
+		hash = f.block.Hash
+		if f.canonicalHash != (common.Hash{}) {
+			hash = f.canonicalHash
+		}
+	}
+	return map[string]interface{}{"number": hexutil.EncodeUint64(number), "hash": hash}, nil
 }
 
 func (f *budgetInventoryRPC) GetLogs(_ context.Context, query struct {
@@ -135,7 +158,7 @@ func (f *budgetInventoryRPC) Call(_ context.Context, msg struct {
 
 func newBudgetInventoryView(t *testing.T, head, deployed, blockRange uint64) (*pinnedBudgetView, *budgetInventoryRPC) {
 	t.Helper()
-	f := &budgetInventoryRPC{block: BudgetBlock{Number: head, Hash: common.HexToHash("0x123456")}, wallet: common.HexToAddress("0xa1"), deployed: deployed, code: hexutil.Bytes{0x60, 0x00}, logLimit: blockRange}
+	f := &budgetInventoryRPC{block: BudgetBlock{Number: head, Hash: budgetInventoryBlockHash(head)}, wallet: common.HexToAddress("0xa1"), deployed: deployed, code: hexutil.Bytes{0x60, 0x00}, logLimit: blockRange}
 	server := rpc.NewServer()
 	require.NoError(t, server.RegisterName("eth", f))
 	httpServer := httptest.NewServer(server)
@@ -179,8 +202,9 @@ func TestBudgetAuthoritiesFindsRegisteredAuthorityInLaterPage(t *testing.T) {
 	require.Equal(t, BudgetAuthorityUnknownCode, refusal.Code)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	require.Equal(t, [][2]uint64{{12_071_715, 12_071_717}, {12_071_718, 12_071_720}, {12_071_721, 12_071_723}}, f.queries)
+	require.Equal(t, [][2]uint64{{12_071_715, 12_071_717}, {12_071_718, 12_071_720}, {12_071_721, 12_071_723}, {12_071_724, 12_071_724}}, f.queries)
 	require.Equal(t, 1, f.registrationCalls)
+	require.NotContains(t, err.Error(), "account validation inventory:")
 }
 
 func TestBudgetAuthoritiesScansEveryPageIncludingConstructor(t *testing.T) {
@@ -204,7 +228,7 @@ func TestBudgetAuthoritiesDelegationDoesNotEraseEarlierInventory(t *testing.T) {
 	require.Equal(t, BudgetAuthorityUnknownCode, refusal.Code)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	require.Equal(t, [][2]uint64{{0, 2}}, f.queries)
+	require.Equal(t, [][2]uint64{{0, 2}, {3, 5}, {6, 8}, {9, 10}}, f.queries)
 	require.Len(t, f.codeReads, 1, "delegation history must not be binary-searched as if clearing code cleared storage")
 }
 

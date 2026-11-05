@@ -21,15 +21,31 @@ session runs, so the problem was not limited to first installation.
   blocks; override `smart_wallet.budget_log_block_range` for a single-chain
   gateway or `chains[].smart_wallet.budget_log_block_range` per gateway chain.
   Zero uses the default. Negative YAML values are rejected.
+- Persist a hash-anchored deployment boundary and a finalized inventory cursor
+  per chain and wallet. Every complete finalized page stores its cursor and all
+  candidates together, so a timeout or restart resumes from the last complete
+  page instead of rescanning the wallet's lifetime.
+- On subsequent checks, verify the cached checkpoint's canonical hash, scan only
+  new finalized blocks and re-read the unfinalized tail through the pinned head.
+  A reorged or malformed checkpoint is rebuilt. An older pinned view cannot
+  overwrite a newer cursor. Concurrent checks share the backfill work.
+- Cache candidates, including ones currently known to Ava or unregistered;
+  never cache the authority decision. Every check reloads the known policies
+  and reads unknown candidates' registration at the current pinned block. A
+  later reinstallation or policy change cannot hide behind a cache hit.
 - Use the same bounded reads when reconciling owner-nonce consumption through
   EntryPoint events. A hold can outlive the provider's maximum log window.
 - Continue checking each unknown candidate's current registration at the pinned
   block. Duplicate events do not repeat registration reads. Missing pages,
   unavailable state, cancellation and reorgs remain failures; they never release
   a hold or authorize a send from a partial inventory.
+- Preserve the authored unknown-authority refusal without adding an internal
+  inventory prefix to the run-path message.
 
-No API, SDK, stored-record or signing changes are required. This change does not
-enable budget flags, alter prepared bytes or restart a gateway.
+The derived inventory uses additive `budgetauthority:v1:{chain}:{wallet}`
+records. Existing permission, hold and preparation records are unchanged; older
+versions ignore this cache. No API, SDK or signing changes are required. This
+change does not enable budget flags, alter prepared bytes or restart a gateway.
 
 ## Read-only provider checks
 
@@ -41,10 +57,19 @@ endpoints support the historical-code probe. The reported salt-1 smart wallet
 The Railway project currently has only its production environment; these
 checks do not claim a separate hosted staging endpoint was tested.
 
-Ordinary-account boundary discovery needs historical `eth_getCode`; an RPC
+Production Ethereum and Base were also checked with complete historical-code
+binary searches over the deployed MA v2 factory. Ethereum served all 25 reads
+and located block 21,426,430; Base served all 26 and located block 23,849,125.
+Both endpoints returned code at the discovered block and no code immediately
+before it, and both served the `finalized` block tag used by the cache. Local
+and production Sepolia were separately verified to serve that tag too.
+
+A cold ordinary-account lookup still needs historical `eth_getCode`; an RPC
 without that state is refused rather than guessing a lower bound. Delegated
-EOAs retain a complete paged scan and can require more requests. No cache or
-persisted scan cursor is introduced in this fix.
+EOAs start their first inventory at genesis. Initial backfills can be expensive,
+but completed finalized pages survive failures and restarts. Warm checks do no
+deployment search and query only blocks since the saved cursor plus the
+unfinalized tail; cost scales with new blocks and candidates, not wallet age.
 
 ## Regression coverage
 
@@ -60,15 +85,27 @@ persisted scan cursor is introduced in this fix.
   account; an inventory failure reports `submissionStarted: false`, creates no
   hold and never calls that relay.
 - Owner-operation reconciliation finds an inclusion in a later page.
+- Warm checks and a new Engine reuse the saved prefix without historical code
+  reads or lifetime log queries, including for delegated EOAs.
+- An interrupted backfill resumes at the first missing page and retains earlier
+  candidates. Cache hits still detect a newly live authority or changed policy.
+- An unfinalized reorg is detected by re-reading the tail; a changed finalized
+  checkpoint forces a full rebuild. Malformed/cross-wallet/cross-chain records,
+  checkpoint read failures and storage failures never authorize a send.
+- Older snapshots cannot regress the stored cursor; concurrent checks backfill
+  once and independently recheck current registration.
 
 The original implementation fails the undeployed-wallet, later-page-authority
 and later-page-owner-operation regression tests against the capped RPC fixture.
-The fixed budget/config tests pass with the race detector: 113 top-level tests,
-229 including subtests. The full affected config, task-engine (including
-subpackages) and REST packages also pass with the race detector. The REST
+The fixed inventory/config tests pass with the race detector. The REST
 lifecycle fixture now models the wallet's creation in block 1 and permits only
 the wallet-code boundary lookup at genesis; owner identity, nonce and fee reads
-retain their final-snapshot assertions. Vet, lint and formatting checks pass.
+retain their final-snapshot assertions.
+
+The complete affected config, task-engine (including subpackages), and REST
+suites pass with the race detector: 1,323 top-level tests, 2,805 including
+subtests. Vet, lint, formatting, diff checks and the storage compatibility
+check against `origin/main` pass.
 
 Live probes are read-only; no budget was signed, broadcast or installed by this
 verification. The shared local gateway was not restarted.

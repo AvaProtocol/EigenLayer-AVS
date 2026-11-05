@@ -14,6 +14,17 @@ import (
 // configured provider limit. A missing page is an error, never an empty
 // inventory or evidence that an owner operation did not reach the chain.
 func (v *pinnedBudgetView) forEachBudgetLog(ctx context.Context, query ethereum.FilterQuery, visit func(types.Log) error) error {
+	return v.forEachBudgetLogPage(ctx, query, func(logs []types.Log, _ uint64) error {
+		for _, log := range logs {
+			if err := visit(log); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (v *pinnedBudgetView) forEachBudgetLogPage(ctx context.Context, query ethereum.FilterQuery, visit func([]types.Log, uint64) error) error {
 	if query.FromBlock == nil || query.ToBlock == nil || !query.FromBlock.IsUint64() || !query.ToBlock.IsUint64() || query.FromBlock.Cmp(query.ToBlock) > 0 {
 		return fmt.Errorf("%w: invalid budget log range", ErrBudgetReadUnavailable)
 	}
@@ -32,10 +43,8 @@ func (v *pinnedBudgetView) forEachBudgetLog(ctx context.Context, query ethereum.
 		if err != nil {
 			return fmt.Errorf("%w: budget logs at blocks %d-%d: %w", ErrBudgetReadUnavailable, from, end, err)
 		}
-		for _, log := range logs {
-			if err := visit(log); err != nil {
-				return err
-			}
+		if err := visit(logs, end); err != nil {
+			return err
 		}
 		if end == to {
 			return nil
