@@ -673,6 +673,10 @@ func mapPolicyError(err error) error {
 		return badRequest(taskengine.SessionPolicyRecipientNotAcknowledgedCode, nativeRecipientNotAcknowledgedTitle, err.Error())
 	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode):
 		return badRequest(taskengine.SessionPolicyRecipientNotEOACode, "Native recipient is not an EOA", err.Error())
+	case errors.Is(err, taskengine.ErrPolicyRevokeCleanupUnavailable):
+		return &restmw.HTTPError{Status: http.StatusInternalServerError, Code: "POLICIES_REVOKED_CLEANUP_UNAVAILABLE",
+			Title:  "Permission revoked; on-chain cleanup unavailable",
+			Detail: "The revoke was applied in Ava. The on-chain permission may still be active, and the gateway could not prepare its cleanup transaction. Check this policy's status or contact support.", Cause: err}
 	case errors.As(err, &validation):
 		return badRequest("POLICIES_REJECTED", "Policy request rejected", validation.Error())
 	default:

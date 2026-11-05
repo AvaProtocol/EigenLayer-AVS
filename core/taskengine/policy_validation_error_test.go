@@ -98,3 +98,26 @@ func TestBudgetHoldStorageFailureIsPrivateAndPreservesCause(t *testing.T) {
 	_, err = budgetHoldRows(nil, testPolicyChain, common.Address{}, common.Address{})
 	require.ErrorIs(t, err, ErrBudgetReadUnavailable)
 }
+
+func TestPolicyRevokeReportsAppliedStateWhenCleanupCannotBeBuilt(t *testing.T) {
+	n, db, ownerKey, owner, wallet := newPolicyTestEngine(t)
+	user := &model.User{Address: owner}
+	in := SessionPolicyInput{Wallet: wallet, ChainID: testPolicyChain, AgentLabel: "Test", Permissions: testPermissions()}
+	prepared, err := n.PrepareSessionPolicy(user, in)
+	require.NoError(t, err)
+	policy, _, err := n.SubmitSessionPolicy(user, in, prepared.Policy.ID, prepared.Policy.EntityID, prepared.Policy.Grant.Deadline, signDigest(t, ownerKey, prepared.Digest))
+	require.NoError(t, err)
+	policy.Grant.AppliedAt = 1
+	policy.Grant.InstallCall = []byte{1} // Stored corruption: the owner cleanup cannot be reconstructed.
+	require.NoError(t, StoreSessionPolicy(db, policy))
+	deleted, cleanupRequired, cleanup, err := n.RevokeSessionPolicyByID(user, testPolicyChain, wallet, policy.ID)
+	require.ErrorIs(t, err, ErrPolicyRevokeCleanupUnavailable)
+	require.False(t, deleted)
+	require.True(t, cleanupRequired)
+	require.Nil(t, cleanup)
+	stored, readErr := n.GetSessionPolicyByID(user, testPolicyChain, wallet, policy.ID)
+	require.NoError(t, readErr)
+	require.Equal(t, model.SessionPolicyRevoked, stored.Status)
+	require.False(t, stored.Usable())
+	require.True(t, stored.Grant.NeedsOnChainCleanup())
+}

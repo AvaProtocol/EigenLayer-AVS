@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo/v4"
@@ -145,4 +147,33 @@ func TestPolicyValidationKeepsAuthoredReasonWithoutOuterDiagnostics(t *testing.T
 			require.Equal(t, text, problem.Detail)
 		}
 	}
+}
+
+func TestPolicyRevokeCleanupFailureReportsPartialSuccessWithoutInternalText(t *testing.T) {
+	cause := errors.New("private uninstall ABI error")
+	err := fmt.Errorf("%w: %w", taskengine.ErrPolicyRevokeCleanupUnavailable, cause)
+	var p *restmw.HTTPError
+	require.ErrorAs(t, mapPolicyError(err), &p)
+	require.Equal(t, http.StatusInternalServerError, p.Status)
+	require.Equal(t, "POLICIES_REVOKED_CLEANUP_UNAVAILABLE", p.Code)
+	require.ErrorIs(t, p, cause)
+	e := echo.New()
+	e.HTTPErrorHandler = restmw.ProblemErrorHandler(nil)
+	e.DELETE("/policy", func(echo.Context) error { return p })
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/policy", nil))
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Contains(t, rec.Body.String(), "The revoke was applied in Ava")
+	require.Contains(t, rec.Body.String(), "on-chain permission may still be active")
+	require.NotContains(t, rec.Body.String(), cause.Error())
+}
+
+func TestInvalidPolicyAdditionKeepsItsTypedClientRefusal(t *testing.T) {
+	token := common.HexToAddress("0x1234")
+	_, _, err := taskengine.MergeSkillGrantWithRemainder(nil, nil, taskengine.PolicyAddition{SpendCaps: []model.ERC20SpendCap{{Token: &token, Amount: "not an amount"}}}, nil, 11155111, time.Now(), time.Hour)
+	require.ErrorIs(t, err, taskengine.ErrSessionPolicyUnsized)
+	var p *restmw.HTTPError
+	require.ErrorAs(t, mapPolicyError(err), &p)
+	require.Equal(t, http.StatusBadRequest, p.Status)
+	require.Equal(t, "POLICIES_BAD_PERMISSIONS", p.Code)
 }

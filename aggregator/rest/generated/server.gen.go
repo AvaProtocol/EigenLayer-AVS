@@ -2721,6 +2721,15 @@ func (response RevokeWalletPolicy404ApplicationProblemPlusJSONResponse) VisitRev
 	return json.NewEncoder(w).Encode(response)
 }
 
+type RevokeWalletPolicy500ApplicationProblemPlusJSONResponse Problem
+
+func (response RevokeWalletPolicy500ApplicationProblemPlusJSONResponse) VisitRevokeWalletPolicyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetWalletPolicyRequestObject struct {
 	Address  EthereumAddress `json:"address"`
 	PolicyId Ulid            `json:"policyId"`

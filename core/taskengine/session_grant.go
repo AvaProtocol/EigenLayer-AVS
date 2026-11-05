@@ -368,7 +368,7 @@ func SubmitSessionGrant(db storage.Storage, prepared *PreparedSessionGrant, owne
 	}
 	if taken {
 		return nil, fmt.Errorf(
-			"%w: entity %d was taken while this grant was being signed; prepare it again",
+			"%w (entity %d); prepare the grant again",
 			ErrSessionEntityTaken, policy.EntityID)
 	}
 

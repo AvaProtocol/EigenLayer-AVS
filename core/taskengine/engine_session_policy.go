@@ -51,6 +51,8 @@ var (
 	// submit DID take effect — the client must not retry it (the entity is
 	// spent), only clear the named leftovers.
 	ErrSessionPolicySupersedeFailed = errors.New("the grant was stored but replacing the previous grant failed")
+	// The stored revoke succeeded; only building owner cleanup failed.
+	ErrPolicyRevokeCleanupUnavailable = errors.New("grant revoked off-chain but on-chain cleanup payload could not be built")
 )
 
 // PolicyValidationError marks authored client-input errors as safe for REST.
@@ -791,7 +793,7 @@ func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet
 	if cleanupRequired {
 		built, buildErr := BuildOnChainRevokeCleanup(policy)
 		if buildErr != nil {
-			return false, true, nil, fmt.Errorf("grant revoked off-chain but on-chain cleanup payload could not be built: %w", buildErr)
+			return false, true, nil, fmt.Errorf("%w: %w", ErrPolicyRevokeCleanupUnavailable, buildErr)
 		}
 		return false, true, built, nil
 	}

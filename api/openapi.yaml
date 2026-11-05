@@ -4525,6 +4525,10 @@ paths:
           (uninstallValidation call for the owner wallet: plain tx to the
           runner, or owner-fallback UserOp). Once teardown is verified,
           GET no longer returns cleanup for that policy.
+        - `500 POLICIES_REVOKED_CLEANUP_UNAVAILABLE` — the revoke was applied
+          in Ava, but the gateway could not construct the owner's on-chain
+          cleanup transaction. The on-chain permission may remain active.
+          The response does not mean the off-chain revoke failed.
       operationId: revokeWalletPolicy
       responses:
         '200':
@@ -4535,6 +4539,11 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '500':
+          description: POLICIES_REVOKED_CLEANUP_UNAVAILABLE — revoke applied in Ava; on-chain cleanup could not be prepared.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   # =====================================================================
   # Secrets

@@ -79,6 +79,22 @@ Studio can recognize a wallet such as MetaMask from `ownerDelegate` and link to
 its own account-switching instructions. Gateway operations still never install
 another delegation and still refuse every unsupported owner implementation.
 
+## Revoke applied but cleanup unavailable
+
+If the stored revoke succeeds but the owner cleanup payload cannot be built,
+REST returns **500 POLICIES_REVOKED_CLEANUP_UNAVAILABLE**. The authored detail
+states that the revoke was applied in Ava and the on-chain permission may still
+be active. The underlying build failure stays in server diagnostics. Regression
+tests assert the persisted revoked state and the HTTP response separately.
+
+## Accepted follow-up
+
+The older budget prepare path still wraps the chain-enabled
+`draft.Permissions.Validate()` result as an input error. Separating its
+structural validation from native-recipient RPC failures is a follow-up; this
+pre-existing path is unchanged here. It is distinct from the legacy policy
+validation boundary corrected above.
+
 ## Validation and deployment
 
 Regression tests exercise pre-send RPC failures, both marker and post-send
