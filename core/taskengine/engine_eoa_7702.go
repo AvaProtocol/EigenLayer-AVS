@@ -8,6 +8,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -53,27 +54,34 @@ func StoreEOA7702Wallet(db storage.Storage, chainID int64, owner, delegate commo
 }
 
 // assertEOA7702OnChain is K13 against the chain's pin. Fail-closed with
-// ErrEOADelegationMissing when the pin is missing, the reader is missing,
-// or the code does not match.
+// ErrEOADelegationMissing only for a confirmed incompatible designation.
+// Gateway configuration/read failures never become wallet setup advice.
 func (n *Engine) assertEOA7702OnChain(ctx context.Context, chainID int64, eoa common.Address) error {
 	sw := n.ResolveSmartWalletConfig(chainID)
 	if sw == nil || !sw.HasSMA7702Pin() {
-		return fmt.Errorf("%w: SMA-7702 pin is not configured for chain_id=%d", ErrEOADelegationMissing, chainID)
+		return fmt.Errorf("%w: SMA-7702 pin is not configured for chain_id=%d", config.ErrSMA7702Unavailable, chainID)
+	}
+	if err := sw.ValidateSMA7702(); err != nil {
+		return err
 	}
 	reader := GetChainStateReaderForChain(uint64(chainID))
 	if reader == nil {
-		return fmt.Errorf("%w: no chain reader for chain_id=%d", ErrEOADelegationMissing, chainID)
+		return fmt.Errorf("%w: no chain reader for chain_id=%d", config.ErrSMA7702Unavailable, chainID)
 	}
 	eoaCode, err := reader.CodeAt(ctx, eoa)
 	if err != nil {
-		return fmt.Errorf("%w: reading code(%s): %v", ErrEOADelegationMissing, eoa.Hex(), err)
+		return fmt.Errorf("%w: reading code(%s): %w", config.ErrSMA7702Unavailable, eoa.Hex(), err)
+	}
+	if !config.IsSMA7702Designation(eoaCode, sw.SMA7702Delegate) {
+		delegate, _ := config.EIP7702DesignationDelegate(eoaCode)
+		return &preset.OwnerDelegationError{Delegate: delegate, Cause: ErrEOADelegationMissing}
 	}
 	implCode, err := reader.CodeAt(ctx, sw.SMA7702Delegate)
 	if err != nil {
-		return fmt.Errorf("%w: reading SMA-7702 impl: %v", ErrEOADelegationMissing, err)
+		return fmt.Errorf("%w: reading SMA-7702 impl: %w", config.ErrSMA7702Unavailable, err)
 	}
 	if err := sw.AssertSMA7702Designation(eoaCode, implCode); err != nil {
-		return fmt.Errorf("%w: %v", ErrEOADelegationMissing, err)
+		return err
 	}
 	return nil
 }

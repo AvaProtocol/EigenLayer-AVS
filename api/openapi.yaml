@@ -292,8 +292,9 @@ components:
             Budget signature-only submit send boundary, when known. False
             proves this request was refused before attempting the durable
             first-send marker, so it did not relay an operation. True includes
-            uncertain marker/storage failures and repeat submits; check the
+            uncertain marker/storage failures and repeats of marked attempts; check the
             existing preparation and never infer that nothing was sent.
+            A repeated submit of a settled unsent preparation remains false.
             Absent means unknown, including older gateways. A lost response
             also means unknown. Never infer this from HTTP status or prose.
         ownerDelegate:
@@ -301,7 +302,12 @@ components:
           description: |
             Observed EIP-7702 delegate of the owner, only on
             EOA_DELEGATION_MISSING from owner execution or budget preparation
-            and submission. Absent for non-designation code or unknown state.
+            and submission, and policy checks of an eoa_7702 runner. Absent
+            for non-designation code or unknown state. Gateway pin, reader or
+            implementation-hash failures are OWNER_ACCOUNT_UNAVAILABLE (503),
+            never owner delegation advice. A confirmed unsupported account
+            implementation, fallback owner or EntryPoint is
+            OWNER_ACCOUNT_UNSUPPORTED (409); preparing again does not fix it.
         legacyGrantDeadline:
           type: integer
           format: int64
@@ -3398,6 +3404,8 @@ paths:
         '409':
           description: |
             EOA_DELEGATION_MISSING — owner account code is not supported.
+            OWNER_ACCOUNT_UNSUPPORTED — the account implementation, fallback
+            owner or EntryPoint is not supported; preparing again cannot fix it.
             ownerDelegate names the observed EIP-7702 delegate, when present.
           content:
             application/problem+json:
@@ -3460,6 +3468,8 @@ paths:
         '409':
           description: |
             EOA_DELEGATION_MISSING — owner account code is not supported.
+            OWNER_ACCOUNT_UNSUPPORTED — the account implementation, fallback
+            owner or EntryPoint is not supported; preparing again cannot fix it.
             ownerDelegate names the observed EIP-7702 delegate, when present.
           content:
             application/problem+json:
@@ -4048,7 +4058,7 @@ paths:
         outstanding signature deadline in unix milliseconds.
         Errors include submissionStarted when the send boundary is known.
         False means this completed request never attempted its first-send marker
-        or relay; the client may let the owner try signing again. True or an
+        or relay; the client may prepare a fresh review. True or an
         absent field requires reading the same preparation, with no second
         operation. A lost reply always requires reconciliation. A 503 alone
         does not distinguish pre-send checks from post-send storage failures.
@@ -4072,7 +4082,7 @@ paths:
               schema: { $ref: '#/components/schemas/PreparedPolicy' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503':
-          description: Required chain or storage evidence is unavailable; no unsafe hold release.
+          description: Required chain or storage evidence is unavailable; no unsafe hold release. OWNER_ACCOUNT_UNAVAILABLE identifies a gateway account-verification fault, not owner setup advice.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -4085,6 +4095,9 @@ paths:
             the operation. BUDGET_LEGACY_GRANT_PENDING includes
             legacyGrantDeadline in unix milliseconds. EOA_DELEGATION_MISSING
             includes ownerDelegate when the owner has an EIP-7702 designation.
+            OWNER_ACCOUNT_UNSUPPORTED identifies a confirmed unsupported
+            implementation, fallback owner or EntryPoint; preparing again
+            cannot fix it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -4267,7 +4280,7 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503':
-          description: A required balance, allowance or complete discovery read is unavailable.
+          description: A required balance, allowance or complete discovery read is unavailable. OWNER_ACCOUNT_UNAVAILABLE identifies a gateway pin, reader or RPC-chain configuration fault; it does not ask the owner to change account setup.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

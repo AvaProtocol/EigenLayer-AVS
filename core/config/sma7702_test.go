@@ -217,11 +217,17 @@ func TestAssertSMA7702Designation(t *testing.T) {
 		require.ErrorIs(t, c.AssertSMA7702Designation(designation(other), impl), ErrEOADelegationMissing)
 	})
 	t.Run("wrong impl hash fails", func(t *testing.T) {
-		require.ErrorContains(t, c.AssertSMA7702Designation(designation(c.SMA7702Delegate), []byte("other")), "impl hash")
+		err := c.AssertSMA7702Designation(designation(c.SMA7702Delegate), []byte("other"))
+		require.ErrorContains(t, err, "impl hash")
+		require.ErrorIs(t, err, ErrSMA7702Unavailable)
+		require.NotErrorIs(t, err, ErrEOADelegationMissing)
 	})
 	t.Run("missing pin fails closed", func(t *testing.T) {
 		empty := &SmartWalletConfig{ChainID: 1}
-		require.ErrorContains(t, empty.AssertSMA7702Designation(designation(SMA7702Delegate()), impl), "not configured")
+		err := empty.AssertSMA7702Designation(designation(SMA7702Delegate()), impl)
+		require.ErrorContains(t, err, "not configured")
+		require.ErrorIs(t, err, ErrSMA7702Unavailable)
+		require.NotErrorIs(t, err, ErrEOADelegationMissing)
 	})
 }
 

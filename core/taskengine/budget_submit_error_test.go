@@ -10,11 +10,13 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,14 +71,15 @@ func TestBudgetPreparationOwnerRPCFailureIsReadUnavailable(t *testing.T) {
 	require.True(t, sawChainID.Load(), "owner inspector never read the RPC")
 }
 
-func TestBudgetPreparationOwnerConfigurationFailureIsReadUnavailable(t *testing.T) {
+func TestBudgetPreparationOwnerConfigurationFailureKeepsItsClassification(t *testing.T) {
 	f := newBudgetPrepareFixture(t)
-	cause := errors.New("SMA-7702 runtime pin is not configured")
+	cause := fmt.Errorf("%w: SMA-7702 runtime pin is not configured", config.ErrSMA7702Unavailable)
 	f.n.budgetOwnerPrepareOverride = func(context.Context, *config.SmartWalletConfig, common.Address, common.Address, *big.Int, preset.OwnerBatch, logger.Logger) (*preset.PreparedOwnerUserOp, error) {
 		return nil, cause
 	}
 	_, err := f.n.PrepareSessionPolicyWithContext(context.Background(), f.user, f.in)
-	require.ErrorIs(t, err, ErrBudgetReadUnavailable)
+	require.ErrorIs(t, err, config.ErrSMA7702Unavailable)
+	require.NotErrorIs(t, err, ErrBudgetReadUnavailable)
 	require.ErrorIs(t, err, cause)
 }
 
@@ -149,4 +152,77 @@ func TestBudgetSubmitPreservesOwnerDelegateRefusal(t *testing.T) {
 	require.ErrorAs(t, err, &refusal)
 	require.Equal(t, delegate, refusal.Delegate)
 	require.Zero(t, backend.sent.Load())
+}
+
+func TestBudgetOwnerRefusalClassificationSurvivesPrepareAndSubmit(t *testing.T) {
+	for _, cause := range []error{preset.ErrOwnerAccountUnsupported, preset.ErrOwnerConfiguration, config.ErrEOA7702ExecuteDisabled} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			f := newBudgetPrepareFixture(t)
+			f.n.budgetOwnerPrepareOverride = func(context.Context, *config.SmartWalletConfig, common.Address, common.Address, *big.Int, preset.OwnerBatch, logger.Logger) (*preset.PreparedOwnerUserOp, error) {
+				return nil, cause
+			}
+			_, err := f.n.PrepareSessionPolicyWithContext(context.Background(), f.user, f.in)
+			require.ErrorIs(t, err, cause)
+			require.NotErrorIs(t, err, ErrBudgetReadUnavailable)
+			if cause != config.ErrEOA7702ExecuteDisabled {
+				require.ErrorIs(t, ownerPreconditionError(cause, "owner preparation: %v"), cause)
+			}
+			g, p, backend, sig := newBudgetChangeTest(t)
+			backend.validationError = cause
+			_, err = g.n.SubmitBudgetPolicyPreparation(context.Background(), g.user, g.in.Wallet, testPolicyChain, p.ID, sig)
+			require.ErrorIs(t, err, cause)
+			require.NotErrorIs(t, err, ErrBudgetReadUnavailable)
+			var failure *BudgetSubmitError
+			require.ErrorAs(t, err, &failure)
+			require.False(t, failure.SubmissionStarted)
+			require.Zero(t, backend.sent.Load())
+		})
+	}
+}
+
+func TestBudgetRepeatUnsentPreparationDoesNotClaimSendingStarted(t *testing.T) {
+	f, p, backend, signature := newBudgetChangeTest(t)
+	backend.validationError = preset.ErrOwnerStateChanged
+	_, err := f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, f.in.Wallet, testPolicyChain, p.ID, signature)
+	require.Error(t, err)
+	stored, err := f.n.loadBudgetChange(f.user, f.in.Wallet, testPolicyChain, p.ID)
+	require.NoError(t, err)
+	require.Equal(t, ownerSubmissionUnsent, stored.State)
+	_, err = f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, f.in.Wallet, testPolicyChain, p.ID, make([]byte, 65))
+	var failure *BudgetSubmitError
+	require.ErrorAs(t, err, &failure)
+	require.False(t, failure.SubmissionStarted)
+	result, err := f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, f.in.Wallet, testPolicyChain, p.ID, signature)
+	require.NoError(t, err)
+	require.Equal(t, ownerSubmissionUnsent, result.State)
+	require.Zero(t, backend.sent.Load())
+}
+
+func TestBudgetPreparationRetirementReadPreservesUnderlyingCause(t *testing.T) {
+	f := newBudgetPrepareFixture(t)
+	policy := storeOutstandingLegacyBudgetGrant(t, f, uint64(time.Now().Add(-time.Minute).Unix()))
+	policy.Grant.AppliedAt = 1
+	require.NoError(t, StoreSessionPolicy(f.n.db, policy))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32000, "message": "private retirement RPC failure"}}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	f.n.config.SmartWallet.EthRpcUrl = server.URL
+	_, err := f.n.PrepareSessionPolicyWithContext(context.Background(), f.user, f.in)
+	require.ErrorIs(t, err, ErrBudgetReadUnavailable)
+	require.ErrorContains(t, err, "retirement registration is unavailable")
+	require.ErrorContains(t, err, "private retirement RPC failure")
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, -32000, rpcErr.ErrorCode())
 }

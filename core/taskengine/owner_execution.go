@@ -458,9 +458,10 @@ func ownerPreconditionError(err error, format string) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, config.ErrEOADelegationMissing) {
-		// Keep the typed observed delegate through to REST, not a prose-only
-		// gRPC precondition that loses machine-readable refusal metadata.
+	if errors.Is(err, config.ErrEOADelegationMissing) || errors.Is(err, config.ErrSMA7702Unavailable) ||
+		errors.Is(err, preset.ErrOwnerAccountUnsupported) || errors.Is(err, preset.ErrOwnerConfiguration) {
+		// Preserve typed account refusals and gateway faults through REST,
+		// rather than flattening them into a prose-only gRPC precondition.
 		return err
 	}
 	if errors.Is(err, config.ErrEOA7702ExecuteDisabled) {

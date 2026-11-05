@@ -81,5 +81,54 @@ func TestOwnerDelegationProblemAcrossOwnerAndBudgetRoutes(t *testing.T) {
 		require.Equal(t, "EOA_DELEGATION_MISSING", problem.Code)
 		require.Equal(t, delegate.Hex(), problem.OwnerDelegate)
 		require.NotContains(t, problem.Detail, "ef0100")
+		require.NotContains(t, problem.Detail, "back to a regular account")
+	}
+}
+
+func TestOwnerAccountProblemsKeepConfigurationAndPermanentRefusalsDistinct(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cause  error
+		status int
+		code   string
+	}{
+		{"execute disabled", config.ErrEOA7702ExecuteDisabled, http.StatusForbidden, "OWNER_EXECUTION_DISABLED"},
+		{"missing pin", config.ErrSMA7702Unavailable, http.StatusServiceUnavailable, "OWNER_ACCOUNT_UNAVAILABLE"},
+		{"wrong RPC chain", preset.ErrOwnerConfiguration, http.StatusServiceUnavailable, "OWNER_ACCOUNT_UNAVAILABLE"},
+		{"unsupported implementation or EntryPoint", preset.ErrOwnerAccountUnsupported, http.StatusConflict, "OWNER_ACCOUNT_UNSUPPORTED"},
+		{"undelegated EOA", config.ErrEOADelegationMissing, http.StatusConflict, "EOA_DELEGATION_MISSING"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cause := fmt.Errorf("%w: private account/RPC detail", tc.cause)
+			for _, mapper := range []func(error) error{mapPolicyError, mapBudgetSubmitError, mapOwnerExecutionError, mapDelegationError} {
+				var p *restmw.HTTPError
+				require.ErrorAs(t, mapper(cause), &p)
+				require.Equal(t, tc.status, p.Status)
+				require.Equal(t, tc.code, p.Code)
+				require.ErrorIs(t, p, cause)
+				require.NotContains(t, p.Detail, "Try again")
+				require.NotContains(t, p.Detail, "back to a regular account")
+				require.Empty(t, p.OwnerDelegate)
+				e := echo.New()
+				e.HTTPErrorHandler = restmw.ProblemErrorHandler(nil)
+				e.POST("/prepare", func(echo.Context) error { return p })
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/prepare", nil))
+				require.Equal(t, tc.status, rec.Code)
+				require.NotContains(t, rec.Body.String(), "private account/RPC detail")
+			}
+		})
+	}
+}
+
+func TestUnknownPolicyFailureKeepsCausePrivate(t *testing.T) {
+	cause := errors.New("database/rpc at private service failed")
+	for _, mapper := range []func(error) error{mapPolicyError, mapBudgetSubmitError} {
+		var p *restmw.HTTPError
+		require.ErrorAs(t, mapper(cause), &p)
+		require.Equal(t, http.StatusBadRequest, p.Status)
+		require.Equal(t, "POLICIES_REJECTED", p.Code)
+		require.ErrorIs(t, p, cause)
+		require.NotContains(t, p.Detail, cause.Error())
 	}
 }

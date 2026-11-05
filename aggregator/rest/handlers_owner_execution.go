@@ -125,8 +125,8 @@ func (s *Server) reportOwnerExecutionError(err error) error {
 }
 
 func mapOwnerExecutionError(err error) error {
-	if errors.Is(err, config.ErrEOADelegationMissing) {
-		return ownerDelegationHTTP(err)
+	if problem := ownerAccountHTTP(err); problem != nil {
+		return problem
 	}
 	st, ok := status.FromError(err)
 	if ok {
@@ -153,10 +153,31 @@ func mapOwnerExecutionError(err error) error {
 	return &restmw.HTTPError{Status: http.StatusBadGateway, Code: "OWNER_EXECUTION_FAILED", Title: "Owner execution unavailable"}
 }
 
+// Keep the same account/read distinction on policy and owner workflow routes.
+func ownerAccountHTTP(err error) *restmw.HTTPError {
+	switch {
+	case errors.Is(err, config.ErrEOA7702ExecuteDisabled):
+		return &restmw.HTTPError{Status: http.StatusForbidden, Code: "OWNER_EXECUTION_DISABLED",
+			Title: "Owner execution is disabled", Detail: "The gateway has not enabled owner execution for this wallet. Choose a compatible source wallet or contact support.", Cause: err}
+	case errors.Is(err, config.ErrSMA7702Unavailable), errors.Is(err, preset.ErrOwnerConfiguration):
+		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: "OWNER_ACCOUNT_UNAVAILABLE",
+			Title:  "Wallet account verification is unavailable",
+			Detail: "The gateway cannot verify this wallet's account setup. Check the service status or contact support.", Cause: err}
+	case errors.Is(err, preset.ErrOwnerAccountUnsupported):
+		return &restmw.HTTPError{Status: http.StatusConflict, Code: "OWNER_ACCOUNT_UNSUPPORTED",
+			Title:  "Source wallet account is not supported",
+			Detail: "This account's implementation, owner or EntryPoint is not supported for this operation. Choose a compatible source wallet.", Cause: err}
+	case errors.Is(err, config.ErrEOADelegationMissing):
+		return ownerDelegationHTTP(err)
+	default:
+		return nil
+	}
+}
+
 func ownerDelegationHTTP(err error) *restmw.HTTPError {
 	problem := &restmw.HTTPError{Status: http.StatusConflict, Code: "EOA_DELEGATION_MISSING",
 		Title:  "Owner wallet account setup is not supported",
-		Detail: "Switch the owner wallet back to a regular account in your wallet, then check again.", Cause: err}
+		Detail: "This wallet does not have the account setup required for this operation. Check its setup or choose a compatible source wallet.", Cause: err}
 	var delegation *preset.OwnerDelegationError
 	if errors.As(err, &delegation) && delegation.Delegate != (common.Address{}) {
 		problem.OwnerDelegate = delegation.Delegate.Hex()

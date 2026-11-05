@@ -32,6 +32,7 @@ func TestOwnerPreparationReportsObservedDelegationWithoutAcceptingIt(t *testing.
 		f, sw := newOwnerRPCFixture(t)
 		f.deployed = deployed
 		f.ownerCode = append([]byte{0xef, 0x01, 0x00}, delegate.Bytes()...)
+		sw.SMA7702Delegate, sw.SMA7702ImplHash = config.SMA7702Delegate(), config.SMA7702ImplHash()
 		_, err := PrepareOwnerUserOp(context.Background(), sw, f.owner, f.sender, big.NewInt(0), ownerTestCalls(), nil)
 		require.ErrorIs(t, err, config.ErrEOADelegationMissing)
 		var delegation *OwnerDelegationError
@@ -466,4 +467,41 @@ func TestBudgetSelfFundedPrefundRefusalBeforeQuote(t *testing.T) {
 	require.Nil(t, fee.Required, "never make up gas when estimation refused")
 	require.Nil(t, fee.Available)
 	require.Zero(t, f.sendCount)
+}
+
+func TestOwnerPreparationSeparatesConfigurationAndAccountRefusals(t *testing.T) {
+	for _, name := range []string{"no pin", "partial pin", "invalid pin", "wrong RPC chain", "unsupported implementation", "changed implementation", "fallback disabled", "wrong EntryPoint"} {
+		t.Run(name, func(t *testing.T) {
+			f, sw := newOwnerRPCFixture(t)
+			expected := ErrOwnerAccountUnsupported
+			switch name {
+			case "no pin", "partial pin", "invalid pin":
+				// Even an incompatible delegate must not hide a gateway pin fault.
+				f.ownerCode = designation(common.HexToAddress("0x1234"))
+				expected = config.ErrSMA7702Unavailable
+				if name != "no pin" {
+					sw.SMA7702Delegate = config.SMA7702Delegate()
+				}
+				if name == "invalid pin" {
+					sw.SMA7702ImplHash = common.HexToHash("0x1234")
+				}
+			case "wrong RPC chain":
+				f.chainID = 8453
+				expected = ErrOwnerConfiguration
+			case "unsupported implementation":
+				f.implementation = common.HexToAddress("0x1234")
+			case "changed implementation":
+				f.changedImpl = true
+			case "fallback disabled":
+				f.disabled = true
+			case "wrong EntryPoint":
+				f.wrongEntry = true
+			}
+			_, err := PrepareOwnerUserOp(context.Background(), sw, f.owner, f.sender, big.NewInt(0), ownerTestCalls(), nil)
+			require.ErrorIs(t, err, expected)
+			require.NotErrorIs(t, err, config.ErrEOADelegationMissing)
+			require.Zero(t, f.estimateReads)
+			require.Zero(t, f.sendCount)
+		})
+	}
 }

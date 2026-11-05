@@ -41,6 +41,12 @@ var implementationSlot = common.HexToHash("0x360894a13ba1a3210667c828492db98dca3
 // A failed RPC is deliberately not classified as a changed account.
 var ErrOwnerStateChanged = errors.New("owner account state changed")
 
+// Successful reads can prove an unsupported account; retrying cannot fix it.
+var ErrOwnerAccountUnsupported = errors.New("owner account is not supported")
+
+// ErrOwnerConfiguration identifies gateway configuration faults, not wallet faults.
+var ErrOwnerConfiguration = errors.New("owner execution configuration unavailable")
+
 // OwnerDelegationError preserves the observed owner delegate for REST callers.
 // It never permits another implementation or changes the signing recipe.
 type OwnerDelegationError struct {
@@ -84,7 +90,7 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 		return nil, fmt.Errorf("reading owner execution chain ID: %w", err)
 	}
 	if actualChain.Cmp(big.NewInt(sw.ChainID)) != 0 {
-		return nil, fmt.Errorf("owner execution chain RPC does not match chain %d", sw.ChainID)
+		return nil, fmt.Errorf("%w: owner execution chain RPC does not match chain %d", ErrOwnerConfiguration, sw.ChainID)
 	}
 	ownerCode, err := chain.CodeAt(ctx, owner, ownerReadBlock(ctx))
 	if err != nil {
@@ -93,26 +99,29 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 	if len(ownerCode) != 0 {
 		// A delegated EOA still holds the private key used by signature type 0.
 		// This also preserves derived-wallet execution after that owner delegates.
+		// Validate gateway configuration before blaming the owner's account.
+		if err := sw.ValidateSMA7702(); err != nil {
+			return nil, err
+		}
+		if !sw.HasSMA7702Pin() {
+			return nil, fmt.Errorf("%w: SMA-7702 pin is not configured", config.ErrSMA7702Unavailable)
+		}
 		if !config.SMA7702FirstChain(sw.ChainID) {
 			delegate, _ := config.EIP7702DesignationDelegate(ownerCode)
 			return nil, &OwnerDelegationError{Delegate: delegate, Cause: fmt.Errorf("%w: delegated owner execution is supported only on Sepolia and Base", config.ErrEOADelegationMissing)}
 		}
-		// Report the incompatible owner before dialing/reading its expected
-		// implementation. A failed implementation RPC must not hide this fact.
+		// Once the pin is valid, an implementation RPC must not hide a
+		// confirmed incompatible designation.
 		if !config.IsSMA7702Designation(ownerCode, sw.SMA7702Delegate) {
 			delegate, _ := config.EIP7702DesignationDelegate(ownerCode)
 			return nil, &OwnerDelegationError{Delegate: delegate, Cause: fmt.Errorf("%w: owner code does not designate the pinned SMA-7702", config.ErrEOADelegationMissing)}
-		}
-		if err := sw.ValidateSMA7702(); err != nil {
-			return nil, err
 		}
 		implCode, implErr := chain.CodeAt(ctx, sw.SMA7702Delegate, ownerReadBlock(ctx))
 		if implErr != nil {
 			return nil, fmt.Errorf("reading owner SMA-7702 implementation: %w", implErr)
 		}
 		if err := sw.AssertSMA7702Designation(ownerCode, implCode); err != nil {
-			delegate, _ := config.EIP7702DesignationDelegate(ownerCode)
-			return nil, &OwnerDelegationError{Delegate: delegate, Cause: err}
+			return nil, err // Runtime/pin fault; the owner's designation already matched.
 		}
 		if sender == owner {
 			if err := inspectOwnerValidation(ctx, chain, sender, owner); err != nil {
@@ -131,7 +140,7 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 		return nil, err
 	}
 	if derived == nil || *derived != sender || sender == (common.Address{}) {
-		return nil, fmt.Errorf("owner execution sender does not match the MA v2 factory derivation")
+		return nil, fmt.Errorf("%w: owner execution sender does not match the MA v2 factory derivation", ErrOwnerAccountUnsupported)
 	}
 	factory := aa.MAv2FactoryAddress()
 	factoryCode, err := chain.CodeAt(ctx, factory, ownerReadBlock(ctx))
@@ -139,7 +148,7 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 		return nil, fmt.Errorf("reading MA v2 factory code: %w", err)
 	}
 	if len(factoryCode) == 0 {
-		return nil, fmt.Errorf("MA v2 factory code is unavailable")
+		return nil, fmt.Errorf("%w: MA v2 factory code is unavailable", ErrOwnerConfiguration)
 	}
 	implResult, err := ownerView(ctx, chain, factory, "SEMI_MODULAR_ACCOUNT_IMPL()")
 	if err != nil {
@@ -150,14 +159,14 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 	}
 	impl := common.BytesToAddress(implResult)
 	if impl != common.HexToAddress(ownerPersonalSignImplementation) {
-		return nil, fmt.Errorf("MA v2 implementation %s is not verified for owner personal_sign", impl.Hex())
+		return nil, fmt.Errorf("%w: MA v2 implementation %s is not verified for owner personal_sign", ErrOwnerAccountUnsupported, impl.Hex())
 	}
 	implCode, err := chain.CodeAt(ctx, impl, ownerReadBlock(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("reading MA v2 implementation code: %w", err)
 	}
 	if len(implCode) == 0 {
-		return nil, fmt.Errorf("MA v2 implementation code is unavailable")
+		return nil, fmt.Errorf("%w: MA v2 implementation code is unavailable", ErrOwnerConfiguration)
 	}
 	code, err := chain.CodeAt(ctx, sender, ownerReadBlock(ctx))
 	if err != nil {
@@ -175,7 +184,7 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 		return nil, fmt.Errorf("reading owner account implementation: %w", err)
 	}
 	if common.BytesToAddress(storedImpl) != impl {
-		return nil, fmt.Errorf("owner account is not the factory's supported MA v2 implementation")
+		return nil, fmt.Errorf("%w: owner account is not the factory's supported MA v2 implementation", ErrOwnerAccountUnsupported)
 	}
 	if err := inspectOwnerValidation(ctx, chain, sender, owner); err != nil {
 		return nil, err
@@ -189,14 +198,14 @@ func inspectOwnerValidation(ctx context.Context, chain *ethclient.Client, sender
 		return fmt.Errorf("reading MA v2 fallback owner: %w", err)
 	}
 	if len(fallback) != 64 || common.BytesToAddress(fallback[:32]) != owner || new(big.Int).SetBytes(fallback[32:]).Sign() != 0 {
-		return fmt.Errorf("MA v2 fallback owner changed, is disabled, or is unavailable")
+		return fmt.Errorf("%w: MA v2 fallback owner changed, is disabled, or is unavailable", ErrOwnerAccountUnsupported)
 	}
 	entry, err := ownerView(ctx, chain, sender, "entryPoint()")
 	if err != nil {
 		return fmt.Errorf("reading owner account EntryPoint: %w", err)
 	}
 	if len(entry) != 32 || common.BytesToAddress(entry) != EntryPointV07() {
-		return fmt.Errorf("owner account has an unsupported EntryPoint")
+		return fmt.Errorf("%w: owner account has an unsupported EntryPoint", ErrOwnerAccountUnsupported)
 	}
 	return nil
 }
@@ -290,7 +299,7 @@ func newOwnerOperation(ctx context.Context, chain *ethclient.Client, sw *config.
 	}
 	entity, options, _, err := userop.DecodeNonceMAv2(nonce)
 	if err != nil || entity != userop.FallbackSignerEntityID || options != userop.ValidationOptionGlobal {
-		return nil, fmt.Errorf("owner execution RPC returned an invalid owner nonce")
+		return nil, fmt.Errorf("%w: owner execution RPC returned an invalid owner nonce", ErrOwnerConfiguration)
 	}
 	op := &userop.UserOperationV07{
 		Sender: sender, Nonce: nonce, CallData: packed,

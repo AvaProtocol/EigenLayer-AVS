@@ -1897,8 +1897,9 @@ type Problem struct {
 	// SubmissionStarted Budget signature-only submit send boundary, when known. False
 	// proves this request was refused before attempting the durable
 	// first-send marker, so it did not relay an operation. True includes
-	// uncertain marker/storage failures and repeat submits; check the
+	// uncertain marker/storage failures and repeats of marked attempts; check the
 	// existing preparation and never infer that nothing was sent.
+	// A repeated submit of a settled unsent preparation remains false.
 	// Absent means unknown, including older gateways. A lost response
 	// also means unknown. Never infer this from HTTP status or prose.
 	SubmissionStarted *bool `json:"submissionStarted,omitempty"`

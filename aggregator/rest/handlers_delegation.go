@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"errors"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -342,9 +341,8 @@ func waitMinedIgnoreStatus(ctx context.Context, chain *ethclient.Client, hash co
 }
 
 func mapDelegationError(err error) error {
-	if errors.Is(err, taskengine.ErrEOADelegationMissing) {
-		return &restmw.HTTPError{Status: http.StatusConflict, Code: "EOA_DELEGATION_MISSING",
-			Title: "EOA is not delegated to SMA-7702", Detail: err.Error()}
+	if problem := ownerAccountHTTP(err); problem != nil {
+		return problem
 	}
 	return err
 }

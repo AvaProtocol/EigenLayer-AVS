@@ -14,6 +14,9 @@ import (
 // ErrEOADelegationMissing is shared with the owner-operation and policy paths.
 var ErrEOADelegationMissing = errors.New("EOA_DELEGATION_MISSING")
 
+// ErrSMA7702Unavailable is a gateway pin/reader failure, not owner setup advice.
+var ErrSMA7702Unavailable = errors.New("SMA-7702 verification unavailable")
+
 // Canonical SMA-7702 pin from Track B spike B0 (PR #798). Byte-identical on
 // Ethereum Sepolia and Base mainnet: 23,741 bytes at the delegate address.
 // Comparison is K13: eoa code[0:3]==0xef0100 && code[3:23]==delegate &&
@@ -63,10 +66,16 @@ func (c *SmartWalletConfig) ValidateSMA7702() error {
 	if c == nil {
 		return nil
 	}
+	var err error
 	if c.EOA7702Execute {
-		return c.eoa7702ExecutePreconditions()
+		err = c.eoa7702ExecutePreconditions()
+	} else {
+		err = c.validateSMA7702Pin()
 	}
-	return c.validateSMA7702Pin()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrSMA7702Unavailable, err)
+	}
+	return nil
 }
 
 // EOA7702ExecuteDisabledDetail is the exact text of ErrEOA7702ExecuteDisabled.
@@ -82,7 +91,10 @@ func (c *SmartWalletConfig) CheckEOA7702Execute() error {
 	if c == nil || !c.EOA7702Execute {
 		return ErrEOA7702ExecuteDisabled
 	}
-	return c.eoa7702ExecutePreconditions()
+	if err := c.eoa7702ExecutePreconditions(); err != nil {
+		return fmt.Errorf("%w: %w", ErrSMA7702Unavailable, err)
+	}
+	return nil
 }
 
 // eoa7702ExecutePreconditions is the lasting execute=true policy: pin must
@@ -158,7 +170,7 @@ func (c *SmartWalletConfig) AssertSMA7702Designation(eoaCode, implCode []byte) e
 		if c != nil {
 			chainID = c.ChainID
 		}
-		return fmt.Errorf("%w: SMA-7702 pin is not configured for chain_id=%d", ErrEOADelegationMissing, chainID)
+		return fmt.Errorf("%w: SMA-7702 pin is not configured for chain_id=%d", ErrSMA7702Unavailable, chainID)
 	}
 	if !IsSMA7702Designation(eoaCode, c.SMA7702Delegate) {
 		return fmt.Errorf(
@@ -169,7 +181,7 @@ func (c *SmartWalletConfig) AssertSMA7702Designation(eoaCode, implCode []byte) e
 	if got != c.SMA7702ImplHash {
 		return fmt.Errorf(
 			"%w: impl hash %s want %s (delegate %s)",
-			ErrEOADelegationMissing, got.Hex(), c.SMA7702ImplHash.Hex(), c.SMA7702Delegate.Hex())
+			ErrSMA7702Unavailable, got.Hex(), c.SMA7702ImplHash.Hex(), c.SMA7702Delegate.Hex())
 	}
 	return nil
 }

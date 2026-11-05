@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
@@ -260,7 +261,7 @@ func (n *Engine) SubmitBudgetPolicyPreparation(ctx context.Context, user *model.
 	// Only a loaded, locked preparation can establish whether sending started.
 	// Missing/failed loads make no claim. A marker write is treated as uncertain
 	// even if storage reports an error: never invite a second operation then.
-	submissionStarted := p.State != ownerSubmissionPrepared
+	submissionStarted := p.State != ownerSubmissionPrepared && p.State != ownerSubmissionUnsent
 	defer func() {
 		if submitErr != nil {
 			submitErr = &BudgetSubmitError{Cause: submitErr, SubmissionStarted: submissionStarted}
@@ -303,7 +304,8 @@ func (n *Engine) SubmitBudgetPolicyPreparation(ctx context.Context, user *model.
 		if errors.As(e, &funding) {
 			return nil, budgetFundingRefusal(funding)
 		}
-		if errors.Is(e, ErrEOADelegationMissing) {
+		if errors.Is(e, config.ErrEOA7702ExecuteDisabled) || errors.Is(e, config.ErrEOADelegationMissing) || errors.Is(e, config.ErrSMA7702Unavailable) ||
+			errors.Is(e, preset.ErrOwnerAccountUnsupported) || errors.Is(e, preset.ErrOwnerConfiguration) {
 			return nil, e
 		}
 		return nil, fmt.Errorf("%w: owner identity, nonce or fee recheck: %w", ErrBudgetReadUnavailable, e)

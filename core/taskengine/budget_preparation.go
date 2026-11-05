@@ -153,7 +153,7 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	}
 	rem, err := n.resolveGrantRemainder(ctx, current, in.Wallet)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBudgetReadUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrBudgetReadUnavailable, err)
 	}
 	tasks, err := n.enabledTasksForRunner(user.Address, in.Wallet)
 	if err != nil {
@@ -202,7 +202,7 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if len(pairs) > 0 {
 		caller, err = n.spendLimitCaller(in.ChainID)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrBudgetReadUnavailable, err)
+			return nil, fmt.Errorf("%w: %w", ErrBudgetReadUnavailable, err)
 		}
 	}
 	reads, resets, err := readBudgetApprovals(ctx, caller, in.Wallet, in.ChainID, pairs, spenders)
@@ -219,7 +219,7 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	for _, target := range targets {
 		cleared, checkErr := n.teardownVerifier()(ctx, in.ChainID, in.Wallet, target.EntityID)
 		if checkErr != nil {
-			return nil, fmt.Errorf("%w: retirement registration is unavailable", ErrBudgetReadUnavailable)
+			return nil, fmt.Errorf("%w: retirement registration is unavailable: %w", ErrBudgetReadUnavailable, checkErr)
 		}
 		if !cleared {
 			retirements = append(retirements, target)
@@ -250,12 +250,13 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 		if errors.As(err, &fee) {
 			return nil, budgetFundingRefusal(fee)
 		}
-		if errors.Is(err, ErrEOADelegationMissing) {
+		if errors.Is(err, config.ErrEOA7702ExecuteDisabled) || errors.Is(err, config.ErrEOADelegationMissing) || errors.Is(err, config.ErrSMA7702Unavailable) ||
+			errors.Is(err, preset.ErrOwnerAccountUnsupported) || errors.Is(err, preset.ErrOwnerConfiguration) {
 			return nil, err
 		}
-		// Pricing/identity/configuration failures are gateway-side failures,
-		// not malformed policy input. Keep their cause for diagnostics while
-		// REST returns its authored 503 instead of a raw 400 detail.
+		// The explicit permanent/configuration refusals above keep their own
+		// codes. Unexpected read/pricing failures retain a private cause and
+		// an authored 503; no blanket retry instruction or raw 400 detail.
 		return nil, fmt.Errorf("%w: budget owner operation could not be prepared: %w", ErrBudgetReadUnavailable, err)
 	}
 	op, hash, err := validateBudgetOwnerOperation(priced, in.Wallet, in.ChainID, calls)

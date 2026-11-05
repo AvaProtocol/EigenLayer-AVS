@@ -256,3 +256,15 @@ func TestProblemCopiesNativeRecipientRefusalFields(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
+
+func TestHTTPErrorTextAndUnwrapRetainPrivateCause(t *testing.T) {
+	cause := errors.New("private diagnostic")
+	plain := &HTTPError{Title: "Public title"}
+	if plain.Error() != "Public title" || errors.Unwrap(plain) != nil {
+		t.Fatal("plain error changed")
+	}
+	wrapped := &HTTPError{Title: "Public title", Cause: cause}
+	if wrapped.Error() != "Public title: private diagnostic" || !errors.Is(wrapped, cause) {
+		t.Fatal("private diagnostic chain was lost")
+	}
+}
