@@ -126,9 +126,23 @@ func TestUnknownPolicyFailureKeepsCausePrivate(t *testing.T) {
 	for _, mapper := range []func(error) error{mapPolicyError, mapBudgetSubmitError} {
 		var p *restmw.HTTPError
 		require.ErrorAs(t, mapper(cause), &p)
-		require.Equal(t, http.StatusBadRequest, p.Status)
-		require.Equal(t, "POLICIES_REJECTED", p.Code)
+		require.Equal(t, http.StatusServiceUnavailable, p.Status)
+		require.Equal(t, "POLICIES_UNAVAILABLE", p.Code)
 		require.ErrorIs(t, p, cause)
 		require.NotContains(t, p.Detail, cause.Error())
+	}
+}
+
+func TestPolicyValidationKeepsAuthoredReasonWithoutOuterDiagnostics(t *testing.T) {
+	for _, text := range []string{"the signing window (deadline 123) has expired; prepare the grant again", "expiresInSeconds must be between 0 and 9223372036", "agent label is required"} {
+		validation := &taskengine.PolicyValidationError{Cause: errors.New(text)}
+		// Only the marked validation is public, not an outer private wrapper.
+		for _, mapper := range []func(error) error{mapPolicyError, mapBudgetSubmitError} {
+			var problem *restmw.HTTPError
+			require.ErrorAs(t, mapper(fmt.Errorf("private diagnostic: %w", validation)), &problem)
+			require.Equal(t, http.StatusBadRequest, problem.Status)
+			require.Equal(t, "POLICIES_REJECTED", problem.Code)
+			require.Equal(t, text, problem.Detail)
+		}
 	}
 }

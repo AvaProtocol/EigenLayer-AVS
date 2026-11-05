@@ -1851,7 +1851,10 @@ type Problem struct {
 
 	// Code Machine-readable error code. Stable across releases; clients can
 	// switch on this for programmatic handling. Mirrors the gRPC-era
-	// ErrorCode enum vocabulary.
+	// ErrorCode enum vocabulary. POLICIES_REJECTED (400) preserves an
+	// authored client-validation reason, including expired signing
+	// windows. POLICIES_UNAVAILABLE (503) hides unexpected internal
+	// diagnostics, which remain only in server logs.
 	Code *string `json:"code,omitempty"`
 
 	// Delegate Lowercase or checksummed hex EOA / contract address.

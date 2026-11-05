@@ -99,16 +99,17 @@ func inspectOwnerAccount(ctx context.Context, chain *ethclient.Client, sw *confi
 	if len(ownerCode) != 0 {
 		// A delegated EOA still holds the private key used by signature type 0.
 		// This also preserves derived-wallet execution after that owner delegates.
-		// Validate gateway configuration before blaming the owner's account.
+		// Chain support is a permanent refusal even where no pin is configured.
+		if !config.SMA7702FirstChain(sw.ChainID) {
+			delegate, _ := config.EIP7702DesignationDelegate(ownerCode)
+			return nil, &OwnerDelegationError{Delegate: delegate, Cause: fmt.Errorf("%w: delegated owner execution is supported only on Sepolia and Base", config.ErrEOADelegationMissing)}
+		}
+		// On a supported chain, validate the pin before the designation.
 		if err := sw.ValidateSMA7702(); err != nil {
 			return nil, err
 		}
 		if !sw.HasSMA7702Pin() {
 			return nil, fmt.Errorf("%w: SMA-7702 pin is not configured", config.ErrSMA7702Unavailable)
-		}
-		if !config.SMA7702FirstChain(sw.ChainID) {
-			delegate, _ := config.EIP7702DesignationDelegate(ownerCode)
-			return nil, &OwnerDelegationError{Delegate: delegate, Cause: fmt.Errorf("%w: delegated owner execution is supported only on Sepolia and Base", config.ErrEOADelegationMissing)}
 		}
 		// Once the pin is valid, an implementation RPC must not hide a
 		// confirmed incompatible designation.

@@ -598,6 +598,7 @@ func mapPolicyError(err error) error {
 	var budgetError *taskengine.BudgetPolicyError
 	var conflict *taskengine.PolicyConflictError
 	var refusal *taskengine.NativeRecipientRefusal
+	var validation *taskengine.PolicyValidationError
 	switch {
 	case errors.As(err, &budgetError):
 		status := http.StatusBadRequest
@@ -672,9 +673,11 @@ func mapPolicyError(err error) error {
 		return badRequest(taskengine.SessionPolicyRecipientNotAcknowledgedCode, nativeRecipientNotAcknowledgedTitle, err.Error())
 	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode):
 		return badRequest(taskengine.SessionPolicyRecipientNotEOACode, "Native recipient is not an EOA", err.Error())
+	case errors.As(err, &validation):
+		return badRequest("POLICIES_REJECTED", "Policy request rejected", validation.Error())
 	default:
-		return &restmw.HTTPError{Status: http.StatusBadRequest, Code: "POLICIES_REJECTED",
-			Title: "Policy request rejected", Detail: "The policy request could not be completed. Check the request details or contact support.", Cause: err}
+		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: "POLICIES_UNAVAILABLE",
+			Title: "Policy service is unavailable", Detail: "The gateway could not complete this request. Check the service status or contact support.", Cause: err}
 	}
 }
 

@@ -505,3 +505,26 @@ func TestOwnerPreparationSeparatesConfigurationAndAccountRefusals(t *testing.T) 
 		})
 	}
 }
+
+func TestOwnerUnsupportedChainRefusalDoesNotRequireSMA7702Pin(t *testing.T) {
+	delegate := common.HexToAddress("0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B")
+	for _, chainID := range []int64{1, 84532} {
+		for _, execute := range []bool{false, true} {
+			t.Run(fmt.Sprintf("chain=%d/execute=%t", chainID, execute), func(t *testing.T) {
+				f, sw := newOwnerRPCFixture(t)
+				f.chainID, sw.ChainID = chainID, chainID
+				f.ownerCode = designation(delegate)
+				sw.EOA7702Execute = execute
+				sw.SMA7702Delegate, sw.SMA7702ImplHash = common.Address{}, common.Hash{}
+				_, err := PrepareOwnerUserOp(context.Background(), sw, f.owner, f.sender, big.NewInt(0), ownerTestCalls(), nil)
+				require.ErrorIs(t, err, config.ErrEOADelegationMissing)
+				require.NotErrorIs(t, err, config.ErrSMA7702Unavailable)
+				var refusal *OwnerDelegationError
+				require.ErrorAs(t, err, &refusal)
+				require.Equal(t, delegate, refusal.Delegate)
+				require.Zero(t, f.estimateReads)
+				require.Zero(t, f.sendCount)
+			})
+		}
+	}
+}

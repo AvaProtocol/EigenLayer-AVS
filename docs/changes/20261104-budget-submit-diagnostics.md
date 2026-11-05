@@ -39,7 +39,11 @@ successful check that proved an unsupported account:
 - The EOA execution gate stays **403 OWNER_EXECUTION_DISABLED**. Funding and
   confirmed incompatible delegation keep their structured 409 refusals.
 
-Pin validation happens before the designation comparison. The same distinction
+The Sepolia/Base support check runs before pin validation: a delegated owner
+on any other chain gets a permanent 409 `EOA_DELEGATION_MISSING` with its
+observed `ownerDelegate`, even when that chain has no pin. After a supported
+chain passes that gate, pin validation happens before the designation
+comparison. The same distinction
 applies to policy checks of an `eoa_7702` runner, including preserved RPC causes.
 Delegation wording asks the owner to check the required setup or choose a
 compatible source, rather than telling every owner to remove delegation: an
@@ -48,8 +52,13 @@ undelegated EOA needs delegation enabled to be the sender.
 A regression runs the real account inspector against a local JSON-RPC error
 server, and the REST test checks that the 503 body contains none of that
 server's private error text. Retirement-read errors also preserve their wrapped
-RPC cause. The existing generic `POLICIES_REJECTED` fallback retains its status
-and code but now uses authored copy, keeping its cause only in server logs.
+RPC cause. Explicitly marked `PolicyValidationError` values retain their safe,
+authored 400 `POLICIES_REJECTED` reason, including an expired signing window,
+invalid expiry range, policy ID and structural permission inputs. Native
+recipient RPC checks are kept outside that public validation wrapper. An
+unexpected failure instead returns 503 `POLICIES_UNAVAILABLE` with fixed copy
+and its private cause logged; a storage or signer-key fault is not a client
+validation reason. Wallet-hold storage reads also retain their original cause.
 
 An authored 4xx with an explicitly attached private cause is logged at info
 level, with its code, route and request id. Ordinary 4xx responses without such
@@ -77,7 +86,11 @@ storage failures, retained causes versus generic wire messages, explicit false
 JSON serialization, observed delegates, and the typed refusal through both REST
 mappers. Review regressions additionally cover missing/invalid pins, wrong RPC
 chain, permanent account refusals, both undelegated-EOA paths, policy-reader
-failures, `unsent` repeats and `HTTPError.Error`/`Unwrap`. `make rest-gen` regenerates the additive Problem fields and 409 response
+failures, `unsent` repeats and `HTTPError.Error`/`Unwrap`. The follow-up
+unsupported-chain test fails on the prior head for Ethereum and Base Sepolia,
+with the execute flag on and off, and passes with the reordered gate. Validation
+regressions exercise real engine paths for expiry/range/input failures and
+confirm RPC and signer/storage failures never become public validation text. `make rest-gen` regenerates the additive Problem fields and 409 response
 types. An SDK patch must sync these fields before depending on their static types.
 
 The earlier broad test failures were compared with clean `e9afe6ff`:
@@ -91,6 +104,9 @@ The earlier broad test failures were compared with clean `e9afe6ff`:
   branch (about 186 seconds each). The reviewed fixes also pass the complete
   taskengine, REST subtree, config and preset packages; taskengine takes about
   201 seconds. The final REST subtree is re-run after the fallback-copy edit.
+  The chain-order/validation follow-up passes the same full package set
+  (taskengine about 179 seconds) and the expanded five-package focused race
+  suite, including the new policy-validation and wallet-hold error tests.
 - The initial workflow-admission timeout did not reproduce in those baseline
   and full-package runs. A later race run concurrent with broader tests/lint
   hit the same admission-test deadline. Re-running the complete focused race

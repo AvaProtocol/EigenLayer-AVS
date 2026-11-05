@@ -112,15 +112,18 @@ func (n *Engine) checkBudgetFee(p *BudgetPolicyPreparation) error {
 	return nil
 }
 func budgetHoldRows(db storage.Storage, chain int64, owner, wallet common.Address) ([]*BudgetHold, error) {
+	if db == nil {
+		return nil, fmt.Errorf("%w: storage unavailable", ErrBudgetReadUnavailable)
+	}
 	rows, e := db.GetByPrefix(budgetHoldPrefix(chain, owner, wallet))
 	if e != nil {
-		return nil, e
+		return nil, fmt.Errorf("%w: reading wallet holds: %w", ErrBudgetReadUnavailable, e)
 	}
 	out := make([]*BudgetHold, 0, len(rows))
 	for _, row := range rows {
 		var h BudgetHold
 		if e = json.Unmarshal(row.Value, &h); e != nil {
-			return nil, fmt.Errorf("%w: unreadable wallet hold", ErrBudgetReadUnavailable)
+			return nil, fmt.Errorf("%w: unreadable wallet hold: %w", ErrBudgetReadUnavailable, e)
 		}
 		if !h.Released {
 			out = append(out, &h)
