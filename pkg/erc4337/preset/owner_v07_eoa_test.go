@@ -27,6 +27,15 @@ func newOwnerEOARPCFixture(t *testing.T) (*ownerRPCFixture, *config.SmartWalletC
 	return f, sw
 }
 
+func TestOwnerEOAWithoutDelegationHasTypedRefusal(t *testing.T) {
+	f, sw := newOwnerEOARPCFixture(t)
+	f.ownerCode = []byte{}
+	_, err := PrepareOwnerUserOp(context.Background(), sw, f.owner, f.sender, nil, ownerTestCalls(), nil)
+	require.ErrorIs(t, err, config.ErrEOADelegationMissing)
+	require.Zero(t, f.estimateReads)
+	require.Zero(t, f.sendCount)
+}
+
 func TestOwnerEOAPrepareAndKeylessRelay(t *testing.T) {
 	for _, chainID := range []int64{config.SMA7702ChainSepolia, config.SMA7702ChainBase} {
 		t.Run(big.NewInt(chainID).String(), func(t *testing.T) {

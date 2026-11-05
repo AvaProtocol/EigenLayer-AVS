@@ -51,7 +51,18 @@ var (
 	// submit DID take effect — the client must not retry it (the entity is
 	// spent), only clear the named leftovers.
 	ErrSessionPolicySupersedeFailed = errors.New("the grant was stored but replacing the previous grant failed")
+	// The stored revoke succeeded; only building owner cleanup failed.
+	ErrPolicyRevokeCleanupUnavailable = errors.New("grant revoked off-chain but on-chain cleanup payload could not be built")
 )
+
+// PolicyValidationError marks authored client-input errors as safe for REST.
+// RPC, storage and service configuration errors must never use this wrapper.
+type PolicyValidationError struct {
+	Cause error
+}
+
+func (e *PolicyValidationError) Error() string { return e.Cause.Error() }
+func (e *PolicyValidationError) Unwrap() error { return e.Cause }
 
 const SessionPolicyEntityUnverifiedCode = "POLICIES_ENTITY_UNVERIFIED"
 
@@ -97,7 +108,7 @@ func (in *SessionPolicyInput) validate() error {
 	if strings.TrimSpace(in.AgentLabel) == "" {
 		return fmt.Errorf("agent label is required")
 	}
-	return in.Permissions.Validate()
+	return in.Permissions.validate(false) // Structural only; no RPC diagnostic can enter the public wrapper.
 }
 
 // bindAndValidatePermissions attaches the session signer, rejects a
@@ -106,13 +117,16 @@ func (in *SessionPolicyInput) validate() error {
 // addition, and submit calls it on the echoed set.
 func (n *Engine) bindAndValidatePermissions(in *SessionPolicyInput) error {
 	if in == nil {
-		return fmt.Errorf("missing session policy input")
+		return &PolicyValidationError{Cause: fmt.Errorf("missing session policy input")}
 	}
 	if err := n.bindNativeRecipientChecks(in.ChainID, &in.Permissions); err != nil {
 		return err
 	}
 	if err := in.validate(); err != nil {
-		return err
+		return &PolicyValidationError{Cause: err}
+	}
+	if err := in.Permissions.Validate(); err != nil {
+		return err // Chain checks can fail internally; keep them out of public validation copy.
 	}
 	n.logContractRecipientException(*in)
 	return nil
@@ -332,7 +346,7 @@ func (n *Engine) PrepareSessionPolicyWithContext(ctx context.Context, user *mode
 		return n.prepareBudgetPolicy(ctx, user, in)
 	}
 	if in.ExpiresInSeconds < 0 || in.ExpiresInSeconds > MaxSessionExpiresInSeconds {
-		return nil, fmt.Errorf("expiresInSeconds must be between 0 and %d", MaxSessionExpiresInSeconds)
+		return nil, &PolicyValidationError{Cause: fmt.Errorf("expiresInSeconds must be between 0 and %d", MaxSessionExpiresInSeconds)}
 	}
 	// An addition is merged under the lock, so its permissions are not
 	// known yet. A legacy prepare still validates the echoed set first.
@@ -581,10 +595,10 @@ func (n *Engine) SubmitSessionPolicy(
 		return nil, nil, err
 	}
 	if _, err := ulid.ParseStrict(strings.ToUpper(policyID)); err != nil {
-		return nil, nil, fmt.Errorf("policy id %q is not a ULID", policyID)
+		return nil, nil, &PolicyValidationError{Cause: fmt.Errorf("policy id %q is not a ULID", policyID)}
 	}
 	if deadline <= uint64(time.Now().Unix()) {
-		return nil, nil, fmt.Errorf("the signing window (deadline %d) has expired; prepare the grant again", deadline)
+		return nil, nil, &PolicyValidationError{Cause: fmt.Errorf("the signing window (deadline %d) has expired; prepare the grant again", deadline)}
 	}
 	signer, err := n.sessionSignerAddress()
 	if err != nil {
@@ -779,7 +793,7 @@ func (n *Engine) RevokeSessionPolicyByID(user *model.User, chainID int64, wallet
 	if cleanupRequired {
 		built, buildErr := BuildOnChainRevokeCleanup(policy)
 		if buildErr != nil {
-			return false, true, nil, fmt.Errorf("grant revoked off-chain but on-chain cleanup payload could not be built: %w", buildErr)
+			return false, true, nil, fmt.Errorf("%w: %w", ErrPolicyRevokeCleanupUnavailable, buildErr)
 		}
 		return false, true, built, nil
 	}

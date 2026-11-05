@@ -592,9 +592,13 @@ func filterToDeclaredFields(domain interface{}, declared []apitypes.Type) interf
 
 // mapPolicyError translates engine sentinels into REST problems.
 func mapPolicyError(err error) error {
+	if problem := ownerAccountHTTP(err); problem != nil {
+		return problem
+	}
 	var budgetError *taskengine.BudgetPolicyError
 	var conflict *taskengine.PolicyConflictError
 	var refusal *taskengine.NativeRecipientRefusal
+	var validation *taskengine.PolicyValidationError
 	switch {
 	case errors.As(err, &budgetError):
 		status := http.StatusBadRequest
@@ -611,7 +615,7 @@ func mapPolicyError(err error) error {
 		}
 		return problem
 	case errors.Is(err, taskengine.ErrBudgetReadUnavailable):
-		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: taskengine.BudgetReadUnavailableCode, Title: "Budget couldn't be prepared", Detail: "A required chain read is unavailable. Try again."}
+		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: taskengine.BudgetReadUnavailableCode, Title: "Budget couldn't be prepared", Detail: "The gateway could not complete the required checks. Check the service status before preparing a fresh review.", Cause: err}
 	case errors.As(err, &conflict):
 		return policyConflictHTTP(conflict)
 	case errors.As(err, &refusal):
@@ -630,9 +634,6 @@ func mapPolicyError(err error) error {
 		}
 	case errors.Is(err, taskengine.ErrSessionWalletNotMAv2):
 		return badRequest("SESSION_WALLET_NOT_MA_V2", err.Error(), "")
-	case errors.Is(err, taskengine.ErrEOADelegationMissing):
-		return &restmw.HTTPError{Status: http.StatusConflict, Code: "EOA_DELEGATION_MISSING",
-			Title: "EOA is not delegated to SMA-7702", Detail: err.Error()}
 	case errors.Is(err, taskengine.ErrSessionChainNotServed):
 		// Distinct from POLICIES_REJECTED so a client can tell "wrong chain"
 		// from "bad grant" and re-prepare against a chain we serve.
@@ -672,8 +673,15 @@ func mapPolicyError(err error) error {
 		return badRequest(taskengine.SessionPolicyRecipientNotAcknowledgedCode, nativeRecipientNotAcknowledgedTitle, err.Error())
 	case strings.Contains(err.Error(), taskengine.SessionPolicyRecipientNotEOACode):
 		return badRequest(taskengine.SessionPolicyRecipientNotEOACode, "Native recipient is not an EOA", err.Error())
+	case errors.Is(err, taskengine.ErrPolicyRevokeCleanupUnavailable):
+		return &restmw.HTTPError{Status: http.StatusInternalServerError, Code: "POLICIES_REVOKED_CLEANUP_UNAVAILABLE",
+			Title:  "Permission revoked; on-chain cleanup unavailable",
+			Detail: "The revoke was applied in Ava. The on-chain permission may still be active, and the gateway could not prepare its cleanup transaction. Check this policy's status or contact support.", Cause: err}
+	case errors.As(err, &validation):
+		return badRequest("POLICIES_REJECTED", "Policy request rejected", validation.Error())
 	default:
-		return badRequest("POLICIES_REJECTED", "Policy request rejected", err.Error())
+		return &restmw.HTTPError{Status: http.StatusServiceUnavailable, Code: "POLICIES_UNAVAILABLE",
+			Title: "Policy service is unavailable", Detail: "The gateway could not complete this request. Check the service status or contact support.", Cause: err}
 	}
 }
 

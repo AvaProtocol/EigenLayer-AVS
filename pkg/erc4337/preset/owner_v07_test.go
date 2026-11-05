@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -24,6 +25,23 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOwnerPreparationReportsObservedDelegationWithoutAcceptingIt(t *testing.T) {
+	delegate := common.HexToAddress("0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B")
+	for _, deployed := range []bool{false, true} {
+		f, sw := newOwnerRPCFixture(t)
+		f.deployed = deployed
+		f.ownerCode = append([]byte{0xef, 0x01, 0x00}, delegate.Bytes()...)
+		sw.SMA7702Delegate, sw.SMA7702ImplHash = config.SMA7702Delegate(), config.SMA7702ImplHash()
+		_, err := PrepareOwnerUserOp(context.Background(), sw, f.owner, f.sender, big.NewInt(0), ownerTestCalls(), nil)
+		require.ErrorIs(t, err, config.ErrEOADelegationMissing)
+		var delegation *OwnerDelegationError
+		require.True(t, errors.As(err, &delegation))
+		require.Equal(t, delegate, delegation.Delegate)
+		require.Zero(t, f.estimateReads)
+		require.Zero(t, f.sendCount)
+	}
+}
 
 func TestOwnerSignatureIsRawHashPersonalSign(t *testing.T) {
 	key, err := crypto.GenerateKey()
@@ -449,4 +467,64 @@ func TestBudgetSelfFundedPrefundRefusalBeforeQuote(t *testing.T) {
 	require.Nil(t, fee.Required, "never make up gas when estimation refused")
 	require.Nil(t, fee.Available)
 	require.Zero(t, f.sendCount)
+}
+
+func TestOwnerPreparationSeparatesConfigurationAndAccountRefusals(t *testing.T) {
+	for _, name := range []string{"no pin", "partial pin", "invalid pin", "wrong RPC chain", "unsupported implementation", "changed implementation", "fallback disabled", "wrong EntryPoint"} {
+		t.Run(name, func(t *testing.T) {
+			f, sw := newOwnerRPCFixture(t)
+			expected := ErrOwnerAccountUnsupported
+			switch name {
+			case "no pin", "partial pin", "invalid pin":
+				// Even an incompatible delegate must not hide a gateway pin fault.
+				f.ownerCode = designation(common.HexToAddress("0x1234"))
+				expected = config.ErrSMA7702Unavailable
+				if name != "no pin" {
+					sw.SMA7702Delegate = config.SMA7702Delegate()
+				}
+				if name == "invalid pin" {
+					sw.SMA7702ImplHash = common.HexToHash("0x1234")
+				}
+			case "wrong RPC chain":
+				f.chainID = 8453
+				expected = ErrOwnerConfiguration
+			case "unsupported implementation":
+				f.implementation = common.HexToAddress("0x1234")
+			case "changed implementation":
+				f.changedImpl = true
+			case "fallback disabled":
+				f.disabled = true
+			case "wrong EntryPoint":
+				f.wrongEntry = true
+			}
+			_, err := PrepareOwnerUserOp(context.Background(), sw, f.owner, f.sender, big.NewInt(0), ownerTestCalls(), nil)
+			require.ErrorIs(t, err, expected)
+			require.NotErrorIs(t, err, config.ErrEOADelegationMissing)
+			require.Zero(t, f.estimateReads)
+			require.Zero(t, f.sendCount)
+		})
+	}
+}
+
+func TestOwnerUnsupportedChainRefusalDoesNotRequireSMA7702Pin(t *testing.T) {
+	delegate := common.HexToAddress("0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B")
+	for _, chainID := range []int64{1, 84532} {
+		for _, execute := range []bool{false, true} {
+			t.Run(fmt.Sprintf("chain=%d/execute=%t", chainID, execute), func(t *testing.T) {
+				f, sw := newOwnerRPCFixture(t)
+				f.chainID, sw.ChainID = chainID, chainID
+				f.ownerCode = designation(delegate)
+				sw.EOA7702Execute = execute
+				sw.SMA7702Delegate, sw.SMA7702ImplHash = common.Address{}, common.Hash{}
+				_, err := PrepareOwnerUserOp(context.Background(), sw, f.owner, f.sender, big.NewInt(0), ownerTestCalls(), nil)
+				require.ErrorIs(t, err, config.ErrEOADelegationMissing)
+				require.NotErrorIs(t, err, config.ErrSMA7702Unavailable)
+				var refusal *OwnerDelegationError
+				require.ErrorAs(t, err, &refusal)
+				require.Equal(t, delegate, refusal.Delegate)
+				require.Zero(t, f.estimateReads)
+				require.Zero(t, f.sendCount)
+			})
+		}
+	}
 }

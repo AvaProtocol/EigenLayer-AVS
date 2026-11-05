@@ -1851,7 +1851,10 @@ type Problem struct {
 
 	// Code Machine-readable error code. Stable across releases; clients can
 	// switch on this for programmatic handling. Mirrors the gRPC-era
-	// ErrorCode enum vocabulary.
+	// ErrorCode enum vocabulary. POLICIES_REJECTED (400) preserves an
+	// authored client-validation reason, including expired signing
+	// windows. POLICIES_UNAVAILABLE (503) hides unexpected internal
+	// diagnostics, which remain only in server logs.
 	Code *string `json:"code,omitempty"`
 
 	// Delegate Lowercase or checksummed hex EOA / contract address.
@@ -1870,6 +1873,9 @@ type Problem struct {
 	// MissingActions Planned calls the grant does not allow.
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
 	NeededWei      *string          `json:"neededWei,omitempty"`
+
+	// OwnerDelegate Lowercase or checksummed hex EOA / contract address.
+	OwnerDelegate *EthereumAddress `json:"ownerDelegate,omitempty"`
 
 	// PolicyId Usable session grant involved in this failure, when there is one.
 	// Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
@@ -1890,6 +1896,16 @@ type Problem struct {
 
 	// Status HTTP status code (echoed for clients that surface only the body).
 	Status int32 `json:"status"`
+
+	// SubmissionStarted Budget signature-only submit send boundary, when known. False
+	// proves this request was refused before attempting the durable
+	// first-send marker, so it did not relay an operation. True includes
+	// uncertain marker/storage failures and repeats of marked attempts; check the
+	// existing preparation and never infer that nothing was sent.
+	// A repeated submit of a settled unsent preparation remains false.
+	// Absent means unknown, including older gateways. A lost response
+	// also means unknown. Never infer this from HTTP status or prose.
+	SubmissionStarted *bool `json:"submissionStarted,omitempty"`
 
 	// Title Short, human-readable summary.
 	Title string `json:"title"`

@@ -47,6 +47,8 @@ type Problem struct {
 	NeededWei           string          `json:"neededWei,omitempty"`
 	AvailableWei        string          `json:"availableWei,omitempty"`
 	LegacyGrantDeadline int64           `json:"legacyGrantDeadline,omitempty"`
+	SubmissionStarted   *bool           `json:"submissionStarted,omitempty"`
+	OwnerDelegate       string          `json:"ownerDelegate,omitempty"`
 	Type                string          `json:"type"`
 	Title               string          `json:"title"`
 	Status              int             `json:"status"`
@@ -79,21 +81,32 @@ type HTTPError struct {
 	NeededWei           string
 	AvailableWei        string
 	LegacyGrantDeadline int64
-	Status              int
-	Code                string
-	Title               string
-	Detail              string
-	PolicyID            string
-	AffectedTaskIDs     []string
-	MissingActions      []ProblemAction
-	Required            *ProblemNeed
+	SubmissionStarted   *bool
+	OwnerDelegate       string
+	// Cause is server-only diagnostic context; Detail stays authored for callers.
+	Cause           error
+	Status          int
+	Code            string
+	Title           string
+	Detail          string
+	PolicyID        string
+	AffectedTaskIDs []string
+	MissingActions  []ProblemAction
+	Required        *ProblemNeed
 	// Native recipient refusals (Problem.Recipient and friends).
 	Recipient            string
 	Delegate             string
 	AcknowledgedDelegate string
 }
 
-func (e *HTTPError) Error() string { return e.Title }
+func (e *HTTPError) Error() string {
+	if e.Cause != nil {
+		return e.Title + ": " + e.Cause.Error()
+	}
+	return e.Title
+}
+
+func (e *HTTPError) Unwrap() error { return e.Cause }
 
 // httpStatusFromGRPCCode maps gRPC status codes to the closest HTTP
 // status. Based on the canonical table in google.golang.org/grpc/status
@@ -153,6 +166,8 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 		case errors.As(err, &typed):
 			p.Token, p.Spender, p.NeededWei, p.AvailableWei = typed.Token, typed.Spender, typed.NeededWei, typed.AvailableWei
 			p.LegacyGrantDeadline = typed.LegacyGrantDeadline
+			p.SubmissionStarted = typed.SubmissionStarted
+			p.OwnerDelegate = typed.OwnerDelegate
 			p.Status = typed.Status
 			p.Code = typed.Code
 			p.Title = typed.Title
@@ -197,6 +212,18 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 			// itself makes Sentry group on the actual failure.
 			logger.Error("REST handler error",
 				"status", p.Status,
+				"path", c.Request().URL.Path,
+				"route", c.Path(),
+				"method", c.Request().Method,
+				"request_id", p.Instance,
+				"error", err)
+		} else if logger != nil && p.Status >= 400 && typed != nil && typed.Cause != nil {
+			// Only deliberately attached private causes, not all ordinary 4xx
+			// requests. Expected owner refusals stay diagnosable without being
+			// raised as server failures or exposing their cause in the body.
+			logger.Info("REST request refused",
+				"status", p.Status,
+				"code", p.Code,
 				"path", c.Request().URL.Path,
 				"route", c.Path(),
 				"method", c.Request().Method,

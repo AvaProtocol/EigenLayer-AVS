@@ -346,7 +346,7 @@ func SubmitSessionGrant(db storage.Storage, prepared *PreparedSessionGrant, owne
 		return nil, fmt.Errorf("nothing prepared to submit")
 	}
 	if len(ownerSignature) != 65 {
-		return nil, fmt.Errorf("owner signature is %d bytes, want 65", len(ownerSignature))
+		return nil, &PolicyValidationError{Cause: fmt.Errorf("owner signature is %d bytes, want 65", len(ownerSignature))}
 	}
 	policy := prepared.Policy
 
@@ -368,8 +368,8 @@ func SubmitSessionGrant(db storage.Storage, prepared *PreparedSessionGrant, owne
 	}
 	if taken {
 		return nil, fmt.Errorf(
-			"entity %d was taken while this grant was being signed; prepare it again",
-			policy.EntityID)
+			"%w (entity %d); prepare the grant again",
+			ErrSessionEntityTaken, policy.EntityID)
 	}
 
 	// Re-check what this grant REPLACES, for the same reason and with the same
@@ -545,7 +545,7 @@ func verifyGrantSignature(digest common.Hash, signature []byte, owner common.Add
 	}
 	pub, err := crypto.SigToPub(digest.Bytes(), sig)
 	if err != nil {
-		return fmt.Errorf("grant signature is malformed: %w", err)
+		return &PolicyValidationError{Cause: fmt.Errorf("grant signature is malformed: %w", err)}
 	}
 	if got := crypto.PubkeyToAddress(*pub); got != owner {
 		return fmt.Errorf("%w: signed by %s, not the wallet owner %s", ErrGrantSignerMismatch, got.Hex(), owner.Hex())

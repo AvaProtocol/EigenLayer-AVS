@@ -83,7 +83,7 @@ func budgetBlockAt(ctx context.Context, client *ethclient.Client, number *big.In
 		Hash   common.Hash  `json:"hash"`
 	}
 	if err := client.Client().CallContext(ctx, &block, "eth_getBlockByNumber", tag, false); err != nil {
-		return BudgetBlock{}, fmt.Errorf("%w: canonical block unavailable", ErrBudgetReadUnavailable)
+		return BudgetBlock{}, fmt.Errorf("%w: canonical block unavailable: %w", ErrBudgetReadUnavailable, err)
 	}
 	if block.Number == nil || (*big.Int)(block.Number).Sign() < 0 || (*big.Int)(block.Number).BitLen() > 64 || block.Hash == (common.Hash{}) {
 		return BudgetBlock{}, fmt.Errorf("%w: invalid canonical block", ErrBudgetReadUnavailable)
@@ -107,7 +107,7 @@ func (v *pinnedBudgetView) VerifyCanonical(ctx context.Context) error {
 		return e
 	}
 	if block.Hash != v.block.Hash {
-		return fmt.Errorf("budget read block is no longer canonical")
+		return fmt.Errorf("%w: budget read block is no longer canonical", ErrBudgetReadUnavailable)
 	}
 	return nil
 }
@@ -116,7 +116,10 @@ func (v *pinnedBudgetView) Nonce(ctx context.Context, wallet common.Address) (*b
 	data = append(data, common.LeftPadBytes([]byte{1}, 32)...)
 	ep := preset.EntryPointV07()
 	out, e := v.CallContract(ctx, ethereum.CallMsg{To: &ep, Data: data}, nil)
-	if e != nil || len(out) != 32 {
+	if e != nil {
+		return nil, fmt.Errorf("%w: owner nonce: %w", ErrBudgetReadUnavailable, e)
+	}
+	if len(out) != 32 {
 		return nil, fmt.Errorf("%w: owner nonce", ErrBudgetReadUnavailable)
 	}
 	return new(big.Int).SetBytes(out), nil

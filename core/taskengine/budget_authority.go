@@ -22,7 +22,7 @@ func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet c
 		Addresses: []common.Address{wallet}, Topics: [][]common.Hash{{budgetValidationInstalled}},
 	})
 	if err != nil {
-		return fmt.Errorf("%w: account validation inventory", ErrBudgetReadUnavailable)
+		return fmt.Errorf("%w: account validation inventory: %w", ErrBudgetReadUnavailable, err)
 	}
 	known, err := v.knownBudgetAuthorities(owner, wallet)
 	if err != nil {
@@ -42,7 +42,7 @@ func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet c
 		seen[key] = true
 		registered, err := aa.ModuleEntityRegisteredOnChain(ctx, v, wallet, module, entity)
 		if err != nil {
-			return fmt.Errorf("%w: unknown entity registration", ErrBudgetReadUnavailable)
+			return fmt.Errorf("%w: unknown entity registration: %w", ErrBudgetReadUnavailable, err)
 		}
 		if registered {
 			return &BudgetPolicyError{Code: BudgetAuthorityUnknownCode, Detail: fmt.Sprintf("Remove the unrecognized validation authority %s, entity %d, in your wallet, then check again. Ava's runs remain paused.", module.Hex(), entity)}
