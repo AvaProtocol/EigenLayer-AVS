@@ -331,6 +331,8 @@ components:
             BUDGET_RETIRED_GRANT_INSTALLED, never for an unknown authority.
             The owner sends this call directly to target on chainId, then
             prepares again after confirmation. The gateway does not send it.
+            Consumers must match target and chainId to the expected source
+            wallet and network before prompting the owner to sign.
             A missing historical install may require skipping hook-module
             storage cleanup; the call still removes registration and clears
             the SingleSigner signer. No permission becomes usable by being

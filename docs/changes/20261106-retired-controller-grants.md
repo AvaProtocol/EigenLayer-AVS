@@ -12,6 +12,13 @@ the historical controller or rotated session signer on each affected chain;
 there is no implicit cross-chain fallback and no private key is needed. Do not
 add a foreign signer merely to suppress a refusal.
 
+The pre-#864 controller was `0x82F2Dd9a552a69f2CED7ff2D05c43aB8430158fb`
+on mainnets as well as testnets. Pin it on all eleven chains served then:
+Ethereum (1), Base (8453), Sepolia (11155111), Base Sepolia (84532), BNB (56),
+Arbitrum (42161), Optimism (10), Unichain (130), Robinhood (4663), Polygon (137)
+and Hyperliquid (999). Applying this configuration must follow deployment of
+the gateway code in this change.
+
 For an unrecognized, currently registered SingleSigner entity greater than
 zero, the gateway reads its signer at the pinned block. If that signer is in
 the chain's retired list, prepare and submit return **409
@@ -39,8 +46,8 @@ Ambiguous or mismatched history is not used. A recovered install is passed to
 `SessionSignerUninstallFromInstall` so the original hook data and teardown
 order are retained.
 
-Pruned history, unsupported transaction wrappers and old cache records without
-provenance use `PackSessionSignerUninstall(entity, nil)`. This intentionally
+Pruned history, unsupported transaction wrappers and missing provenance use
+`PackSessionSignerUninstall(entity, nil)`. This intentionally
 skips hook-module cleanup while removing account registration and clearing the
 SingleSigner slot. Any remaining hook storage is inert after deregistration;
 it must not be described as fully cleaned. Before returning any retired cleanup,
@@ -53,6 +60,12 @@ than a fallback derived after cancellation. No synthetic policy records are
 created. The reservation key is additive; no existing records are rewritten.
 
 ## First-scan latency
+
+The derived inventory namespace and record version are now v2. v1 records are
+left untouched and ignored, so previously scanned wallets rebuild once and
+capture install provenance. Permanent entity reservations use a separate key
+and survive this rebuild. A complete v2 checkpoint is reused on the next read
+and after restart; interrupted v2 backfills retain their complete prefix.
 
 Long finalized inventory backfills overlap at most four log-range requests.
 Results are consumed and checkpointed in ascending range order, with the

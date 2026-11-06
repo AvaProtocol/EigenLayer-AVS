@@ -3,7 +3,9 @@ package taskengine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -55,6 +57,52 @@ func TestBudgetRetiredInstallRecoversDeferredHookCleanup(t *testing.T) {
 	require.NotNil(t, readBudgetInventory(t, v, rpc.wallet).Candidates[0].Install)
 	require.ErrorAs(t, v.CheckAuthorities(context.Background(), owner, rpc.wallet), &refusal)
 	require.Equal(t, want, refusal.OnChainCleanup.CallData)
+}
+
+func TestBudgetRetiredInstallRebuildsV1CacheAndReusesV2ProvenanceAfterRestart(t *testing.T) {
+	v, rpc, owner := retiredBudgetFixture(t)
+	tx, install := retiredInstallTransaction(t, rpc.wallet, rpc.signer, 99)
+	log := &rpc.logs[0]
+	log.BlockHash, log.TxHash = budgetInventoryBlockHash(11), tx.Hash()
+	rpc.historyTx = tx
+	rpc.historyReceipt = &types.Receipt{Status: 1, BlockNumber: big.NewInt(11), BlockHash: log.BlockHash, TxHash: tx.Hash(), Logs: []*types.Log{log}}
+	// The complete v1 checkpoint would suppress every historical log read,
+	// leaving this candidate permanently without its install's provenance.
+	old := budgetAuthorityInventory{Version: 1, ChainID: v.chainID, Wallet: rpc.wallet, Start: BudgetBlock{Number: 11, Hash: log.BlockHash}, Cursor: &v.block, Candidates: []budgetAuthorityCandidate{{Module: aa.SingleSignerValidationModuleAddress(), Entity: 99}}}
+	raw, err := json.Marshal(old)
+	require.NoError(t, err)
+	oldKey := []byte(fmt.Sprintf("budgetauthority:v1:%d:%s", v.chainID, strings.ToLower(rpc.wallet.Hex())))
+	require.NoError(t, v.n.db.Set(oldKey, raw))
+	require.NoError(t, v.reserveRetiredSessionEntity(context.Background(), rpc.wallet, 500))
+	var refusal *BudgetPolicyError
+	require.ErrorAs(t, v.CheckAuthorities(context.Background(), owner, rpc.wallet), &refusal)
+	want, err := aa.SessionSignerUninstallFromInstall(99, install)
+	require.NoError(t, err)
+	require.Equal(t, want, refusal.OnChainCleanup.CallData)
+	cache := readBudgetInventory(t, v, rpc.wallet)
+	require.EqualValues(t, 2, cache.Version)
+	require.NotNil(t, cache.Candidates[0].Install)
+	require.Equal(t, tx.Hash(), cache.Candidates[0].Install.Transaction)
+	unchanged, err := v.n.db.GetKey(oldKey)
+	require.NoError(t, err)
+	require.Equal(t, raw, unchanged, "the derived v1 record is ignored, not migrated in place")
+	history, queries, _ := budgetInventoryReadCounts(rpc)
+	require.Positive(t, queries, "the v1 cursor must not suppress provenance backfill")
+	// Restart with a provider that refuses any new backfill: the durable v2
+	// provenance still produces full hook removal, not the empty-hook fallback.
+	restarted := *v
+	restarted.n = &Engine{db: v.n.db, config: v.n.config, smartWalletConfig: v.n.smartWalletConfig}
+	rpc.historyError = true
+	failed := uint64(0)
+	rpc.logErrorFrom = &failed
+	require.ErrorAs(t, restarted.CheckAuthorities(context.Background(), owner, rpc.wallet), &refusal)
+	require.Equal(t, want, refusal.OnChainCleanup.CallData)
+	historyAfter, queriesAfter, _ := budgetInventoryReadCounts(rpc)
+	require.Equal(t, history, historyAfter)
+	require.Equal(t, queries, queriesAfter)
+	next, err := NextSessionEntityID(v.n.db, v.chainID, owner, rpc.wallet)
+	require.NoError(t, err)
+	require.EqualValues(t, 501, next, "cache invalidation never regresses permanent reservations")
 }
 
 func TestBudgetRetiredInstallUnavailableOrMismatchedFallsBack(t *testing.T) {

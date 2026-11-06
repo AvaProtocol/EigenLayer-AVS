@@ -21,7 +21,7 @@ type budgetAuthorityCandidate struct {
 	Module common.Address `json:"module"`
 	Entity uint32         `json:"entity"`
 	// Optional provenance lets retired grants recover their original teardown.
-	// Older cached inventories remain usable and fall back to signer-only cleanup.
+	// Missing history falls back to signer-only cleanup.
 	Install *budgetAuthorityInstall `json:"install,omitempty"`
 }
 
@@ -43,8 +43,12 @@ type budgetAuthorityInventory struct {
 	Candidates []budgetAuthorityCandidate `json:"candidates"`
 }
 
+// v1 candidates lacked install provenance. Rebuild derived inventories once so
+// already-scanned wallets can recover their original hook teardown as well.
+const budgetAuthorityInventoryVersion uint8 = 2
+
 func budgetAuthorityInventoryKey(chain int64, wallet common.Address) []byte {
-	return []byte(fmt.Sprintf("budgetauthority:v1:%d:%s", chain, strings.ToLower(wallet.Hex())))
+	return []byte(fmt.Sprintf("budgetauthority:v2:%d:%s", chain, strings.ToLower(wallet.Hex())))
 }
 
 // Serialize each wallet's backfill and checkpoints through the caller's
@@ -124,7 +128,7 @@ func (v *pinnedBudgetView) loadBudgetAuthorityInventory(ctx context.Context, wal
 }
 
 func (c *budgetAuthorityInventory) valid(chain int64, wallet common.Address) bool {
-	if c.Version != 1 || c.ChainID != chain || c.Wallet != wallet || c.Start.Hash == (common.Hash{}) {
+	if c.Version != budgetAuthorityInventoryVersion || c.ChainID != chain || c.Wallet != wallet || c.Start.Hash == (common.Hash{}) {
 		return false
 	}
 	if c.Cursor == nil {
@@ -145,7 +149,7 @@ func (v *pinnedBudgetView) newBudgetAuthorityInventory(ctx context.Context, wall
 	if err = v.VerifyCanonical(ctx); err != nil {
 		return nil, err
 	}
-	return &budgetAuthorityInventory{Version: 1, ChainID: v.chainID, Wallet: wallet, Start: start}, nil
+	return &budgetAuthorityInventory{Version: budgetAuthorityInventoryVersion, ChainID: v.chainID, Wallet: wallet, Start: start}, nil
 }
 
 func (v *pinnedBudgetView) saveBudgetAuthorityInventory(inventory *budgetAuthorityInventory) error {
