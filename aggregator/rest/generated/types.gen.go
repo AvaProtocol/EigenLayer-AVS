@@ -1874,6 +1874,19 @@ type Problem struct {
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
 	NeededWei      *string          `json:"neededWei,omitempty"`
 
+	// OnChainCleanup Unsigned owner-directed removal of a registered grant naming a
+	// configured retired Ava signer. Returned only with 409
+	// BUDGET_RETIRED_GRANT_INSTALLED, never for an unknown authority.
+	// The owner sends this call directly to target on chainId, then
+	// prepares again after confirmation. The gateway does not send it.
+	// Consumers must match target and chainId to the expected source
+	// wallet and network before prompting the owner to sign.
+	// A missing historical install may require skipping hook-module
+	// storage cleanup; the call still removes registration and clears
+	// the SingleSigner signer. No permission becomes usable by being
+	// classified as retired.
+	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
+
 	// OwnerDelegate Observed EIP-7702 delegate of the owner, only on
 	// EOA_DELEGATION_MISSING from owner execution or budget preparation
 	// and submission, and policy checks of an eoa_7702 runner. Absent

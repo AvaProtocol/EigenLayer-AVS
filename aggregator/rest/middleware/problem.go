@@ -31,6 +31,15 @@ type ProblemNativeCap struct {
 	Amount string `json:"amount"`
 }
 
+// ProblemOnChainCleanup has the same wire shape as OnChainRevokeCleanup.
+// It is an unsigned owner call, never a gateway-signed operation.
+type ProblemOnChainCleanup struct {
+	EntityID int64  `json:"entityId"`
+	Target   string `json:"target"`
+	CallData string `json:"callData"`
+	ChainID  int64  `json:"chainId"`
+}
+
 // ProblemNeed is the permission set one workflow still needs.
 type ProblemNeed struct {
 	AllowedActions   []ProblemAction   `json:"allowedActions,omitempty"`
@@ -42,23 +51,24 @@ type ProblemNeed struct {
 }
 
 type Problem struct {
-	Token               string          `json:"token,omitempty"`
-	Spender             string          `json:"spender,omitempty"`
-	NeededWei           string          `json:"neededWei,omitempty"`
-	AvailableWei        string          `json:"availableWei,omitempty"`
-	LegacyGrantDeadline int64           `json:"legacyGrantDeadline,omitempty"`
-	SubmissionStarted   *bool           `json:"submissionStarted,omitempty"`
-	OwnerDelegate       string          `json:"ownerDelegate,omitempty"`
-	Type                string          `json:"type"`
-	Title               string          `json:"title"`
-	Status              int             `json:"status"`
-	Detail              string          `json:"detail,omitempty"`
-	Instance            string          `json:"instance,omitempty"`
-	Code                string          `json:"code,omitempty"`
-	PolicyID            string          `json:"policyId,omitempty"`
-	AffectedTaskIDs     []string        `json:"affectedTaskIds,omitempty"`
-	MissingActions      []ProblemAction `json:"missingActions,omitempty"`
-	Required            *ProblemNeed    `json:"required,omitempty"`
+	Token               string                 `json:"token,omitempty"`
+	Spender             string                 `json:"spender,omitempty"`
+	NeededWei           string                 `json:"neededWei,omitempty"`
+	AvailableWei        string                 `json:"availableWei,omitempty"`
+	LegacyGrantDeadline int64                  `json:"legacyGrantDeadline,omitempty"`
+	SubmissionStarted   *bool                  `json:"submissionStarted,omitempty"`
+	OwnerDelegate       string                 `json:"ownerDelegate,omitempty"`
+	OnChainCleanup      *ProblemOnChainCleanup `json:"onChainCleanup,omitempty"`
+	Type                string                 `json:"type"`
+	Title               string                 `json:"title"`
+	Status              int                    `json:"status"`
+	Detail              string                 `json:"detail,omitempty"`
+	Instance            string                 `json:"instance,omitempty"`
+	Code                string                 `json:"code,omitempty"`
+	PolicyID            string                 `json:"policyId,omitempty"`
+	AffectedTaskIDs     []string               `json:"affectedTaskIds,omitempty"`
+	MissingActions      []ProblemAction        `json:"missingActions,omitempty"`
+	Required            *ProblemNeed           `json:"required,omitempty"`
 	// Recipient, Delegate and AcknowledgedDelegate name the native
 	// recipient a prepare or submit refused for its code.
 	Recipient            string `json:"recipient,omitempty"`
@@ -83,6 +93,7 @@ type HTTPError struct {
 	LegacyGrantDeadline int64
 	SubmissionStarted   *bool
 	OwnerDelegate       string
+	OnChainCleanup      *ProblemOnChainCleanup
 	// Cause is server-only diagnostic context; Detail stays authored for callers.
 	Cause           error
 	Status          int
@@ -168,6 +179,7 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 			p.LegacyGrantDeadline = typed.LegacyGrantDeadline
 			p.SubmissionStarted = typed.SubmissionStarted
 			p.OwnerDelegate = typed.OwnerDelegate
+			p.OnChainCleanup = typed.OnChainCleanup
 			p.Status = typed.Status
 			p.Code = typed.Code
 			p.Title = typed.Title

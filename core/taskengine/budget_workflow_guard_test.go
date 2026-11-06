@@ -15,44 +15,46 @@ import (
 )
 
 func TestBudgetWorkflowAuthorityPauseUsesDetailWithoutCodePrefix(t *testing.T) {
-	for _, wrapped := range []bool{false, true} {
-		name := "direct"
-		if wrapped {
-			name = "wrapped"
-		}
-		t.Run(name, func(t *testing.T) {
-			f, p, backend, signature := newBudgetChangeTest(t)
-			_, err := f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, p.Wallet, p.ChainID, p.ID, signature)
-			require.NoError(t, err)
-			backend.observation = budgetMined(p, true)
-			active, err := f.n.GetBudgetPolicyPreparation(f.user, p.Wallet, p.ChainID, p.ID)
-			require.NoError(t, err)
-			require.Equal(t, budgetChangeActive, active.State)
-			detail := "This wallet has an unrecognized validation authority. Remove it, then check again."
-			backend.authorityError = &BudgetPolicyError{Code: BudgetAuthorityUnknownCode, Detail: detail}
+	for _, code := range []string{BudgetAuthorityUnknownCode, BudgetRetiredGrantInstalledCode} {
+		for _, wrapped := range []bool{false, true} {
+			name := "direct"
 			if wrapped {
-				backend.authorityError = fmt.Errorf("private inventory context: %w", backend.authorityError)
+				name = "wrapped"
 			}
-			task := manualCustomCodeTask(f.user.Address.Hex(), p.Wallet.Hex(), model.GenerateID())
-			task.Nodes = append(task.Nodes, &avsproto.TaskNode{
-				Id: "write1", Name: "transfer", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
-				TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{
-					Config: &avsproto.ContractWriteNode_Config{ChainId: testPolicyChain, ContractAddress: testTokenAddr.Hex()},
-				}},
+			t.Run(code+"/"+name, func(t *testing.T) {
+				f, p, backend, signature := newBudgetChangeTest(t)
+				_, err := f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, p.Wallet, p.ChainID, p.ID, signature)
+				require.NoError(t, err)
+				backend.observation = budgetMined(p, true)
+				active, err := f.n.GetBudgetPolicyPreparation(f.user, p.Wallet, p.ChainID, p.ID)
+				require.NoError(t, err)
+				require.Equal(t, budgetChangeActive, active.State)
+				detail := "This wallet has an unrecognized validation authority. Remove it, then check again."
+				backend.authorityError = &BudgetPolicyError{Code: code, Detail: detail}
+				if wrapped {
+					backend.authorityError = fmt.Errorf("private inventory context: %w", backend.authorityError)
+				}
+				task := manualCustomCodeTask(f.user.Address.Hex(), p.Wallet.Hex(), model.GenerateID())
+				task.Nodes = append(task.Nodes, &avsproto.TaskNode{
+					Id: "write1", Name: "transfer", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
+					TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: &avsproto.ContractWriteNode{
+						Config: &avsproto.ContractWriteNode_Config{ChainId: testPolicyChain, ContractAddress: testTokenAddr.Hex()},
+					}},
+				})
+				task.Edges = append(task.Edges, &avsproto.TaskEdge{Id: "to_write", Source: task.Nodes[0].Id, Target: "write1"})
+				lease, err := f.n.budgetWorkflowLease(context.Background(), task)
+				require.Nil(t, lease)
+				var paused *BudgetPolicyError
+				require.ErrorAs(t, err, &paused)
+				require.Equal(t, BudgetChangingCode, paused.Code)
+				require.Contains(t, paused.Detail, detail)
+				require.Contains(t, paused.Detail, "paused")
+				require.NotContains(t, paused.Detail, code+":")
+				require.NotContains(t, paused.Detail, "private inventory context")
+				require.Equal(t, 5*time.Second, paused.RetryAfter())
+				require.EqualValues(t, 1, backend.sent.Load(), "only the earlier offline install was relayed")
 			})
-			task.Edges = append(task.Edges, &avsproto.TaskEdge{Id: "to_write", Source: task.Nodes[0].Id, Target: "write1"})
-			lease, err := f.n.budgetWorkflowLease(context.Background(), task)
-			require.Nil(t, lease)
-			var paused *BudgetPolicyError
-			require.ErrorAs(t, err, &paused)
-			require.Equal(t, BudgetChangingCode, paused.Code)
-			require.Contains(t, paused.Detail, detail)
-			require.Contains(t, paused.Detail, "paused")
-			require.NotContains(t, paused.Detail, BudgetAuthorityUnknownCode+":")
-			require.NotContains(t, paused.Detail, "private inventory context")
-			require.Equal(t, 5*time.Second, paused.RetryAfter())
-			require.EqualValues(t, 1, backend.sent.Load(), "only the earlier offline install was relayed")
-		})
+		}
 	}
 }
 

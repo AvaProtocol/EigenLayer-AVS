@@ -16,6 +16,8 @@ import (
 // ERC-6900 v0.8 IModularAccount / Alchemy ModularAccount v2.0.1.
 var budgetValidationInstalled = crypto.Keccak256Hash([]byte("ValidationInstalled(address,uint32)"))
 
+const BudgetRetiredGrantInstalledCode = "BUDGET_RETIRED_GRANT_INSTALLED"
+
 func (n *Engine) warmBudgetAuthorityInventory(ctx context.Context, owner, wallet common.Address, chain int64) error {
 	view, err := n.budgetBackend().View(ctx, chain, nil)
 	if err != nil {
@@ -43,7 +45,9 @@ func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet c
 	if err != nil {
 		return err
 	}
-	for key, candidate := range candidates {
+	var retired *BudgetPolicyError
+	for _, candidate := range sortedBudgetAuthorityCandidates(candidates) {
+		key := aa.PackModuleEntity(candidate.Module, candidate.Entity)
 		if known[key] {
 			continue
 		}
@@ -52,10 +56,79 @@ func (v *pinnedBudgetView) CheckAuthorities(ctx context.Context, owner, wallet c
 			return fmt.Errorf("%w: unknown entity registration: %w", ErrBudgetReadUnavailable, err)
 		}
 		if registered {
+			if candidate.Module == aa.SingleSignerValidationModuleAddress() && candidate.Entity >= aa.MinSessionEntityID && len(v.retiredBudgetSigners()) > 0 {
+				signer, readErr := aa.EntitySignerOnChain(ctx, v, wallet, candidate.Entity)
+				if readErr != nil {
+					return fmt.Errorf("%w: retired authority signer: %w", ErrBudgetReadUnavailable, readErr)
+				}
+				if v.isRetiredBudgetSigner(signer) {
+					if retired == nil {
+						cleanup, cleanupErr := v.retiredBudgetGrantCleanup(ctx, wallet, candidate, signer)
+						if cleanupErr != nil {
+							return cleanupErr
+						}
+						retired = &BudgetPolicyError{Code: BudgetRetiredGrantInstalledCode, Detail: "This wallet still has a permission for a retired Ava signer. Remove the old permission with the owner wallet, then check again.", OnChainCleanup: cleanup}
+					}
+					continue
+				}
+			}
 			return &BudgetPolicyError{Code: BudgetAuthorityUnknownCode, Detail: fmt.Sprintf("This wallet has a validation authority Ava doesn't recognize (module %s, entity %d). Remove it, then check again.", candidate.Module.Hex(), candidate.Entity)}
 		}
 	}
-	return v.VerifyCanonical(ctx)
+	if err := v.VerifyCanonical(ctx); err != nil {
+		return err
+	}
+	if retired != nil {
+		return retired
+	}
+	return nil
+}
+
+func (v *pinnedBudgetView) retiredBudgetSigners() []common.Address {
+	if v.n.config == nil {
+		return nil
+	}
+	return v.n.config.WalletBudgetRetiredSessionSigners[v.chainID]
+}
+
+func (v *pinnedBudgetView) isRetiredBudgetSigner(signer common.Address) bool {
+	if signer == (common.Address{}) {
+		return false
+	}
+	for _, retired := range v.retiredBudgetSigners() {
+		if signer == retired {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *pinnedBudgetView) retiredBudgetGrantCleanup(ctx context.Context, wallet common.Address, candidate budgetAuthorityCandidate, signer common.Address) (*OnChainRevokeCleanup, error) {
+	if err := v.reserveRetiredSessionEntity(ctx, wallet, candidate.Entity); err != nil {
+		return nil, fmt.Errorf("%w: retired entity reservation: %w", ErrBudgetReadUnavailable, err)
+	}
+	install, recoveryErr := v.recoverRetiredBudgetInstall(ctx, wallet, candidate, signer)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%w: retired authority cleanup: %w", ErrBudgetReadUnavailable, err)
+	}
+	if recoveryErr == nil && install != nil {
+		data, err := aa.SessionSignerUninstallFromInstall(candidate.Entity, install)
+		if err == nil {
+			return &OnChainRevokeCleanup{EntityID: candidate.Entity, Target: wallet, CallData: data, ChainID: v.chainID}, nil
+		}
+		recoveryErr = err
+	}
+	if recoveryErr != nil && v.n.logger != nil {
+		v.n.logger.Debug("Retired grant uses empty-hook cleanup", "chain_id", v.chainID, "wallet", wallet.Hex(), "entity_id", candidate.Entity, "err", recoveryErr)
+	}
+	// Always clear registration and the SingleSigner slot, even if the
+	// historical install cannot be recovered. Empty hook data intentionally
+	// skips hook module storage, which is inert once registration is removed.
+	data, err := aa.PackSessionSignerUninstall(candidate.Entity, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: retired authority cleanup: %w", ErrBudgetReadUnavailable, err)
+	}
+	return &OnChainRevokeCleanup{EntityID: candidate.Entity, Target: wallet, CallData: data, ChainID: v.chainID}, nil
 }
 
 // Normal account creation begins with empty code/storage. Binary-searching

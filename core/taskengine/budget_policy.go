@@ -33,6 +33,8 @@ type BudgetPolicyError struct {
 	// Latest outstanding legacy signature deadline, in Unix milliseconds.
 	// Set only for BudgetLegacyGrantPendingCode.
 	LegacyGrantDeadline int64
+	// Owner-directed removal for a proven, registered retired session signer.
+	OnChainCleanup *OnChainRevokeCleanup
 }
 
 func (e *BudgetPolicyError) Error() string { return e.Code + ": " + e.Detail }
