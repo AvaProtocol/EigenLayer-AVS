@@ -2183,10 +2183,22 @@ type SessionPolicy struct {
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
-	// OnChainCleanup Present when status is revoked and the validation entity is still
-	// installed on chain. Owner-executable uninstallValidation so clients
-	// can finish teardown without re-calling DELETE (#717).
+	// OnChainCleanup Owner-executable uninstallValidation so clients can finish teardown
+	// without re-calling DELETE (#717). Present only when
+	// onChainCleanupRequired is true and the payload can be built.
+	// When the payload cannot be built, onChainCleanupRequired remains
+	// true and this field is absent.
 	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
+
+	// OnChainCleanupRequired True when this policy is revoked and its grant was applied on
+	// chain without a recorded verified teardown. Has the same meaning
+	// as RevokePolicyResponse.onChainCleanupRequired. False for active
+	// or pending policies, grants never applied, or verified teardown.
+	// Independent of payload availability: onChainCleanup may be absent
+	// even when this is true, if the cleanup payload cannot be built.
+	// List and single-policy reads recheck the account registration and
+	// record verified removals. Failed checks leave the requirement set.
+	OnChainCleanupRequired bool `json:"onChainCleanupRequired"`
 
 	// Runner Lowercase or checksummed hex EOA / contract address.
 	Runner EthereumAddress `json:"runner"`
@@ -2539,10 +2551,22 @@ type SubmitPolicyResponse struct {
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
-	// OnChainCleanup Present when status is revoked and the validation entity is still
-	// installed on chain. Owner-executable uninstallValidation so clients
-	// can finish teardown without re-calling DELETE (#717).
+	// OnChainCleanup Owner-executable uninstallValidation so clients can finish teardown
+	// without re-calling DELETE (#717). Present only when
+	// onChainCleanupRequired is true and the payload can be built.
+	// When the payload cannot be built, onChainCleanupRequired remains
+	// true and this field is absent.
 	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
+
+	// OnChainCleanupRequired True when this policy is revoked and its grant was applied on
+	// chain without a recorded verified teardown. Has the same meaning
+	// as RevokePolicyResponse.onChainCleanupRequired. False for active
+	// or pending policies, grants never applied, or verified teardown.
+	// Independent of payload availability: onChainCleanup may be absent
+	// even when this is true, if the cleanup payload cannot be built.
+	// List and single-policy reads recheck the account registration and
+	// record verified removals. Failed checks leave the requirement set.
+	OnChainCleanupRequired bool `json:"onChainCleanupRequired"`
 
 	// Runner Lowercase or checksummed hex EOA / contract address.
 	Runner EthereumAddress `json:"runner"`

@@ -2621,7 +2621,7 @@ components:
 
     SessionPolicy:
       type: object
-      required: [id, runner, chainId, status, entityId, sessionSigner, agentLabel, validUntil, createdAt]
+      required: [id, runner, chainId, status, entityId, sessionSigner, agentLabel, validUntil, createdAt, onChainCleanupRequired]
       properties:
         id: { $ref: '#/components/schemas/Ulid' }
         runner: { $ref: '#/components/schemas/EthereumAddress' }
@@ -2686,13 +2686,26 @@ components:
           type: integer
           format: int64
           description: Unix milliseconds.
+        onChainCleanupRequired:
+          type: boolean
+          description: |
+            True when this policy is revoked and its grant was applied on
+            chain without a recorded verified teardown. Has the same meaning
+            as RevokePolicyResponse.onChainCleanupRequired. False for active
+            or pending policies, grants never applied, or verified teardown.
+            Independent of payload availability: onChainCleanup may be absent
+            even when this is true, if the cleanup payload cannot be built.
+            List and single-policy reads recheck the account registration and
+            record verified removals. Failed checks leave the requirement set.
         onChainCleanup:
           allOf:
             - $ref: '#/components/schemas/OnChainRevokeCleanup'
           description: |
-            Present when status is revoked and the validation entity is still
-            installed on chain. Owner-executable uninstallValidation so clients
-            can finish teardown without re-calling DELETE (#717).
+            Owner-executable uninstallValidation so clients can finish teardown
+            without re-calling DELETE (#717). Present only when
+            onChainCleanupRequired is true and the payload can be built.
+            When the payload cannot be built, onChainCleanupRequired remains
+            true and this field is absent.
 
     BudgetApprovalPair:
       type: object
@@ -4479,7 +4492,13 @@ paths:
     get:
       tags: [Policies]
       summary: List the wallet's session policies
-      description: Grant material (calldata, signatures) is never echoed.
+      description: |
+        Grant material (install calldata, signatures) is never echoed.
+        Revoked, applied policies without verified teardown are checked on their
+        chain. A cleared registration records teardown and removes the cleanup
+        requirement and payload. Failed checks leave the stored requirement
+        unchanged; the list remains available. Registration reads share a
+        ten-second request budget.
       operationId: listWalletPolicies
       responses:
         '200':
@@ -4505,6 +4524,12 @@ paths:
     get:
       tags: [Policies]
       summary: Get one session policy
+      description: |
+        A revoked, applied policy without verified teardown is checked on its
+        chain before rendering. A cleared registration records teardown and
+        removes the cleanup requirement and payload. A failed check leaves
+        the stored requirement unchanged. The registration read is bounded
+        to ten seconds.
       operationId: getWalletPolicy
       responses:
         '200':
