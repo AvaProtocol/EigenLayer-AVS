@@ -2,16 +2,20 @@ package rest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
@@ -92,6 +96,11 @@ func newCleanupRegistrationProbe(t *testing.T, rig *policyTestRig) *cleanupRegis
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
 	}))
 	t.Cleanup(rpc.Close)
+	client, err := ethclient.Dial(rpc.URL)
+	require.NoError(t, err)
+	t.Cleanup(client.Close)
+	rig.server.smartWalletRpc = client
+	rig.server.smartWalletRpcByChain = map[int64]*ethclient.Client{policyTestChain: client}
 	rig.server.config.SmartWallet.EthRpcUrl = rpc.URL
 	rig.server.engine.InstallSessionResolver()
 	t.Cleanup(func() {
@@ -157,6 +166,7 @@ func TestPolicyCleanupReadFailureKeepsRequirement(t *testing.T) {
 			require.False(t, stored.Grant.TornDown())
 			require.Equal(t, 1, logs.Len(), "failed verification is rate limited independently of payload failures")
 			require.Equal(t, "verification", logs.All()[0].ContextMap()["stage"])
+			require.Equal(t, "rpc", logs.All()[0].ContextMap()["cause_class"])
 			require.EqualValues(t, 3, probe.calls.Load())
 			require.False(t, probe.wrongRequest.Load())
 		})
@@ -185,7 +195,9 @@ func TestPolicyCleanupReadStorageFailureKeepsRequirement(t *testing.T) {
 	rig.server.engine = taskengine.New(db, rig.server.config, nil, rig.server.logger)
 	probe := newCleanupRegistrationProbe(t, rig)
 	probe.registered.Store(false)
+	logs := observePolicyCleanupWarnings(t, rig.server)
 	assertCleanupFields(t, readCleanupPolicy(t, rig, policy.ID, true), true, true)
+	require.Equal(t, "storage", logs.All()[0].ContextMap()["cause_class"])
 
 	db.fail.Store(false)
 	assertCleanupFields(t, readCleanupPolicy(t, rig, policy.ID, false), false, false)
@@ -199,8 +211,14 @@ func TestPolicyCleanupReadUsesPolicyChain(t *testing.T) {
 	require.NoError(t, taskengine.StoreSessionPolicy(rig.db, policy))
 	probe := newCleanupRegistrationProbe(t, rig)
 	probe.registered.Store(false)
+	rig.server.smartWalletRpcByChain[policyGrantChain] = rig.server.smartWalletRpc
 	rig.server.config.Chains[1].SmartWallet.EthRpcUrl = rig.server.config.SmartWallet.EthRpcUrl
 	rig.server.config.SmartWallet.EthRpcUrl = "http://127.0.0.1:1"
+	wrongChain, err := ethclient.Dial("http://127.0.0.1:1")
+	require.NoError(t, err)
+	t.Cleanup(wrongChain.Close)
+	rig.server.smartWalletRpc = wrongChain
+	rig.server.smartWalletRpcByChain[policyTestChain] = wrongChain
 	rec := rig.callAs(t, policyGrantChain, nil, func(c echo.Context) error {
 		return rig.server.GetWalletPolicy(c, rig.wallet.Hex(), policy.ID, generated.GetWalletPolicyParams{})
 	}, nil)
@@ -210,6 +228,88 @@ func TestPolicyCleanupReadUsesPolicyChain(t *testing.T) {
 	assertCleanupFields(t, fields, false, false)
 	require.EqualValues(t, 1, probe.calls.Load())
 	require.False(t, probe.wrongRequest.Load())
+}
+
+func TestPolicyCleanupReadReusesHeldRPCClient(t *testing.T) {
+	rig := newPolicyRig(t)
+	policy := cleanupPolicyFixture(t, rig)
+	require.NoError(t, taskengine.StoreSessionPolicy(rig.db, policy))
+	probe := newCleanupRegistrationProbe(t, rig)
+	probe.registered.Store(false)
+	// The already-open client remains usable even if a fresh dial from config
+	// would fail. Policy reads must borrow it without replacing or closing it.
+	rig.server.config.SmartWallet.EthRpcUrl = "http://127.0.0.1:1"
+	assertCleanupFields(t, readCleanupPolicy(t, rig, policy.ID, true), false, false)
+	registered, err := aa.EntityRegisteredOnChain(context.Background(), rig.server.smartWalletRpc, rig.wallet, policy.EntityID)
+	require.NoError(t, err, "a policy read must not close the shared client")
+	require.False(t, registered)
+	require.EqualValues(t, 2, probe.calls.Load())
+	require.False(t, probe.wrongRequest.Load())
+}
+
+func TestPolicyCleanupMissingSharedClientDoesNotFallBack(t *testing.T) {
+	for _, missingMap := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing_map=%t", missingMap), func(t *testing.T) {
+			rig := newPolicyRig(t)
+			policy := cleanupPolicyFixture(t, rig)
+			policy.ChainID = policyGrantChain
+			require.NoError(t, taskengine.StoreSessionPolicy(rig.db, policy))
+			probe := newCleanupRegistrationProbe(t, rig)
+			probe.registered.Store(false)
+			rig.server.config.Chains[1].SmartWallet.EthRpcUrl = rig.server.config.SmartWallet.EthRpcUrl
+			if missingMap {
+				rig.server.smartWalletRpcByChain = nil
+			}
+			logs := observePolicyCleanupWarnings(t, rig.server)
+			rec := rig.callAs(t, policyGrantChain, nil, func(c echo.Context) error {
+				return rig.server.GetWalletPolicy(c, rig.wallet.Hex(), policy.ID, generated.GetWalletPolicyParams{})
+			}, nil)
+			require.Equal(t, http.StatusOK, rec.Code)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &fields))
+			assertCleanupFields(t, fields, true, true)
+			require.Zero(t, probe.calls.Load(), "a configured policy chain needs its own held RPC client")
+			require.Equal(t, 1, logs.Len())
+			require.Equal(t, "configuration", logs.All()[0].ContextMap()["cause_class"])
+		})
+	}
+}
+
+func TestPolicyCleanupReadUsesSingleChainHeldClient(t *testing.T) {
+	rig := newPolicyRig(t)
+	policy := cleanupPolicyFixture(t, rig)
+	require.NoError(t, taskengine.StoreSessionPolicy(rig.db, policy))
+	probe := newCleanupRegistrationProbe(t, rig)
+	probe.registered.Store(false)
+	rig.server.smartWalletRpcByChain = nil
+	rig.server.config.SmartWallet.EthRpcUrl = "http://127.0.0.1:1"
+	assertCleanupFields(t, readCleanupPolicy(t, rig, policy.ID, false), false, false)
+	require.EqualValues(t, 1, probe.calls.Load())
+}
+
+func TestPolicyCleanupWarningsSeparateFailureClasses(t *testing.T) {
+	rig := newPolicyRig(t)
+	logs := observePolicyCleanupWarnings(t, rig.server)
+	policy := rig.server.policyToAPI(cleanupPolicyFixture(t, rig))
+	for _, kind := range []string{"busy", "rpc", "storage", "rpc"} {
+		err := fmt.Errorf("wrapped: %w", &taskengine.PolicyCleanupReadError{Kind: kind, Cause: errors.New(kind + " unavailable")})
+		rig.server.logPolicyCleanupUnavailable(policy, "verification", err)
+	}
+	require.Equal(t, 3, logs.Len(), "a busy lock must not suppress a later RPC/storage warning")
+	for i, kind := range []string{"busy", "rpc", "storage"} {
+		require.Equal(t, kind, logs.All()[i].ContextMap()["cause_class"])
+	}
+	deadline := &taskengine.PolicyCleanupReadError{Kind: "rpc", Cause: context.DeadlineExceeded}
+	require.Equal(t, "timeout", policyCleanupFailureClass(deadline))
+}
+
+func TestPolicyCleanupWarningRateLimitExpires(t *testing.T) {
+	server := &Server{}
+	key := policyCleanupWarningKey{policyID: "policy", stage: "verification", cause: "rpc"}
+	now := time.Unix(1_700_000_000, 0)
+	require.True(t, server.allowPolicyCleanupWarning(key, now))
+	require.False(t, server.allowPolicyCleanupWarning(key, now.Add(59*time.Second)))
+	require.True(t, server.allowPolicyCleanupWarning(key, now.Add(time.Minute)), "persistent failures must become visible again")
 }
 
 func TestPolicyCleanupReadsSkipPoliciesWithoutCleanup(t *testing.T) {

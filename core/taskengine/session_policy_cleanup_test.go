@@ -91,6 +91,6 @@ func TestSessionPolicyCleanupReadDoesNotFallBackToAnotherChain(t *testing.T) {
 	n, policy := readCleanupFixture(t)
 	n.sessionChainReads = true
 	policy.ChainID = 999999
-	require.ErrorIs(t, n.RefreshSessionPolicyCleanup(context.Background(), policy), ErrSessionChainNotServed)
+	require.ErrorIs(t, n.RefreshSessionPolicyCleanup(context.Background(), policy, nil), ErrSessionChainNotServed)
 	require.True(t, policy.Grant.NeedsOnChainCleanup())
 }

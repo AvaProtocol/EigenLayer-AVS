@@ -13,17 +13,21 @@ looking clear. A payload is only returned with true. The existing revoke
 responses, including `POLICIES_REVOKED_CLEANUP_UNAVAILABLE`, do not change.
 
 Payload build or registration-check failures log the policy id, chain, wallet,
-stage and cause once per policy/stage in the running REST server. Suppression is
+stage, cause class and cause. Warnings are limited to one per minute for each
+policy/stage/class. Busy locks, RPC faults, timeouts, storage and configuration
+failures have independent buckets, so one failure cannot hide another kind.
+Persistent failures become visible again after the interval. Suppression is
 concurrency-safe and only affects logging: every read still derives the state
-and tries building the
-payload again. When the record is repaired, later reads can return the payload;
+and tries building the payload again. When the record is repaired, later reads can return the payload;
 when verified teardown is recorded, both the flag and payload clear.
 
 List and detail reads now check the account's registration for revoked applied
 policies whose teardown is not yet recorded. This detects owner removals made
 outside Ava, without waiting for a later grant or relying on a browser latch.
-The check uses the policy's chain and the existing account-registration verifier,
-not residual module storage. An unserved chain never falls back to another chain.
+The check borrows the REST server's held client for the policy's chain and reads
+account registration, not residual module storage. It does not dial or close a
+client per policy. An unserved chain or missing per-chain client never falls
+back to another chain. Registration checks remain fresh on each read.
 A confirmed clear records teardown under the authority lock, reloading the stored
 row so concurrent grant updates survive. Subsequent reads skip the RPC entirely.
 
@@ -39,7 +43,8 @@ boolean as required and documents that a required cleanup may lack a payload.
 Offline HTTP tests cover all cleanup states on list and detail reads, a failed
 revoke followed by a new server/read and payload recovery, external removal
 reported by a mocked registration RPC and durable teardown, conservative error
-handling, concurrent warning suppression, submit serialization and unchanged
+handling, held-client reuse and ownership, warning-class isolation and interval
+expiry, concurrent warning suppression, submit serialization and unchanged
 revoke responses. The original read/recovery regressions fail on staging because
 the required field is absent. The RPC reconciliation regressions also fail
 against the original #894 handlers at `5eba9e90`, which never rechecked removal.

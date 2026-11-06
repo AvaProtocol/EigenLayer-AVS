@@ -8,9 +8,11 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 	"github.com/labstack/echo/v4"
 
@@ -403,12 +405,24 @@ func erc20SpendCapFromAPI(spendCap generated.Erc20SpendCap) (*model.ERC20SpendCa
 // policyReadToAPI reconciles owner cleanup on list/detail requests only. Grant
 // writes and internal engine lookups keep their existing locking and reads.
 func (s *Server) policyReadToAPI(ctx context.Context, p *model.SessionPolicy) generated.SessionPolicy {
-	err := s.engine.RefreshSessionPolicyCleanup(ctx, p)
+	err := s.engine.RefreshSessionPolicyCleanup(ctx, p, s.policyCleanupRPC(p.ChainID))
 	out := s.policyToAPI(p)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		s.logPolicyCleanupUnavailable(out, "verification", err)
 	}
 	return out
+}
+
+func (s *Server) policyCleanupRPC(chainID int64) *ethclient.Client {
+	if s.smartWalletRpcByChain != nil {
+		return s.smartWalletRpcByChain[chainID]
+	}
+	// Only a matching primary chain may use the single-chain client. A
+	// missing gateway client must never fall back to another chain.
+	if s.config != nil && s.config.SmartWallet != nil && s.config.SmartWallet.ChainID == chainID {
+		return s.smartWalletRpc
+	}
+	return nil
 }
 
 // policyToAPI renders a policy for responses. Grant material — install
@@ -489,18 +503,51 @@ type policyCleanupWarningKey struct {
 	wallet   generated.EthereumAddress
 	policyID generated.Ulid
 	stage    string
+	cause    string
+}
+
+type policyCleanupWarningState struct {
+	mu   sync.Mutex
+	last time.Time
+}
+
+func policyCleanupFailureClass(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var failure *taskengine.PolicyCleanupReadError
+	if errors.As(err, &failure) {
+		return failure.Kind
+	}
+	return "other"
+}
+
+func (s *Server) allowPolicyCleanupWarning(key policyCleanupWarningKey, now time.Time) bool {
+	value, _ := s.policyCleanupWarnings.LoadOrStore(key, &policyCleanupWarningState{})
+	state, ok := value.(*policyCleanupWarningState)
+	if !ok {
+		return true // A limiter fault must not silence the diagnostic.
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.last.IsZero() && now.Sub(state.last) < time.Minute {
+		return false
+	}
+	state.last = now
+	return true
 }
 
 func (s *Server) logPolicyCleanupUnavailable(policy generated.SessionPolicy, stage string, err error) {
 	if s.logger == nil {
 		return
 	}
-	key := policyCleanupWarningKey{chainID: policy.ChainId, wallet: policy.Runner, policyID: policy.Id, stage: stage}
-	if _, logged := s.policyCleanupWarnings.LoadOrStore(key, struct{}{}); logged {
+	cause := policyCleanupFailureClass(err)
+	key := policyCleanupWarningKey{chainID: policy.ChainId, wallet: policy.Runner, policyID: policy.Id, stage: stage, cause: cause}
+	if !s.allowPolicyCleanupWarning(key, time.Now()) {
 		return
 	}
 	s.logger.Warn("Policy on-chain cleanup unavailable", "policy_id", policy.Id,
-		"chain_id", policy.ChainId, "wallet", policy.Runner, "stage", stage, "error", err)
+		"chain_id", policy.ChainId, "wallet", policy.Runner, "stage", stage, "cause_class", cause, "error", err)
 }
 
 // submitPolicyToAPI renders the submit response: the stored policy plus the
