@@ -121,6 +121,9 @@ type Config struct {
 	WalletBudgetDiscoverySigner string
 	WalletBudgetSigningEnabled  bool
 	WalletBudgetMaxFeeWei       string
+	// Public retired signer identities, scoped to chains. These only enable
+	// owner-directed removal; their grants never count as usable authority.
+	WalletBudgetRetiredSessionSigners map[int64][]common.Address
 
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
@@ -576,12 +579,13 @@ type ConfigRaw struct {
 	JwtSecret           string `yaml:"jwt_secret"`
 
 	// SessionSignerPrivateKey is required; see Config.SessionSignerPrivateKey.
-	SessionSignerPrivateKey        string `yaml:"session_signer_private_key"`
-	OwnerExecutionEnabled          bool   `yaml:"owner_execution_enabled"`
-	WalletBudgetPreparationEnabled bool   `yaml:"wallet_budget_preparation_enabled"`
-	WalletBudgetDiscoverySigner    string `yaml:"wallet_budget_discovery_signer"`
-	WalletBudgetSigningEnabled     bool   `yaml:"wallet_budget_signing_enabled"`
-	WalletBudgetMaxFeeWei          string `yaml:"wallet_budget_max_fee_wei"`
+	SessionSignerPrivateKey           string             `yaml:"session_signer_private_key"`
+	OwnerExecutionEnabled             bool               `yaml:"owner_execution_enabled"`
+	WalletBudgetPreparationEnabled    bool               `yaml:"wallet_budget_preparation_enabled"`
+	WalletBudgetDiscoverySigner       string             `yaml:"wallet_budget_discovery_signer"`
+	WalletBudgetSigningEnabled        bool               `yaml:"wallet_budget_signing_enabled"`
+	WalletBudgetMaxFeeWei             string             `yaml:"wallet_budget_max_fee_wei"`
+	WalletBudgetRetiredSessionSigners map[int64][]string `yaml:"wallet_budget_retired_session_signers"`
 
 	// REST rate-limit overrides; see Config.RestRateLimitPerSecond.
 	RestRateLimitPerSecond float64 `yaml:"rest_rate_limit_per_second"`
@@ -823,6 +827,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	retiredSessionSigners, err := parseBudgetRetiredSessionSigners(configRaw.WalletBudgetRetiredSessionSigners)
+	if err != nil {
+		return nil, err
+	}
 
 	// Enforce sane default for max wallets per owner (no unlimited allowed)
 	if configRaw.SmartWallet.MaxWalletsPerOwner <= 0 {
@@ -858,12 +866,13 @@ func NewConfig(configFilePath string) (*Config, error) {
 		BackupInterval: resolveBackupInterval(configRaw.BackupIntervalHours),
 		JwtSecret:      []byte(configRaw.JwtSecret),
 
-		SessionSignerPrivateKey:        sessionSignerPrivateKey,
-		OwnerExecutionEnabled:          configRaw.OwnerExecutionEnabled,
-		WalletBudgetPreparationEnabled: configRaw.WalletBudgetPreparationEnabled,
-		WalletBudgetDiscoverySigner:    configRaw.WalletBudgetDiscoverySigner,
-		WalletBudgetSigningEnabled:     configRaw.WalletBudgetSigningEnabled,
-		WalletBudgetMaxFeeWei:          configRaw.WalletBudgetMaxFeeWei,
+		SessionSignerPrivateKey:           sessionSignerPrivateKey,
+		OwnerExecutionEnabled:             configRaw.OwnerExecutionEnabled,
+		WalletBudgetPreparationEnabled:    configRaw.WalletBudgetPreparationEnabled,
+		WalletBudgetDiscoverySigner:       configRaw.WalletBudgetDiscoverySigner,
+		WalletBudgetSigningEnabled:        configRaw.WalletBudgetSigningEnabled,
+		WalletBudgetMaxFeeWei:             configRaw.WalletBudgetMaxFeeWei,
+		WalletBudgetRetiredSessionSigners: retiredSessionSigners,
 
 		RestRateLimitPerSecond: configRaw.RestRateLimitPerSecond,
 		RestRateLimitBurst:     configRaw.RestRateLimitBurst,

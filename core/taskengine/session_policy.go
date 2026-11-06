@@ -408,6 +408,16 @@ func NextSessionEntityID(db storage.Storage, chainID int64, owner, wallet common
 			next = p.EntityID + 1
 		}
 	}
+	retired, err := retiredSessionEntityFloor(db, chainID, wallet)
+	if err != nil {
+		return 0, err
+	}
+	if retired >= next {
+		if retired == math.MaxUint32 {
+			return 0, fmt.Errorf("%s: validation entity ids exhausted for %s", SessionPolicyEntityOccupiedCode, wallet.Hex())
+		}
+		next = retired + 1
+	}
 	return next, nil
 }
 
