@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 	"github.com/labstack/echo/v4"
@@ -654,6 +655,12 @@ func mapPolicyError(err error) error {
 			status = http.StatusConflict
 		}
 		problem := &restmw.HTTPError{Status: status, Code: budgetError.Code, Title: "Budget request refused", Detail: budgetError.Detail, Token: budgetError.Details["token"], Spender: budgetError.Details["spender"], NeededWei: budgetError.Details["neededWei"], AvailableWei: budgetError.Details["availableWei"]}
+		if budgetError.Code == taskengine.BudgetRetiredGrantInstalledCode {
+			problem.Status = http.StatusConflict
+			if cleanup := budgetError.OnChainCleanup; cleanup != nil {
+				problem.OnChainCleanup = &restmw.ProblemOnChainCleanup{EntityID: int64(cleanup.EntityID), Target: cleanup.Target.Hex(), CallData: hexutil.Encode(cleanup.CallData), ChainID: cleanup.ChainID}
+			}
+		}
 		if budgetError.Code == taskengine.BudgetLegacyGrantPendingCode {
 			problem.LegacyGrantDeadline = budgetError.LegacyGrantDeadline
 		}

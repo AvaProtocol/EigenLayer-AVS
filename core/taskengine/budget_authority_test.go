@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
@@ -34,6 +35,10 @@ type budgetInventoryRPC struct {
 	codeReads         []rpc.BlockNumberOrHash
 	registrationCalls int
 	registered        bool
+	signer            common.Address
+	signerError       bool
+	historyTx         *types.Transaction
+	historyReceipt    *types.Receipt
 	pinnedCodeError   bool
 	historyError      bool
 	registrationError bool
@@ -43,6 +48,7 @@ type budgetInventoryRPC struct {
 	blockReadError    *uint64
 	blockHashes       map[uint64]common.Hash
 	onLogQuery        func(uint64)
+	logWaiter         func(context.Context, uint64) error
 }
 
 func (f *budgetInventoryRPC) GetCode(_ context.Context, address common.Address, at rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
@@ -101,12 +107,20 @@ func (f *budgetInventoryRPC) GetBlockByNumber(_ context.Context, requested rpc.B
 	return map[string]interface{}{"number": hexutil.EncodeUint64(number), "hash": hash}, nil
 }
 
-func (f *budgetInventoryRPC) GetLogs(_ context.Context, query struct {
+func (f *budgetInventoryRPC) GetLogs(ctx context.Context, query struct {
 	FromBlock hexutil.Uint64   `json:"fromBlock"`
 	ToBlock   hexutil.Uint64   `json:"toBlock"`
 	Addresses []common.Address `json:"address"`
 	Topics    [][]common.Hash  `json:"topics"`
 }) ([]types.Log, error) {
+	f.mu.Lock()
+	wait := f.logWaiter
+	f.mu.Unlock()
+	if wait != nil {
+		if err := wait(ctx, uint64(query.FromBlock)); err != nil {
+			return nil, err
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	from, to := uint64(query.FromBlock), uint64(query.ToBlock)
@@ -143,6 +157,12 @@ func (f *budgetInventoryRPC) Call(_ context.Context, msg struct {
 	}
 	if msg.To == preset.EntryPointV07() {
 		return budgetWord(2), nil
+	}
+	if msg.To == aa.SingleSignerValidationModuleAddress() {
+		if f.signerError {
+			return nil, errors.New("signer read unavailable")
+		}
+		return common.LeftPadBytes(f.signer.Bytes(), 32), nil
 	}
 	f.registrationCalls++
 	if f.registrationError {

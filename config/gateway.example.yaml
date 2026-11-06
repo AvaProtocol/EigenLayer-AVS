@@ -22,6 +22,10 @@ wallet_budget_discovery_signer: ""
 # Sepolia-only owner-signed budget changes. Keep off until the live release
 # gates and discovery canary pass. No paymaster; the wallet pays network fees.
 wallet_budget_signing_enabled: false
+# Optional public retired signer identities, scoped by chain. Recognized grants
+# still block budgets and require owner-directed removal; never a trust bypass.
+# wallet_budget_retired_session_signers:
+#   11155111: ["0x82F2Dd9a552a69f2CED7ff2D05c43aB8430158fb"]
 # Maximum fee per priced budget operation, in wei (default 0.005 ETH).
 wallet_budget_max_fee_wei: "5000000000000000"
 

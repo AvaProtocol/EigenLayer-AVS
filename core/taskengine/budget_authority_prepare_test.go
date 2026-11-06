@@ -7,12 +7,56 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBudgetRetiredGrantBlocksPrepareAndSubmitUntilOwnerRemovesIt(t *testing.T) {
+	for _, stage := range []string{"prepare", "submit"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newBudgetPrepareFixture(t)
+			inventory, rpcFixture := newBudgetInventoryView(t, 20, 11, 10_000)
+			inventory.n = f.n
+			rpcFixture.wallet, rpcFixture.signer = f.in.Wallet, common.HexToAddress("0xbaba")
+			log := budgetInstallLog(rpcFixture, 11)
+			log.Topics[1] = common.BytesToHash(aa.SingleSignerValidationModuleAddress().Bytes())
+			rpcFixture.logs = []types.Log{log}
+			f.n.config.WalletBudgetRetiredSessionSigners = map[int64][]common.Address{f.in.ChainID: {rpcFixture.signer}}
+			backend := &budgetChangeFake{}
+			f.n.budgetChangeBackend = &budgetInventoryBackend{budgetChangeBackend: backend, inventory: inventory}
+			var refusal *BudgetPolicyError
+			if stage == "prepare" {
+				rpcFixture.registered = true
+				review, err := f.n.PrepareSessionPolicyWithContext(context.Background(), f.user, f.in)
+				require.Nil(t, review)
+				require.ErrorAs(t, err, &refusal)
+			} else {
+				p := f.prepare(t)
+				rpcFixture.registered = true
+				f.n.config.WalletBudgetSigningEnabled = true
+				signature, err := crypto.Sign(accounts.TextHash(p.UserOpHash.Bytes()), f.ownerKey)
+				require.NoError(t, err)
+				_, err = f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, p.Wallet, p.ChainID, p.ID, signature)
+				require.ErrorAs(t, err, &refusal)
+				var boundary *BudgetSubmitError
+				require.ErrorAs(t, err, &boundary)
+				require.False(t, boundary.SubmissionStarted)
+			}
+			require.Equal(t, BudgetRetiredGrantInstalledCode, refusal.Code)
+			require.Equal(t, f.in.Wallet, refusal.OnChainCleanup.Target)
+			require.Zero(t, backend.sent.Load())
+			rpcFixture.registered, rpcFixture.signer = false, common.Address{}
+			// Merely returning a payload never changes chain state; only this
+			// simulated owner removal lets a fresh preparation succeed.
+			require.NotNil(t, f.prepare(t))
+			require.Zero(t, backend.sent.Load())
+		})
+	}
+}
 
 func TestBudgetPrepareWarmsInventoryBeforeOwnerReviewAndSubmitRechecks(t *testing.T) {
 	f := newBudgetPrepareFixture(t)

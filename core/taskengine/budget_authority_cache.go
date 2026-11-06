@@ -20,6 +20,15 @@ import (
 type budgetAuthorityCandidate struct {
 	Module common.Address `json:"module"`
 	Entity uint32         `json:"entity"`
+	// Optional provenance lets retired grants recover their original teardown.
+	// Older cached inventories remain usable and fall back to signer-only cleanup.
+	Install *budgetAuthorityInstall `json:"install,omitempty"`
+}
+
+type budgetAuthorityInstall struct {
+	Transaction common.Hash `json:"transaction"`
+	Block       BudgetBlock `json:"block"`
+	LogIndex    uint        `json:"logIndex"`
 }
 
 // Derived inventory only: a candidate is never evidence of live authority.
@@ -165,7 +174,7 @@ func (v *pinnedBudgetView) extendBudgetAuthorityInventory(ctx context.Context, i
 	query := ethereum.FilterQuery{Addresses: []common.Address{inventory.Wallet}, Topics: [][]common.Hash{{budgetValidationInstalled}}}
 	if from <= finalized.Number {
 		query.FromBlock, query.ToBlock = new(big.Int).SetUint64(from), new(big.Int).SetUint64(finalized.Number)
-		err = v.forEachBudgetLogPage(ctx, query, func(logs []types.Log, end uint64) error {
+		err = v.forEachBudgetInventoryLogPage(ctx, query, func(logs []types.Log, end uint64) error {
 			for _, log := range logs {
 				if candidateErr := addBudgetAuthorityCandidate(inventory.Wallet, candidates, log); candidateErr != nil {
 					return candidateErr
@@ -209,7 +218,14 @@ func addBudgetAuthorityCandidate(wallet common.Address, candidates map[[24]byte]
 		return fmt.Errorf("%w: malformed validation inventory", ErrBudgetReadUnavailable)
 	}
 	candidate := budgetAuthorityCandidate{Module: common.BytesToAddress(log.Topics[1].Bytes()), Entity: uint32(log.Topics[2].Big().Uint64())}
-	candidates[aa.PackModuleEntity(candidate.Module, candidate.Entity)] = candidate
+	if log.TxHash != (common.Hash{}) && log.BlockHash != (common.Hash{}) {
+		candidate.Install = &budgetAuthorityInstall{Transaction: log.TxHash, Block: BudgetBlock{Number: log.BlockNumber, Hash: log.BlockHash}, LogIndex: log.Index}
+	}
+	key := aa.PackModuleEntity(candidate.Module, candidate.Entity)
+	prior := candidates[key]
+	if prior.Install == nil || candidate.Install != nil && (candidate.Install.Block.Number > prior.Install.Block.Number || candidate.Install.Block.Number == prior.Install.Block.Number && candidate.Install.LogIndex >= prior.Install.LogIndex) {
+		candidates[key] = candidate
+	}
 	return nil
 }
 
