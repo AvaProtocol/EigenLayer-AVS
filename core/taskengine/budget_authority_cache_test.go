@@ -11,9 +11,13 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func readBudgetInventory(t *testing.T, v *pinnedBudgetView, wallet common.Address) budgetAuthorityInventory {
@@ -59,7 +63,11 @@ func TestBudgetInventoryWarmCheckAndRestartReuseFinalizedHistory(t *testing.T) {
 			// prefix must still avoid deployment lookup and history scans.
 			restarted := *v
 			restarted.n = &Engine{db: v.n.db, smartWalletConfig: v.n.smartWalletConfig}
+			// Cursor equals the pinned head: even a provider refusing every
+			// historical/log read cannot stop the current registration check.
 			f.historyError = true
+			refusedPage := uint64(0)
+			f.logErrorFrom = &refusedPage
 			require.NoError(t, restarted.CheckAuthorities(context.Background(), owner, f.wallet))
 			history, queries, registered := budgetInventoryReadCounts(f)
 			require.Equal(t, oldHistory, history)
@@ -166,6 +174,10 @@ func TestBudgetInventoryRebuildsReorgedAndMalformedCache(t *testing.T) {
 			owner := common.HexToAddress("0xb1")
 			require.NoError(t, v.CheckAuthorities(context.Background(), owner, f.wallet))
 			oldHistory, oldQueries, _ := budgetInventoryReadCounts(f)
+			core, logs := observer.New(zap.WarnLevel)
+			log, err := sdklogging.NewZapLoggerByConfig(zap.NewDevelopmentConfig(), zap.WrapCore(func(zapcore.Core) zapcore.Core { return core }))
+			require.NoError(t, err)
+			v.n.logger = log
 			switch mode {
 			case "reorg":
 				f.block.Hash = common.HexToHash("0xdddd")
@@ -185,7 +197,7 @@ func TestBudgetInventoryRebuildsReorgedAndMalformedCache(t *testing.T) {
 			}
 			f.logs = []types.Log{budgetInstallLog(f, 12)}
 			f.registered = true
-			err := v.CheckAuthorities(context.Background(), owner, f.wallet)
+			err = v.CheckAuthorities(context.Background(), owner, f.wallet)
 			var refusal *BudgetPolicyError
 			require.ErrorAs(t, err, &refusal)
 			require.Equal(t, BudgetAuthorityUnknownCode, refusal.Code)
@@ -194,8 +206,40 @@ func TestBudgetInventoryRebuildsReorgedAndMalformedCache(t *testing.T) {
 			f.mu.Lock()
 			require.Equal(t, [2]uint64{11, 13}, f.queries[oldQueries])
 			f.mu.Unlock()
+			if mode == "reorg" {
+				require.Zero(t, logs.Len(), "canonical invalidation is not malformed stored data")
+			} else {
+				require.Equal(t, 1, logs.Len())
+				warning := logs.All()[0]
+				require.Equal(t, "Rebuilding invalid budget authority inventory", warning.Message)
+				require.Equal(t, v.chainID, warning.ContextMap()["chain_id"])
+				require.Equal(t, f.wallet.Hex(), warning.ContextMap()["wallet"])
+				require.NotEmpty(t, warning.ContextMap()["err"])
+			}
+			// A successful rebuild replaces the invalid record even when a
+			// live unknown authority still refuses the operation.
+			warnings := logs.Len()
+			err = v.CheckAuthorities(context.Background(), owner, f.wallet)
+			require.ErrorAs(t, err, &refusal)
+			require.Equal(t, BudgetAuthorityUnknownCode, refusal.Code)
+			require.Equal(t, warnings, logs.Len(), "a repaired cache should not warn again")
 		})
 	}
+}
+
+func TestBudgetInventoryCandidateOrderUsesAddressBytesThenEntity(t *testing.T) {
+	candidates := make(map[[24]byte]budgetAuthorityCandidate)
+	var expected []budgetAuthorityCandidate
+	for value := 0xa0; value < 0xb0; value++ {
+		var module common.Address
+		module[len(module)-1] = byte(value)
+		for _, entity := range []uint32{2, 9} {
+			candidate := budgetAuthorityCandidate{Module: module, Entity: entity}
+			candidates[aa.PackModuleEntity(module, entity)] = candidate
+			expected = append(expected, candidate)
+		}
+	}
+	require.Equal(t, expected, sortedBudgetAuthorityCandidates(candidates))
 }
 
 func TestBudgetInventoryFailedCheckpointReadBlocksCacheHit(t *testing.T) {

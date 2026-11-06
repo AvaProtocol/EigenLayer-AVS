@@ -84,6 +84,34 @@ retained for resumable backfills; first setup now does that work before the
 owner signs. A later cold repair can still delay a budget run until its safety
 check completes.
 
+### Cold-scan latency and lock scope
+
+The inventory lock is per chain and wallet and spans the deployment search,
+log pages and checkpoints. Requests for that same wallet serialize until the
+scan completes or their own context is cancelled. Other wallets use different
+locks. Budget preparation already limits its lock/RPC stage to one minute;
+this includes waiting for the inventory lock and all of its RPCs. Other callers
+retain their own context deadlines. There is no new scan-specific timeout.
+
+There is no wallet-age-independent worst-case duration. A factory account needs
+roughly `log2(head)` historical code reads to find its deployment block; a
+delegated EOA starts at genesis. Each finalized page uses three RPCs: its logs,
+its ending block hash, and the pinned-head canonical check. For deployment
+block `D`, finalized block `F` and configured range `R`, the finalized portion
+has `ceil((F - D + 1) / R)` pages, plus the unfinalized tail and live candidate
+registration reads. For illustration, 180 days of Base history is about 778
+pages at 10,000 blocks per page. At 100 ms per RPC, those finalized pages alone
+take about four minutes across several preparation attempts. Provider latency,
+rate limits and the number of authorities can increase that cost.
+
+Each completed finalized page is stored before the next one, so a timeout or
+restart resumes rather than repeating the complete scan. Requests waiting for
+the same lock can time out without making progress themselves; retry after the
+active request checkpoints or finishes. A warm cursor at the pinned head skips
+history and log queries but still reads current authority registration. The
+first review may therefore need retries; no partial inventory is accepted to
+make it return sooner.
+
 ## Regression coverage
 
 - Undeployed wallet at a 12-million-block snapshot makes no `eth_getLogs` call.
@@ -111,6 +139,11 @@ check completes.
   gates; submit still refuses a newly live authority after a successful warmup.
 - A mid-scan reorg cannot promote a mixed-fork prefix to a canonical checkpoint,
   even if the final check would have refused the send.
+- Invalid stored inventory logs its wallet, chain and cause before rebuilding;
+  the repaired record is reused without repeating that warning. A normal
+  canonical-hash invalidation is not reported as corrupt data.
+- Candidate serialization orders raw address bytes and then entity numbers,
+  without checksum-string allocations or casing-dependent order.
 
 The original implementation fails the undeployed-wallet, later-page-authority
 and later-page-owner-operation regression tests against the capped RPC fixture.

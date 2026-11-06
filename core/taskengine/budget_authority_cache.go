@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,9 @@ func budgetAuthorityInventoryKey(chain int64, wallet common.Address) []byte {
 	return []byte(fmt.Sprintf("budgetauthority:v1:%d:%s", chain, strings.ToLower(wallet.Hex())))
 }
 
+// Serialize each wallet's backfill and checkpoints through the caller's
+// context, including the lock wait and RPCs. prepareBudgetPolicy already caps
+// its lock/RPC stage at one minute; completed finalized pages survive retries.
 func (v *pinnedBudgetView) budgetAuthorityCandidates(ctx context.Context, wallet common.Address, code []byte) (map[[24]byte]budgetAuthorityCandidate, error) {
 	release, err := v.n.budgetAuthorityLocks.acquire(ctx, budgetGateKey(v.chainID, common.Address{}, wallet))
 	if err != nil {
@@ -80,8 +84,15 @@ func (v *pinnedBudgetView) loadBudgetAuthorityInventory(ctx context.Context, wal
 		return nil, false, fmt.Errorf("%w: loading validation inventory: %w", ErrBudgetReadUnavailable, err)
 	}
 	var inventory budgetAuthorityInventory
-	if json.Unmarshal(raw, &inventory) != nil || !inventory.valid(v.chainID, wallet) {
+	decodeErr := json.Unmarshal(raw, &inventory)
+	if decodeErr == nil && !inventory.valid(v.chainID, wallet) {
+		decodeErr = errors.New("inventory metadata does not match its wallet, chain or checkpoint")
+	}
+	if decodeErr != nil {
 		// Invalid derived data is rebuilt, never interpreted as an empty scan.
+		if v.n.logger != nil {
+			v.n.logger.Warn("Rebuilding invalid budget authority inventory", "chain_id", v.chainID, "wallet", wallet.Hex(), "err", decodeErr)
+		}
 		return nil, true, nil
 	}
 	anchor := inventory.Start
@@ -211,7 +222,7 @@ func sortedBudgetAuthorityCandidates(candidates map[[24]byte]budgetAuthorityCand
 		if result[i].Module == result[j].Module {
 			return result[i].Entity < result[j].Entity
 		}
-		return result[i].Module.Hex() < result[j].Module.Hex()
+		return bytes.Compare(result[i].Module[:], result[j].Module[:]) < 0
 	})
 	return result
 }
