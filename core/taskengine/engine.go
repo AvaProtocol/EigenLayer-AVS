@@ -338,6 +338,7 @@ type Engine struct {
 	budgetPreparationLocks     budgetPreparationLockSet
 	budgetWorkflowLocks        budgetPreparationLockSet
 	budgetSendLocks            budgetPreparationLockSet
+	budgetAuthorityLocks       budgetPreparationLockSet
 	budgetChangeBackend        budgetChangeBackend
 }
 

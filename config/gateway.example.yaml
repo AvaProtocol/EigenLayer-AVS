@@ -122,6 +122,9 @@ moralis_api_key: ${MORALIS_API_KEY}
 # still routes via chains[].
 smart_wallet:
   eth_rpc_url:            ${ETH_RPC_URL}
+  # Maximum blocks per budget eth_getLogs request (inclusive; default 10000).
+  # Set independently in each chain's smart_wallet for its RPC provider.
+  budget_log_block_range: 10000
   # bundler_provider selects the bundler; 'alchemy' is both the code default and
   # what every production chain runs. The URL is derived from alchemy_api_key +
   # the chain's Alchemy subdomain and NEVER falls back to bundler_url, so no
@@ -156,6 +159,7 @@ chains:
     smart_wallet:
       eth_rpc_url:            ${ETH_RPC_URL}
       eth_ws_url:             ${ETH_WS_URL}
+      budget_log_block_range: 10000
       bundler_provider:       alchemy
       alchemy_api_key:        ${ALCHEMY_API_KEY}
       controller_private_key: <testnet-controller-private-key-hex>

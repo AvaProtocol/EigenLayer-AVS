@@ -2,6 +2,7 @@ package rest
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
+	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
@@ -49,13 +51,31 @@ func (s *Server) SubmitWalletBudgetPreparation(ctx echo.Context, address generat
 	}
 	record, err := s.engine.SubmitBudgetPolicyPreparation(ctx.Request().Context(), user, wallet, policyChainID(ctx, params.ChainId), id, signature)
 	if err != nil {
-		return mapPolicyError(err)
+		return mapBudgetSubmitError(err)
 	}
 	out, err := budgetPreparationToAPI(record)
 	if err != nil {
 		return err
 	}
 	return ctx.JSON(http.StatusOK, out)
+}
+
+func mapBudgetSubmitError(err error) error {
+	mapped := mapPolicyError(err)
+	var problem *restmw.HTTPError
+	if !errors.As(mapped, &problem) {
+		return mapped
+	}
+	var submit *taskengine.BudgetSubmitError
+	if errors.As(err, &submit) {
+		started := submit.SubmissionStarted
+		problem.SubmissionStarted = &started
+	}
+	if errors.Is(err, taskengine.ErrBudgetReadUnavailable) {
+		problem.Title = "Budget couldn't be submitted"
+		problem.Detail = "A required check is unavailable. Check this change's status before trying again."
+	}
+	return problem
 }
 func (s *Server) PrepareWalletBudgetCancel(ctx echo.Context, address generated.EthereumAddress, id generated.Ulid, params generated.PrepareWalletBudgetCancelParams) error {
 	user, wallet, err := s.policyAuth(ctx, OpPrepareWalletBudgetCancel, address)

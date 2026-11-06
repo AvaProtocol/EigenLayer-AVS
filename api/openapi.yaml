@@ -274,7 +274,10 @@ components:
           description: |
             Machine-readable error code. Stable across releases; clients can
             switch on this for programmatic handling. Mirrors the gRPC-era
-            ErrorCode enum vocabulary.
+            ErrorCode enum vocabulary. POLICIES_REJECTED (400) preserves an
+            authored client-validation reason, including expired signing
+            windows. POLICIES_UNAVAILABLE (503) hides unexpected internal
+            diagnostics, which remain only in server logs.
           example: 'WORKFLOW_NOT_FOUND'
         policyId:
           type: string
@@ -286,6 +289,39 @@ components:
         token: { $ref: '#/components/schemas/EthereumAddress' }
         spender: { $ref: '#/components/schemas/EthereumAddress' }
         neededWei: { type: string, pattern: '^[0-9]+$' }
+        submissionStarted:
+          type: boolean
+          description: |
+            Budget signature-only submit send boundary, when known. False
+            proves this request was refused before attempting the durable
+            first-send marker, so it did not relay an operation. True includes
+            uncertain marker/storage failures and repeats of marked attempts; check the
+            existing preparation and never infer that nothing was sent.
+            A repeated submit of a settled unsent preparation remains false.
+            Absent means unknown, including older gateways. A lost response
+            also means unknown. Never infer this from HTTP status or prose.
+        ownerDelegate:
+          allOf:
+            - $ref: '#/components/schemas/EthereumAddress'
+          description: |
+            Observed EIP-7702 delegate of the owner, only on
+            EOA_DELEGATION_MISSING from owner execution or budget preparation
+            and submission, and policy checks of an eoa_7702 runner. Absent
+            for non-designation code or unknown state. Gateway pin, reader or
+            implementation-hash failures on supported chains are
+            OWNER_ACCOUNT_UNAVAILABLE (503), never owner delegation advice.
+            A delegated owner on a chain other than Sepolia or Base is a
+            permanent EOA_DELEGATION_MISSING refusal even without a configured
+            pin; ownerDelegate still names the observed designation.
+            A confirmed unsupported account implementation, fallback owner or
+            EntryPoint is OWNER_ACCOUNT_UNSUPPORTED (409); preparing again
+            does not fix it.
+        legacyGrantDeadline:
+          type: integer
+          format: int64
+          description: |
+            Latest outstanding legacy signature deadline, in unix milliseconds.
+            Set only on BUDGET_LEGACY_GRANT_PENDING.
         availableWei: { type: string, pattern: '^[0-9]+$' }
         affectedTaskIds:
           type: array
@@ -2585,7 +2621,7 @@ components:
 
     SessionPolicy:
       type: object
-      required: [id, runner, chainId, status, entityId, sessionSigner, agentLabel, validUntil, createdAt]
+      required: [id, runner, chainId, status, entityId, sessionSigner, agentLabel, validUntil, createdAt, onChainCleanupRequired]
       properties:
         id: { $ref: '#/components/schemas/Ulid' }
         runner: { $ref: '#/components/schemas/EthereumAddress' }
@@ -2650,13 +2686,26 @@ components:
           type: integer
           format: int64
           description: Unix milliseconds.
+        onChainCleanupRequired:
+          type: boolean
+          description: |
+            True when this policy is revoked and its grant was applied on
+            chain without a recorded verified teardown. Has the same meaning
+            as RevokePolicyResponse.onChainCleanupRequired. False for active
+            or pending policies, grants never applied, or verified teardown.
+            Independent of payload availability: onChainCleanup may be absent
+            even when this is true, if the cleanup payload cannot be built.
+            List and single-policy reads recheck the account registration and
+            record verified removals. Failed checks leave the requirement set.
         onChainCleanup:
           allOf:
             - $ref: '#/components/schemas/OnChainRevokeCleanup'
           description: |
-            Present when status is revoked and the validation entity is still
-            installed on chain. Owner-executable uninstallValidation so clients
-            can finish teardown without re-calling DELETE (#717).
+            Owner-executable uninstallValidation so clients can finish teardown
+            without re-calling DELETE (#717). Present only when
+            onChainCleanupRequired is true and the payload can be built.
+            When the payload cannot be built, onChainCleanupRequired remains
+            true and this field is absent.
 
     BudgetApprovalPair:
       type: object
@@ -3373,6 +3422,15 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: |
+            EOA_DELEGATION_MISSING — owner account code is not supported.
+            OWNER_ACCOUNT_UNSUPPORTED — the account implementation, fallback
+            owner or EntryPoint is not supported; preparing again cannot fix it.
+            ownerDelegate names the observed EIP-7702 delegate, when present.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '412':
           description: Checks, source compatibility, funding or pricing failed; refresh the preparation.
           content:
@@ -3428,6 +3486,15 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            EOA_DELEGATION_MISSING — owner account code is not supported.
+            OWNER_ACCOUNT_UNSUPPORTED — the account implementation, fallback
+            owner or EntryPoint is not supported; preparing again cannot fix it.
+            ownerDelegate names the observed EIP-7702 delegate, when present.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '412':
           description: Preparation is stale or rejected; prepare, review and sign again.
           content:
@@ -4007,6 +4074,17 @@ paths:
         Rejected or unknown sends keep the hold until the nonce is consumed.
         Successful inclusion stays submitted until reset proof passes; activation
         and hold release are atomic. Signing is self-funded and fee capped.
+        An outstanding legacy signature found by the submit-time recheck returns
+        409 BUDGET_LEGACY_GRANT_PENDING with legacyGrantDeadline, the latest
+        outstanding signature deadline in unix milliseconds.
+        A live unrecognized validation authority returns 409 BUDGET_AUTHORITY_UNKNOWN;
+        remove it in the wallet, then check again.
+        Errors include submissionStarted when the send boundary is known.
+        False means this completed request never attempted its first-send marker
+        or relay; the client may prepare a fresh review. True or an
+        absent field requires reading the same preparation, with no second
+        operation. A lost reply always requires reconciliation. A 503 alone
+        does not distinguish pre-send checks from post-send storage failures.
       parameters:
         - $ref: '#/components/parameters/ChainIdQuery'
       requestBody:
@@ -4027,7 +4105,7 @@ paths:
               schema: { $ref: '#/components/schemas/PreparedPolicy' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503':
-          description: Required chain or storage evidence is unavailable; no unsafe hold release.
+          description: Required chain or storage evidence is unavailable; no unsafe hold release. OWNER_ACCOUNT_UNAVAILABLE identifies a gateway account-verification fault, not owner setup advice.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -4035,7 +4113,14 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: Budget submission is not enabled.
+          description: |
+            Budget submission is not enabled, or a first-submit recheck refused
+            the operation. BUDGET_LEGACY_GRANT_PENDING includes
+            legacyGrantDeadline in unix milliseconds. EOA_DELEGATION_MISSING
+            includes ownerDelegate when the owner has an EIP-7702 designation.
+            OWNER_ACCOUNT_UNSUPPORTED identifies a confirmed unsupported
+            implementation, fallback owner or EntryPoint; preparing again
+            cannot fix it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -4096,15 +4181,19 @@ paths:
         v1 Sepolia USDC. Other live allowances requiring reset return 409
         BUDGET_RESET_UNSUPPORTED_TOKEN with token/spender; insufficient ETH returns
         409 BUDGET_FEE_INSUFFICIENT_ETH with neededWei/availableWei.
+        An incompatible delegated owner returns 409 EOA_DELEGATION_MISSING
+        with ownerDelegate when the observed code is an EIP-7702 designation.
         A quote above wallet_budget_max_fee_wei (default 0.005 ETH) returns
         409 BUDGET_FEE_CEILING_EXCEEDED. Unsupported Permit2, NFT/operator or
         unaudited spending targets return 409 BUDGET_ROUTE_UNSUPPORTED.
-        A live unknown validation authority returns BUDGET_AUTHORITY_UNKNOWN;
-        remove it in the wallet and check again. Ava's session operations are
+        Budget preparation and submission return 409 BUDGET_AUTHORITY_UNKNOWN
+        for a live unrecognized validation authority; remove it in the wallet,
+        then check again. Ava's session operations are
         refused with BUDGET_CHANGING while the wallet/chain hold is open;
         scheduled runs wait without consuming an execution.
         A known, unexpired legacy deferred signature returns 409
-        BUDGET_LEGACY_GRANT_PENDING with its latest outstanding deadline.
+        BUDGET_LEGACY_GRANT_PENDING with legacyGrantDeadline, the latest
+        outstanding signature deadline in unix milliseconds.
         The default legacy signing window lasts up to 30 days. Revoking a
         permission off chain does not invalidate its signature; migration must
         wait until that window closes. This route offers no nonce-cancellation
@@ -4193,8 +4282,9 @@ paths:
             usable grant anymore. Prepare again.
 
             `BUDGET_LEGACY_GRANT_PENDING` — an earlier deferred signature can
-            still install, even after off-chain revocation. The detail names
-            the latest deadline; the default window can last 30 days.
+            still install, even after off-chain revocation. legacyGrantDeadline
+            is the latest outstanding signature deadline in unix milliseconds;
+            the default window can last 30 days.
 
             `SESSION_POLICY_TARGET_UNRESOLVED` — there is no usable grant,
             and an enabled task moves funds to a target this prepare cannot
@@ -4214,7 +4304,7 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503':
-          description: A required balance, allowance or complete discovery read is unavailable.
+          description: A required balance, allowance or complete discovery read is unavailable. OWNER_ACCOUNT_UNAVAILABLE identifies a gateway pin, reader or RPC-chain configuration fault; it does not ask the owner to change account setup.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -4402,7 +4492,13 @@ paths:
     get:
       tags: [Policies]
       summary: List the wallet's session policies
-      description: Grant material (calldata, signatures) is never echoed.
+      description: |
+        Grant material (install calldata, signatures) is never echoed.
+        Revoked, applied policies without verified teardown are checked on their
+        chain. A cleared registration records teardown and removes the cleanup
+        requirement and payload. Failed checks leave the stored requirement
+        unchanged; the list remains available. Registration reads share a
+        ten-second request budget.
       operationId: listWalletPolicies
       responses:
         '200':
@@ -4428,6 +4524,12 @@ paths:
     get:
       tags: [Policies]
       summary: Get one session policy
+      description: |
+        A revoked, applied policy without verified teardown is checked on its
+        chain before rendering. A cleared registration records teardown and
+        removes the cleanup requirement and payload. A failed check leaves
+        the stored requirement unchanged. The registration read is bounded
+        to ten seconds.
       operationId: getWalletPolicy
       responses:
         '200':
@@ -4453,6 +4555,10 @@ paths:
           (uninstallValidation call for the owner wallet: plain tx to the
           runner, or owner-fallback UserOp). Once teardown is verified,
           GET no longer returns cleanup for that policy.
+        - `500 POLICIES_REVOKED_CLEANUP_UNAVAILABLE` — the revoke was applied
+          in Ava, but the gateway could not construct the owner's on-chain
+          cleanup transaction. The on-chain permission may remain active.
+          The response does not mean the off-chain revoke failed.
       operationId: revokeWalletPolicy
       responses:
         '200':
@@ -4463,6 +4569,11 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '500':
+          description: POLICIES_REVOKED_CLEANUP_UNAVAILABLE — revoke applied in Ava; on-chain cleanup could not be prepared.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   # =====================================================================
   # Secrets

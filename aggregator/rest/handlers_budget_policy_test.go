@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -14,9 +15,40 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
+	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
+
+func TestBudgetLegacyGrantDeadlineProblem(t *testing.T) {
+	const deadlineMs int64 = 1800000000000
+	for _, code := range []string{taskengine.BudgetLegacyGrantPendingCode, taskengine.BudgetFeeInsufficientCode, taskengine.BudgetChangingCode} {
+		t.Run(code, func(t *testing.T) {
+			e := echo.New()
+			e.HTTPErrorHandler = restmw.ProblemErrorHandler(nil)
+			e.GET("/refusal", func(echo.Context) error {
+				return mapPolicyError(&taskengine.BudgetPolicyError{
+					Code: code, Detail: "Budget request refused.", LegacyGrantDeadline: deadlineMs,
+					Details: map[string]string{"neededWei": "123", "availableWei": "100"},
+				})
+			})
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/refusal", nil))
+			require.Equal(t, http.StatusConflict, rec.Code)
+			var body map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			if code == taskengine.BudgetLegacyGrantPendingCode {
+				require.Equal(t, fmt.Sprint(deadlineMs), string(body["legacyGrantDeadline"]))
+				var problem generated.Problem
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &problem))
+				require.NotNil(t, problem.LegacyGrantDeadline)
+				require.Equal(t, deadlineMs, *problem.LegacyGrantDeadline)
+			} else {
+				require.NotContains(t, body, "legacyGrantDeadline")
+			}
+		})
+	}
+}
 
 func TestBudgetPolicyRoutesRefuseStatelessSigning(t *testing.T) {
 	r := newPolicyRig(t)

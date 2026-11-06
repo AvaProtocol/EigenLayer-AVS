@@ -79,6 +79,20 @@ func budgetPreparationKey(owner common.Address, id string) []byte {
 	return append(budgetPreparationPrefix(owner), id...)
 }
 
+func latestOutstandingLegacyGrantDeadline(policies []*model.SessionPolicy, wallet common.Address, now time.Time) uint64 {
+	var latest uint64
+	for _, p := range policies {
+		// A deferred signature uses its own session nonce, so consuming the
+		// owner nonce cannot invalidate a not-yet-carried legacy install.
+		if p.Runner != nil && *p.Runner == wallet && !isWalletBudget(p) && p.Grant != nil && !p.Grant.Applied() && len(p.Grant.OwnerSignature) > 0 && p.Grant.Deadline >= uint64(now.Unix()) {
+			if p.Grant.Deadline > latest {
+				latest = p.Grant.Deadline
+			}
+		}
+	}
+	return latest
+}
+
 //nolint:gocyclo // Linear fail-closed preparation: no authority is written between its validation stages.
 func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in SessionPolicyInput) (*PreparedSessionGrant, error) {
 	if err := n.requireServedChain(in.ChainID); err != nil {
@@ -133,22 +147,13 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if err != nil {
 		return nil, err
 	}
-	var legacyDeadline uint64
-	for _, p := range all {
-		// A deferred signature uses its own session nonce, so consuming the
-		// owner nonce cannot invalidate a not-yet-carried legacy install.
-		if p.Runner != nil && *p.Runner == in.Wallet && !isWalletBudget(p) && p.Grant != nil && !p.Grant.Applied() && len(p.Grant.OwnerSignature) > 0 && p.Grant.Deadline >= uint64(now.Unix()) {
-			if p.Grant.Deadline > legacyDeadline {
-				legacyDeadline = p.Grant.Deadline
-			}
-		}
-	}
+	legacyDeadline := latestOutstandingLegacyGrantDeadline(all, in.Wallet, now)
 	if legacyDeadline > 0 {
-		return nil, &BudgetPolicyError{Code: BudgetLegacyGrantPendingCode, Detail: fmt.Sprintf("An earlier signed permission may still install until %s. Legacy signing windows can last 30 days, and revoking in Ava does not cancel that signature. Budget migration must wait until this window closes.", time.Unix(int64(legacyDeadline), 0).UTC().Format(time.RFC3339))}
+		return nil, &BudgetPolicyError{Code: BudgetLegacyGrantPendingCode, Detail: fmt.Sprintf("An earlier signed permission may still install until %s. Legacy signing windows can last 30 days, and revoking in Ava does not cancel that signature. Budget migration must wait until this window closes.", time.Unix(int64(legacyDeadline), 0).UTC().Format(time.RFC3339)), LegacyGrantDeadline: int64(legacyDeadline) * 1000}
 	}
 	rem, err := n.resolveGrantRemainder(ctx, current, in.Wallet)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBudgetReadUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrBudgetReadUnavailable, err)
 	}
 	tasks, err := n.enabledTasksForRunner(user.Address, in.Wallet)
 	if err != nil {
@@ -197,7 +202,7 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	if len(pairs) > 0 {
 		caller, err = n.spendLimitCaller(in.ChainID)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrBudgetReadUnavailable, err)
+			return nil, fmt.Errorf("%w: %w", ErrBudgetReadUnavailable, err)
 		}
 	}
 	reads, resets, err := readBudgetApprovals(ctx, caller, in.Wallet, in.ChainID, pairs, spenders)
@@ -214,7 +219,7 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 	for _, target := range targets {
 		cleared, checkErr := n.teardownVerifier()(ctx, in.ChainID, in.Wallet, target.EntityID)
 		if checkErr != nil {
-			return nil, fmt.Errorf("%w: retirement registration is unavailable", ErrBudgetReadUnavailable)
+			return nil, fmt.Errorf("%w: retirement registration is unavailable: %w", ErrBudgetReadUnavailable, checkErr)
 		}
 		if !cleared {
 			retirements = append(retirements, target)
@@ -245,10 +250,23 @@ func (n *Engine) prepareBudgetPolicy(ctx context.Context, user *model.User, in S
 		if errors.As(err, &fee) {
 			return nil, budgetFundingRefusal(fee)
 		}
-		return nil, fmt.Errorf("budget owner operation could not be prepared: %w", err)
+		if errors.Is(err, config.ErrEOA7702ExecuteDisabled) || errors.Is(err, config.ErrEOADelegationMissing) || errors.Is(err, config.ErrSMA7702Unavailable) ||
+			errors.Is(err, preset.ErrOwnerAccountUnsupported) || errors.Is(err, preset.ErrOwnerConfiguration) {
+			return nil, err
+		}
+		// The explicit permanent/configuration refusals above keep their own
+		// codes. Unexpected read/pricing failures retain a private cause and
+		// an authored 503; no blanket retry instruction or raw 400 detail.
+		return nil, fmt.Errorf("%w: budget owner operation could not be prepared: %w", ErrBudgetReadUnavailable, err)
 	}
 	op, hash, err := validateBudgetOwnerOperation(priced, in.Wallet, in.ChainID, calls)
 	if err != nil {
+		return nil, err
+	}
+	// Backfill before returning a signable review, with only the unsigned
+	// preparation lock held. Preserve pricing/identity refusals above, and
+	// recheck current authority again under the send gate at submit.
+	if err = n.warmBudgetAuthorityInventory(ctx, user.Address, in.Wallet, in.ChainID); err != nil {
 		return nil, err
 	}
 	expires := time.Now().Add(ownerPreparationTTL).UnixMilli()

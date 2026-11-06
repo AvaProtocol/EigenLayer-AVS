@@ -27,8 +27,11 @@ type budgetChangeFake struct {
 	reset           int64
 	readError       bool
 	validationError error
+	viewError       error
+	canonicalError  error
 	changed         bool
 	authorityError  error
+	authorityCheck  func(context.Context, common.Address, common.Address) error
 	caller          func(ethereum.CallMsg) ([]byte, error)
 	sending         chan struct{}
 	releaseSend     chan struct{}
@@ -43,6 +46,9 @@ type budgetFakeView struct {
 }
 
 func (f *budgetChangeFake) View(_ context.Context, _ int64, number *big.Int) (budgetChainView, error) {
+	if f.viewError != nil {
+		return nil, f.viewError
+	}
 	b := uint64(10)
 	if f.observation != nil {
 		b = f.observation.Block.Number + 1
@@ -64,11 +70,14 @@ func (v *budgetFakeView) CodeAt(_ context.Context, address common.Address) ([]by
 }
 func (v *budgetFakeView) Block() BudgetBlock                    { return v.block }
 func (v *budgetFakeView) Close()                                {}
-func (v *budgetFakeView) VerifyCanonical(context.Context) error { return nil }
+func (v *budgetFakeView) VerifyCanonical(context.Context) error { return v.f.canonicalError }
 func (v *budgetFakeView) ValidateOwner(context.Context, *BudgetPolicyPreparation) error {
 	return v.f.validationError
 }
-func (v *budgetFakeView) CheckAuthorities(context.Context, common.Address, common.Address) error {
+func (v *budgetFakeView) CheckAuthorities(ctx context.Context, owner, wallet common.Address) error {
+	if v.f.authorityCheck != nil {
+		return v.f.authorityCheck(ctx, owner, wallet)
+	}
 	return v.f.authorityError
 }
 func (v *budgetFakeView) Nonce(context.Context, common.Address) (*big.Int, error) {
@@ -137,6 +146,24 @@ func budgetMined(p *BudgetPolicyPreparation, success bool) *budgetObservation {
 	nonce := new(big.Int).Add((*userop.UserOperationV07)(p.Operation).Nonce, big.NewInt(1))
 	return &budgetObservation{Nonce: nonce, Hash: p.UserOpHash, Success: success, Block: BudgetBlock{Number: 11, Hash: common.BigToHash(big.NewInt(11))}, TransactionHash: common.HexToHash("0xabc")}
 }
+
+func TestBudgetSubmitReportsLatestLegacyGrantDeadlineAfterPrepare(t *testing.T) {
+	f, p, backend, signature := newBudgetChangeTest(t)
+	earlier := uint64(time.Now().Add(time.Hour).Unix())
+	later := earlier + 3600
+	// These signatures did not exist when the budget operation was prepared.
+	storeOutstandingLegacyBudgetGrant(t, f, earlier)
+	storeOutstandingLegacyBudgetGrant(t, f, later)
+
+	_, err := f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, f.in.Wallet, testPolicyChain, p.ID, signature)
+	var refusal *BudgetPolicyError
+	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, BudgetLegacyGrantPendingCode, refusal.Code)
+	require.Equal(t, int64(later)*1000, refusal.LegacyGrantDeadline)
+	require.Equal(t, "An outstanding legacy signature can still install.", refusal.Detail)
+	require.Zero(t, backend.sent.Load())
+}
+
 func TestBudgetSubmitActivatesOnlyAfterReceiptAndResetProof(t *testing.T) {
 	f, p, b, sig := newBudgetChangeTest(t)
 	result, e := f.n.SubmitBudgetPolicyPreparation(context.Background(), f.user, f.in.Wallet, testPolicyChain, p.ID, sig)

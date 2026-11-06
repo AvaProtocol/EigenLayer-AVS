@@ -1851,7 +1851,10 @@ type Problem struct {
 
 	// Code Machine-readable error code. Stable across releases; clients can
 	// switch on this for programmatic handling. Mirrors the gRPC-era
-	// ErrorCode enum vocabulary.
+	// ErrorCode enum vocabulary. POLICIES_REJECTED (400) preserves an
+	// authored client-validation reason, including expired signing
+	// windows. POLICIES_UNAVAILABLE (503) hides unexpected internal
+	// diagnostics, which remain only in server logs.
 	Code *string `json:"code,omitempty"`
 
 	// Delegate Lowercase or checksummed hex EOA / contract address.
@@ -1863,9 +1866,27 @@ type Problem struct {
 	// Instance URI / opaque ID identifying this specific occurrence (e.g., request id).
 	Instance *string `json:"instance,omitempty"`
 
+	// LegacyGrantDeadline Latest outstanding legacy signature deadline, in unix milliseconds.
+	// Set only on BUDGET_LEGACY_GRANT_PENDING.
+	LegacyGrantDeadline *int64 `json:"legacyGrantDeadline,omitempty"`
+
 	// MissingActions Planned calls the grant does not allow.
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
 	NeededWei      *string          `json:"neededWei,omitempty"`
+
+	// OwnerDelegate Observed EIP-7702 delegate of the owner, only on
+	// EOA_DELEGATION_MISSING from owner execution or budget preparation
+	// and submission, and policy checks of an eoa_7702 runner. Absent
+	// for non-designation code or unknown state. Gateway pin, reader or
+	// implementation-hash failures on supported chains are
+	// OWNER_ACCOUNT_UNAVAILABLE (503), never owner delegation advice.
+	// A delegated owner on a chain other than Sepolia or Base is a
+	// permanent EOA_DELEGATION_MISSING refusal even without a configured
+	// pin; ownerDelegate still names the observed designation.
+	// A confirmed unsupported account implementation, fallback owner or
+	// EntryPoint is OWNER_ACCOUNT_UNSUPPORTED (409); preparing again
+	// does not fix it.
+	OwnerDelegate *EthereumAddress `json:"ownerDelegate,omitempty"`
 
 	// PolicyId Usable session grant involved in this failure, when there is one.
 	// Set on `SESSION_POLICY_BASE_CHANGED`, `SESSION_POLICY_NOT_COVERING`,
@@ -1886,6 +1907,16 @@ type Problem struct {
 
 	// Status HTTP status code (echoed for clients that surface only the body).
 	Status int32 `json:"status"`
+
+	// SubmissionStarted Budget signature-only submit send boundary, when known. False
+	// proves this request was refused before attempting the durable
+	// first-send marker, so it did not relay an operation. True includes
+	// uncertain marker/storage failures and repeats of marked attempts; check the
+	// existing preparation and never infer that nothing was sent.
+	// A repeated submit of a settled unsent preparation remains false.
+	// Absent means unknown, including older gateways. A lost response
+	// also means unknown. Never infer this from HTTP status or prose.
+	SubmissionStarted *bool `json:"submissionStarted,omitempty"`
 
 	// Title Short, human-readable summary.
 	Title string `json:"title"`
@@ -2152,10 +2183,22 @@ type SessionPolicy struct {
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
-	// OnChainCleanup Present when status is revoked and the validation entity is still
-	// installed on chain. Owner-executable uninstallValidation so clients
-	// can finish teardown without re-calling DELETE (#717).
+	// OnChainCleanup Owner-executable uninstallValidation so clients can finish teardown
+	// without re-calling DELETE (#717). Present only when
+	// onChainCleanupRequired is true and the payload can be built.
+	// When the payload cannot be built, onChainCleanupRequired remains
+	// true and this field is absent.
 	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
+
+	// OnChainCleanupRequired True when this policy is revoked and its grant was applied on
+	// chain without a recorded verified teardown. Has the same meaning
+	// as RevokePolicyResponse.onChainCleanupRequired. False for active
+	// or pending policies, grants never applied, or verified teardown.
+	// Independent of payload availability: onChainCleanup may be absent
+	// even when this is true, if the cleanup payload cannot be built.
+	// List and single-policy reads recheck the account registration and
+	// record verified removals. Failed checks leave the requirement set.
+	OnChainCleanupRequired bool `json:"onChainCleanupRequired"`
 
 	// Runner Lowercase or checksummed hex EOA / contract address.
 	Runner EthereumAddress `json:"runner"`
@@ -2508,10 +2551,22 @@ type SubmitPolicyResponse struct {
 	NativeRecipients *[]EthereumAddress `json:"nativeRecipients,omitempty"`
 	NativeSpendCap   *NativeSpendCap    `json:"nativeSpendCap,omitempty"`
 
-	// OnChainCleanup Present when status is revoked and the validation entity is still
-	// installed on chain. Owner-executable uninstallValidation so clients
-	// can finish teardown without re-calling DELETE (#717).
+	// OnChainCleanup Owner-executable uninstallValidation so clients can finish teardown
+	// without re-calling DELETE (#717). Present only when
+	// onChainCleanupRequired is true and the payload can be built.
+	// When the payload cannot be built, onChainCleanupRequired remains
+	// true and this field is absent.
 	OnChainCleanup *OnChainRevokeCleanup `json:"onChainCleanup,omitempty"`
+
+	// OnChainCleanupRequired True when this policy is revoked and its grant was applied on
+	// chain without a recorded verified teardown. Has the same meaning
+	// as RevokePolicyResponse.onChainCleanupRequired. False for active
+	// or pending policies, grants never applied, or verified teardown.
+	// Independent of payload availability: onChainCleanup may be absent
+	// even when this is true, if the cleanup payload cannot be built.
+	// List and single-policy reads recheck the account registration and
+	// record verified removals. Failed checks leave the requirement set.
+	OnChainCleanupRequired bool `json:"onChainCleanupRequired"`
 
 	// Runner Lowercase or checksummed hex EOA / contract address.
 	Runner EthereumAddress `json:"runner"`

@@ -19,8 +19,15 @@ import (
 // the log — and therefore what SentryLogger would have captured.
 type recordingLogger struct {
 	sdklogging.Logger
-	msgs []string
-	tags [][]any
+	msgs     []string
+	tags     [][]any
+	infoMsgs []string
+	infoTags [][]any
+}
+
+func (l *recordingLogger) Info(msg string, tags ...any) {
+	l.infoMsgs = append(l.infoMsgs, msg)
+	l.infoTags = append(l.infoTags, tags)
 }
 
 func (l *recordingLogger) Error(msg string, tags ...any) {
@@ -80,6 +87,54 @@ func TestProblemClampsUnauthored5xxDetail(t *testing.T) {
 	}
 	if got := logger.loggedError(t); !errors.Is(got, internal) {
 		t.Fatalf("log must keep the original error, got %v", got)
+	}
+}
+
+func TestProblemLogsTypedServerCauseWithoutExposingIt(t *testing.T) {
+	cause := errors.New("RPC node is behind the pinned block; private diagnostic")
+	logger := &recordingLogger{}
+	started := false
+	rec, p := serveErr(logger, &HTTPError{
+		Status: http.StatusServiceUnavailable, Code: "BUDGET_READ_UNAVAILABLE",
+		Title: "Budget couldn't be submitted", Detail: "A required check is unavailable.",
+		Cause: cause, SubmissionStarted: &started,
+	})
+	if !errors.Is(logger.loggedError(t), cause) || !strings.Contains(logger.loggedError(t).Error(), cause.Error()) {
+		t.Fatal("server diagnostics must retain the original cause")
+	}
+	if strings.Contains(rec.Body.String(), cause.Error()) {
+		t.Fatal("private diagnostic leaked to the response")
+	}
+	if p.SubmissionStarted == nil || *p.SubmissionStarted {
+		t.Fatal("response must preserve an explicit false send boundary")
+	}
+}
+
+func TestProblemLogsAttachedRefusalCauseAtInfoOnly(t *testing.T) {
+	cause := errors.New("owner implementation comparison: private diagnostic")
+	logger := &recordingLogger{}
+	rec, _ := serveErr(logger, &HTTPError{
+		Status: http.StatusConflict, Code: "EOA_DELEGATION_MISSING",
+		Title: "Owner wallet account setup is not supported", Detail: "Switch back in your wallet, then check again.",
+		Cause: cause,
+	})
+	if len(logger.tags) != 0 || len(logger.infoTags) != 1 {
+		t.Fatal("expected one info refusal and no server error")
+	}
+	foundCause := false
+	for i := 0; i+1 < len(logger.infoTags[0]); i += 2 {
+		if logger.infoTags[0][i] == "error" {
+			err, ok := logger.infoTags[0][i+1].(error)
+			foundCause = ok && errors.Is(err, cause)
+		}
+	}
+	if !foundCause || strings.Contains(rec.Body.String(), cause.Error()) {
+		t.Fatal("private cause must be logged, never returned")
+	}
+	ordinary := &recordingLogger{}
+	serveErr(ordinary, &HTTPError{Status: http.StatusBadRequest, Title: "Invalid input"})
+	if len(ordinary.infoTags) != 0 {
+		t.Fatal("ordinary refusals without a private cause must not be logged")
 	}
 }
 
@@ -199,5 +254,17 @@ func TestProblemCopiesNativeRecipientRefusalFields(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"acknowledgedDelegate":"0x00000000000000000000000000000000000000c3"`) {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestHTTPErrorTextAndUnwrapRetainPrivateCause(t *testing.T) {
+	cause := errors.New("private diagnostic")
+	plain := &HTTPError{Title: "Public title"}
+	if plain.Error() != "Public title" || errors.Unwrap(plain) != nil {
+		t.Fatal("plain error changed")
+	}
+	wrapped := &HTTPError{Title: "Public title", Cause: cause}
+	if wrapped.Error() != "Public title: private diagnostic" || !errors.Is(wrapped, cause) {
+		t.Fatal("private diagnostic chain was lost")
 	}
 }

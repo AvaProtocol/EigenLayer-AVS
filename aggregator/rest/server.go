@@ -14,6 +14,7 @@ package rest
 import (
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/labstack/echo/v4"
@@ -59,6 +60,9 @@ type Server struct {
 	smartWalletRpcByChain map[int64]*ethclient.Client
 	priceService          taskengine.PriceService
 	withdraws             avsclient.WithdrawService
+	// Rate-limit cleanup warnings independently per policy/stage/cause.
+	// This stores logging timestamps only, never cleanup state or payloads.
+	policyCleanupWarnings sync.Map // policyCleanupWarningKey -> *policyCleanupWarningState
 }
 
 // NewServer wires the REST handler with its dependencies. Constructed once

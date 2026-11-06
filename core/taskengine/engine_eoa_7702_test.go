@@ -1,6 +1,8 @@
 package taskengine
 
 import (
+	"context"
+	"errors"
 	"math/big"
 	"strings"
 	"testing"
@@ -9,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil/fixtures"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -111,10 +114,84 @@ func TestRequireMAv2SessionWalletEOA7702(t *testing.T) {
 	user := &model.User{Address: owner, ChainID: testPolicyChain}
 	require.NoError(t, StoreEOA7702Wallet(db, testPolicyChain, owner, config.SMA7702Delegate()))
 
-	// No chain reader in this fixture: K13 fail-closed, not "not MA v2".
+	// No pin in this fixture: a gateway verification failure, not owner advice.
 	err := engine.requireMAv2SessionWallet(user, testPolicyChain, owner)
-	require.ErrorIs(t, err, ErrEOADelegationMissing)
+	require.ErrorIs(t, err, config.ErrSMA7702Unavailable)
 
 	// Derived runner still uses the factory path.
 	require.NoError(t, engine.requireMAv2SessionWallet(user, testPolicyChain, derived))
+}
+
+type eoaSetupReader struct {
+	ChainStateReader
+	owner      common.Address
+	code, impl []byte
+	failAt     common.Address
+	cause      error
+	implReads  int
+}
+
+func (r *eoaSetupReader) CodeAt(_ context.Context, address common.Address) ([]byte, error) {
+	if address == r.failAt {
+		return nil, r.cause
+	}
+	if address == r.owner {
+		return r.code, nil
+	}
+	r.implReads++
+	return r.impl, nil
+}
+
+func TestEOA7702PolicyChecksSeparateReadAndSetupFailures(t *testing.T) {
+	for _, name := range []string{"no pin", "partial pin", "invalid pin", "no reader", "owner RPC", "implementation RPC", "runtime mismatch", "undelegated", "other delegate", "valid"} {
+		t.Run(name, func(t *testing.T) {
+			n, db, _, owner, _ := newPolicyTestEngine(t)
+			require.NoError(t, StoreEOA7702Wallet(db, testPolicyChain, owner, config.SMA7702Delegate()))
+			sw := n.ResolveSmartWalletConfig(testPolicyChain)
+			sw.SMA7702Delegate, sw.SMA7702ImplHash = config.SMA7702Delegate(), config.SMA7702ImplHash()
+			cause := errors.New("private RPC failure")
+			r := &eoaSetupReader{owner: owner, code: append([]byte{0xef, 0x01, 0x00}, config.SMA7702Delegate().Bytes()...), impl: fixtures.SMA7702Runtime(), cause: cause}
+			previous := GetChainStateReaderForChain(uint64(testPolicyChain))
+			unregisterChainStateReader(uint64(testPolicyChain))
+			t.Cleanup(func() {
+				unregisterChainStateReader(uint64(testPolicyChain))
+				RegisterChainStateReader(uint64(testPolicyChain), previous)
+			})
+			expected := config.ErrSMA7702Unavailable
+			switch name {
+			case "no pin":
+				sw.SMA7702Delegate, sw.SMA7702ImplHash = common.Address{}, common.Hash{}
+			case "partial pin":
+				sw.SMA7702ImplHash = common.Hash{}
+			case "invalid pin":
+				sw.SMA7702ImplHash = common.HexToHash("0x1234")
+			case "owner RPC":
+				r.failAt = owner
+			case "implementation RPC":
+				r.failAt = config.SMA7702Delegate()
+			case "runtime mismatch":
+				r.impl = []byte{0x60, 0x00}
+			case "undelegated":
+				r.code, expected = nil, config.ErrEOADelegationMissing
+			case "other delegate":
+				r.code, expected = append([]byte{0xef, 0x01, 0x00}, common.HexToAddress("0x1234").Bytes()...), config.ErrEOADelegationMissing
+			case "valid":
+				expected = nil
+			}
+			if name != "no reader" {
+				RegisterChainStateReader(uint64(testPolicyChain), r)
+			}
+			err := n.requireMAv2SessionWallet(&model.User{Address: owner, ChainID: testPolicyChain}, testPolicyChain, owner)
+			require.ErrorIs(t, err, expected)
+			if expected != config.ErrEOADelegationMissing {
+				require.NotErrorIs(t, err, config.ErrEOADelegationMissing)
+			}
+			if name == "owner RPC" || name == "implementation RPC" {
+				require.ErrorIs(t, err, cause)
+			}
+			if expected == config.ErrEOADelegationMissing {
+				require.Zero(t, r.implReads)
+			}
+		})
+	}
 }

@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -152,7 +153,10 @@ func (n *Engine) checkBudgetSessionFlights(ctx context.Context, p *BudgetPolicyP
 		data := append(crypto.Keccak256([]byte("getNonce(address,uint192)"))[:4], common.LeftPadBytes(p.Wallet.Bytes(), 32)...)
 		data = append(data, common.LeftPadBytes(key.Bytes(), 32)...)
 		out, e := v.CallContract(ctx, ethereum.CallMsg{To: &ep, Data: data}, nil)
-		if e != nil || len(out) != 32 {
+		if e != nil {
+			return fmt.Errorf("%w: session flight nonce unavailable: %w", ErrBudgetReadUnavailable, e)
+		}
+		if len(out) != 32 {
 			return fmt.Errorf("%w: session flight nonce unavailable", ErrBudgetReadUnavailable)
 		}
 		if new(big.Int).SetBytes(out).Cmp(full) <= 0 {
@@ -199,6 +203,10 @@ func (n *Engine) budgetWorkflowLease(ctx context.Context, task *model.Workflow) 
 		}
 		if e = n.checkBudgetAuthorities(ctx, chain, owner, wallet); e != nil {
 			unlock()
+			var refusal *BudgetPolicyError
+			if errors.As(e, &refusal) && refusal.Code == BudgetAuthorityUnknownCode {
+				return nil, budgetChanging(refusal.Detail + " Ava's runs for this wallet are paused.")
+			}
 			return nil, budgetChanging(e.Error())
 		}
 	}
