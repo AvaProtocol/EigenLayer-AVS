@@ -69,6 +69,13 @@ func TestWorkflowGraphValidationOverHTTP(t *testing.T) {
 		return rec
 	}
 
+	storedWorkflowCount := func(t *testing.T) int {
+		t.Helper()
+		stored, err := r.db.GetByPrefix(taskengine.WorkflowByStatusStoragePrefix(avsproto.TaskStatus_Enabled))
+		require.NoError(t, err)
+		return len(stored)
+	}
+
 	for _, path := range []string{"/api/v1/workflows", "/api/v1/workflows:simulate"} {
 		for _, graph := range []struct {
 			name   string
@@ -92,9 +99,7 @@ func TestWorkflowGraphValidationOverHTTP(t *testing.T) {
 				if path == "/api/v1/workflows:simulate" {
 					require.Equal(t, "WORKFLOWS_SIMULATE_INVALID", problem.Code)
 				}
-				stored, err := r.db.GetByPrefix(taskengine.ChainWorkflowByStatusStoragePrefix(policyTestChain, avsproto.TaskStatus_Enabled))
-				require.NoError(t, err)
-				require.Empty(t, stored, "invalid workflows must not be persisted")
+				require.Zero(t, storedWorkflowCount(t), "invalid workflows must not be persisted")
 			})
 		}
 	}
@@ -109,10 +114,13 @@ func TestWorkflowGraphValidationOverHTTP(t *testing.T) {
 		{"branch with nonconsecutive condition IDs", branchPayload("2")},
 	} {
 		t.Run(graph.name, func(t *testing.T) {
+			beforeCreate := storedWorkflowCount(t)
 			created := call("/api/v1/workflows", graph.body)
 			require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+			require.Equal(t, beforeCreate+1, storedWorkflowCount(t), "the persistence assertion must observe successful creates")
 			simulated := call("/api/v1/workflows:simulate", graph.body)
 			require.Equal(t, http.StatusOK, simulated.Code, simulated.Body.String())
+			require.Equal(t, beforeCreate+1, storedWorkflowCount(t), "simulation must not persist a workflow")
 			var execution generated.Execution
 			require.NoError(t, json.Unmarshal(simulated.Body.Bytes(), &execution))
 			require.Equal(t, generated.ExecutionStatusSuccess, execution.Status)
