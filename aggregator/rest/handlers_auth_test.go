@@ -1,8 +1,10 @@
 package rest
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +19,6 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
 const testAuthTemplate = `Please sign the below text for ownership verification.
@@ -36,6 +37,10 @@ var testJwtSecret = []byte("test-jwt-secret")
 // exchangeSignedMessage signs the canonical auth message with a fresh key,
 // expiring at expireAt, and posts it to AuthExchange.
 func exchangeSignedMessage(t *testing.T, expireAt time.Time) (*httptest.ResponseRecorder, error) {
+	return exchangeSignedMessageWithPartner(t, expireAt, nil)
+}
+
+func exchangeSignedMessageWithPartner(t *testing.T, expireAt time.Time, configure func(*Server, *http.Request, ed25519.PrivateKey, jwt.MapClaims)) (*httptest.ResponseRecorder, error) {
 	t.Helper()
 	pk, err := crypto.GenerateKey()
 	if err != nil {
@@ -61,11 +66,123 @@ func exchangeSignedMessage(t *testing.T, expireAt time.Time) (*httptest.Response
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth:exchange", strings.NewReader(string(body)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newPartnerServerAud(t, pub, []string{scopeAuthExchange}, partnerStatusActive, "test-gateway")
+	s.config.JwtSecret = testJwtSecret
+	claims := validClaims()
+	claims["sub"] = owner.Hex()
+	claims["scope"] = scopeAuthExchange
+	claims["aud"] = "test-gateway"
+	req.Header.Set(partnerAssertionHeader, signAssertion(t, priv, claims))
+	if configure != nil {
+		configure(s, req, priv, claims)
+	}
 	rec := httptest.NewRecorder()
 	ctx := echo.New().NewContext(req, rec)
 
-	s := &Server{config: &config.Config{JwtSecret: testJwtSecret}}
 	return rec, s.AuthExchange(ctx)
+}
+
+func TestAuthExchangeRequiresPartnerAndWalletProof(t *testing.T) {
+	cases := []struct {
+		name      string
+		configure func(*Server, *http.Request, ed25519.PrivateKey, jwt.MapClaims)
+		code      string
+	}{
+		{"missing assertion", func(_ *Server, r *http.Request, _ ed25519.PrivateKey, _ jwt.MapClaims) {
+			r.Header.Del(partnerAssertionHeader)
+		}, "PARTNER_REQUIRED"},
+		{"user JWT alone", func(_ *Server, r *http.Request, _ ed25519.PrivateKey, _ jwt.MapClaims) {
+			r.Header.Del(partnerAssertionHeader)
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": testPartnerSubject, "exp": time.Now().Add(time.Hour).Unix()})
+			signed, err := token.SignedString(testJwtSecret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Header.Set(echo.HeaderAuthorization, "Bearer "+signed)
+		}, "PARTNER_REQUIRED"},
+		{"plain partner ID", func(_ *Server, r *http.Request, _ ed25519.PrivateKey, _ jwt.MapClaims) {
+			r.Header.Set(partnerAssertionHeader, "studio")
+		}, "PARTNER_ASSERTION_MALFORMED"},
+		{"wrong key", func(_ *Server, r *http.Request, _ ed25519.PrivateKey, c jwt.MapClaims) {
+			_, key, err := ed25519.GenerateKey(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Header.Set(partnerAssertionHeader, signAssertion(t, key, c))
+		}, "PARTNER_ASSERTION_INVALID"},
+		{"suspended partner", func(s *Server, _ *http.Request, _ ed25519.PrivateKey, _ jwt.MapClaims) {
+			s.config.Partners[0].Status = "suspended"
+		}, "PARTNER_SUSPENDED"},
+		{"registry read scope only", func(s *Server, _ *http.Request, _ ed25519.PrivateKey, _ jwt.MapClaims) {
+			s.config.Partners[0].Scopes = []string{scopeRead}
+		}, "PARTNER_SCOPE_DENIED"},
+		{"assertion read scope only", func(_ *Server, r *http.Request, key ed25519.PrivateKey, c jwt.MapClaims) {
+			c["scope"] = scopeRead
+			r.Header.Set(partnerAssertionHeader, signAssertion(t, key, c))
+		}, "PARTNER_TOKEN_SCOPE"},
+		{"wrong audience", func(_ *Server, r *http.Request, key ed25519.PrivateKey, c jwt.MapClaims) {
+			c["aud"] = "other-gateway"
+			r.Header.Set(partnerAssertionHeader, signAssertion(t, key, c))
+		}, "PARTNER_ASSERTION_AUDIENCE"},
+		{"expired assertion", func(_ *Server, r *http.Request, key ed25519.PrivateKey, c jwt.MapClaims) {
+			c["exp"] = time.Now().Add(-time.Minute).Unix()
+			r.Header.Set(partnerAssertionHeader, signAssertion(t, key, c))
+		}, "PARTNER_ASSERTION_INVALID"},
+		{"missing subject", func(_ *Server, r *http.Request, key ed25519.PrivateKey, c jwt.MapClaims) {
+			delete(c, "sub")
+			r.Header.Set(partnerAssertionHeader, signAssertion(t, key, c))
+		}, "PARTNER_SUBJECT_MISMATCH"},
+		{"another wallet", func(_ *Server, r *http.Request, key ed25519.PrivateKey, c jwt.MapClaims) {
+			c["sub"] = testPartnerSubject
+			r.Header.Set(partnerAssertionHeader, signAssertion(t, key, c))
+		}, "PARTNER_SUBJECT_MISMATCH"},
+		{"partner does not replace wallet signature", func(_ *Server, r *http.Request, _ ed25519.PrivateKey, _ jwt.MapClaims) {
+			var body generated.AuthExchangeRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			body.Signature = generated.Hex("0x" + strings.Repeat("00", 65))
+			encoded, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Body = io.NopCloser(strings.NewReader(string(encoded)))
+		}, "AUTH_INVALID_SIGNATURE"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := exchangeSignedMessageWithPartner(t, time.Now().Add(time.Hour), tc.configure)
+			if err == nil {
+				t.Fatal("unauthorized exchange minted a token")
+			}
+			httpErr, ok := err.(*restmw.HTTPError)
+			if !ok || httpErr.Code != tc.code {
+				t.Fatalf("got %v, want %s", err, tc.code)
+			}
+		})
+	}
+	t.Run("valid partner and wallet", func(t *testing.T) {
+		rec, err := exchangeSignedMessage(t, time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response generated.AuthExchangeResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		token, err := jwt.Parse(response.Token, func(*jwt.Token) (any, error) { return testJwtSecret, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims := token.Claims.(jwt.MapClaims)
+		if claims["partner_id"] != "studio" || claims["sub"] != string(*response.Subject) {
+			t.Fatalf("unexpected attribution: %v", claims)
+		}
+	})
 }
 
 // A wallet sign-in may last at most 48 hours (studio#1888). The token

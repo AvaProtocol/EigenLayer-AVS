@@ -10,7 +10,7 @@ import (
 // with permissionMap and api/openapi.yaml security overrides.
 var expectedPermissionLevels = map[string]Level{
 	OpGetHealth:     LevelPublic,
-	OpAuthExchange:  LevelPublic,
+	OpAuthExchange:  LevelPartnerAuth,
 	OpListOperators: LevelPublic,
 
 	OpGetToken: LevelPartnerRead,

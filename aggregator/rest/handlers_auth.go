@@ -46,7 +46,8 @@ const authMessageRequired = 8
 // the EigenLayer registration chain id (chain-agnostic auth). SDKs
 // construct the message locally; there is no GetSignatureFormat endpoint.
 func (s *Server) AuthExchange(ctx echo.Context) error {
-	if _, err := s.ensurePermission(ctx, OpAuthExchange); err != nil {
+	principal, err := s.ensurePermission(ctx, OpAuthExchange)
+	if err != nil {
 		return err
 	}
 	var body generated.AuthExchangeRequest
@@ -88,6 +89,13 @@ func (s *Server) AuthExchange(ctx echo.Context) error {
 			Title:  "Owner address cannot be the zero address",
 			Detail: "0x0000…0000 is never a real EOA. Refusing to mint a token bound to it.",
 		}
+	}
+	// A partner may admit only the wallet named in its signed assertion. The
+	// end-user must still prove control of that wallet with personal_sign below.
+	if principal.User == nil || principal.User.Address != ownerAddress {
+		return partnerError(http.StatusForbidden, "PARTNER_SUBJECT_MISMATCH",
+			"Partner subject does not match wallet",
+			"The partner assertion sub must be the non-zero ownerAddress being authenticated.")
 	}
 
 	chainID, expireAt, err := parseAuthMessage(message)
@@ -138,11 +146,17 @@ func (s *Server) AuthExchange(ctx echo.Context) error {
 		}
 	}
 
-	claims := &jwt.RegisteredClaims{
-		ExpiresAt: jwt.NewNumericDate(expireAt),
-		Issuer:    auth.Issuer,
-		Subject:   ownerAddress.Hex(),
-		Audience:  jwt.ClaimStrings{chainID.String()},
+	claims := &struct {
+		jwt.RegisteredClaims
+		PartnerID string `json:"partner_id"`
+	}{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expireAt),
+			Issuer:    auth.Issuer,
+			Subject:   ownerAddress.Hex(),
+			Audience:  jwt.ClaimStrings{chainID.String()},
+		},
+		PartnerID: principal.PartnerID,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(s.config.JwtSecret)
