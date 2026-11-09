@@ -1852,6 +1852,9 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	if err = rejectOwnerReserveGas(taskPayload.Nodes); err != nil {
 		return nil, err
 	}
+	if err := validateWorkflowGraphReferences(taskPayload.Trigger, taskPayload.Nodes, taskPayload.Edges); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid workflow graph: %v", err)
+	}
 	userAddr := user.Address.Hex()
 
 	// Log the create task request with detailed information
@@ -3891,6 +3894,9 @@ func (n *Engine) SimulateWorkflowWithContext(ctx context.Context, user *model.Us
 	}
 	if len(task.Nodes) == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "task must have at least one node for simulation")
+	}
+	if err := validateWorkflowGraphReferences(task.Trigger, task.Nodes, task.Edges); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid workflow graph: %v", err)
 	}
 
 	// Validate all node names for JavaScript compatibility
