@@ -25,6 +25,23 @@ func TestWorkflowGraphReferences(t *testing.T) {
 			want:   `edge "e1" references unknown source "__trigger"`,
 		},
 		{
+			name: "trigger ID cannot be mistaken for a branch output",
+			change: func(task *avsproto.Task) {
+				task.Trigger.Id = "start.trigger"
+				task.Edges[0].Source = task.Trigger.Id
+			},
+			want: `trigger ID "start.trigger" must not contain '.'`,
+		},
+		{
+			name: "node ID cannot be mistaken for a branch output",
+			change: func(task *avsproto.Task) {
+				task.Nodes[0].Id = "code.1"
+				task.Edges[0].Target = "code.1"
+				task.Edges = append(task.Edges, &avsproto.TaskEdge{Id: "e2", Source: "code.1", Target: "branch"})
+			},
+			want: `node ID "code.1" must not contain '.'`,
+		},
+		{
 			name:   "dangling target",
 			change: func(task *avsproto.Task) { task.Edges[0].Target = "missing" },
 			want:   `edge "e1" references unknown target node "missing"`,
@@ -41,6 +58,21 @@ func TestWorkflowGraphReferences(t *testing.T) {
 				task.Edges = append(task.Edges, &avsproto.TaskEdge{Id: "e2", Source: "branch.missing", Target: "c1"})
 			},
 			want: `edge "e2" references unknown source "branch.missing"`,
+		},
+		{
+			name: "stale Studio condition gets recovery guidance",
+			change: func(task *avsproto.Task) {
+				task.Nodes[1].GetBranch().Config.Conditions = []*avsproto.BranchNode_Condition{{Id: "0"}, {Id: "1"}}
+				task.Edges = append(task.Edges, &avsproto.TaskEdge{Id: "e2", Source: "branch.2", Target: "c1"})
+			},
+			want: `branch "branch" has no condition "2"; remove the stale edge or reconnect it to an existing condition`,
+		},
+		{
+			name: "branch condition IDs do not have to be consecutive",
+			change: func(task *avsproto.Task) {
+				task.Nodes[1].GetBranch().Config.Conditions = []*avsproto.BranchNode_Condition{{Id: "0"}, {Id: "2"}}
+				task.Edges = append(task.Edges, &avsproto.TaskEdge{Id: "e2", Source: "branch.2", Target: "c1"})
+			},
 		},
 		{
 			name: "dotted source must belong to a branch",
