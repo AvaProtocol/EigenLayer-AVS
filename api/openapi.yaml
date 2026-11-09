@@ -3111,6 +3111,8 @@ paths:
         granted `auth:exchange`. The assertion must declare that scope and its
         `sub` must match `ownerAddress`. Partner admission never replaces the
         wallet signature. The issued JWT records the verified `partner_id`.
+        `partner_assertion_audience` must be configured; otherwise issuance
+        fails closed with `503 PARTNER_AUTH_AUDIENCE_REQUIRED`.
 
         The token expires at the message's `Expire At`, which may be at most
         48 hours from now. A message that expires later is refused with
@@ -3139,6 +3141,13 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/RateLimited'
+
+        '503':
+          description: Partner JWT issuance is missing its gateway audience configuration.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
   # =====================================================================
   # Workflows

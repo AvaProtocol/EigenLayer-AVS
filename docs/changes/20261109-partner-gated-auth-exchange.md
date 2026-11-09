@@ -13,7 +13,16 @@ Bearer token alone, or a `read` assertion cannot authorize issuance. Health
 remains anonymous. Subsequent workflow and fund-authority calls retain their
 existing user-JWT requirements; a partner assertion is not wallet authority.
 
+JWT issuance additionally refuses an unset or blank `partner_assertion_audience`
+with `503 PARTNER_AUTH_AUDIENCE_REQUIRED`, preventing an accidental unbound
+environment from accepting assertions issued for another gateway. Delegated
+read routes retain their existing optional-audience behavior.
+
 ## Client and configuration rollout
+
+Before any gateway config apply, restart or image deployment, verify sufficient
+volume headroom for a startup migration backup as well as normal DB writes.
+Do not rely only on the periodic timer when planning storage operations.
 
 1. Grant the existing Studio partner `auth:exchange` in its gateway registry.
    No new key pair is needed. Local/test gateways need a registered partner too.
@@ -34,6 +43,10 @@ credentials, which are signed with the same secret. This change does not rotate
 keys, invalidate cached Studio credentials, or stop already deployed workflows.
 The CLI minting path remains privileged: it requires access to the gateway's
 signing-secret configuration and is not a public HTTP endpoint.
+Unapproved direct SDK/integrator JWT issuance is intentionally disabled; an
+approved partner backend must mediate it. Operator Node gRPC authentication
+is separate and unchanged. Privileged CLI JWTs may have longer lifetimes than
+the 48-hour wallet sign-in window; do not assume they expire within two days.
 
 ## Verification
 

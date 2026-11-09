@@ -92,6 +92,12 @@ func TestAuthExchangeRequiresPartnerAndWalletProof(t *testing.T) {
 		configure func(*Server, *http.Request, ed25519.PrivateKey, jwt.MapClaims)
 		code      string
 	}{
+		{"missing configured audience", func(s *Server, _ *http.Request, _ ed25519.PrivateKey, _ jwt.MapClaims) {
+			s.config.PartnerAssertionAudience = ""
+		}, "PARTNER_AUTH_AUDIENCE_REQUIRED"},
+		{"blank configured audience", func(s *Server, _ *http.Request, _ ed25519.PrivateKey, _ jwt.MapClaims) {
+			s.config.PartnerAssertionAudience = " \t "
+		}, "PARTNER_AUTH_AUDIENCE_REQUIRED"},
 		{"missing assertion", func(_ *Server, r *http.Request, _ ed25519.PrivateKey, _ jwt.MapClaims) {
 			r.Header.Del(partnerAssertionHeader)
 		}, "PARTNER_REQUIRED"},
@@ -165,24 +171,31 @@ func TestAuthExchangeRequiresPartnerAndWalletProof(t *testing.T) {
 			}
 		})
 	}
-	t.Run("valid partner and wallet", func(t *testing.T) {
-		rec, err := exchangeSignedMessage(t, time.Now().Add(time.Hour))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var response generated.AuthExchangeResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-			t.Fatal(err)
-		}
-		token, err := jwt.Parse(response.Token, func(*jwt.Token) (any, error) { return testJwtSecret, nil })
-		if err != nil {
-			t.Fatal(err)
-		}
-		claims := token.Claims.(jwt.MapClaims)
-		if claims["partner_id"] != "studio" || claims["sub"] != string(*response.Subject) {
-			t.Fatalf("unexpected attribution: %v", claims)
-		}
-	})
+	for _, arrayScope := range []bool{false, true} {
+		t.Run(fmt.Sprintf("valid partner and wallet (array scope %t)", arrayScope), func(t *testing.T) {
+			rec, err := exchangeSignedMessageWithPartner(t, time.Now().Add(time.Hour), func(_ *Server, r *http.Request, key ed25519.PrivateKey, c jwt.MapClaims) {
+				if arrayScope {
+					c["scope"] = []string{scopeAuthExchange}
+					r.Header.Set(partnerAssertionHeader, signAssertion(t, key, c))
+				}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var response generated.AuthExchangeResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			token, err := jwt.Parse(response.Token, func(*jwt.Token) (any, error) { return testJwtSecret, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			claims := token.Claims.(jwt.MapClaims)
+			if claims["partner_id"] != "studio" || claims["sub"] != string(*response.Subject) {
+				t.Fatalf("unexpected attribution: %v", claims)
+			}
+		})
+	}
 }
 
 // A wallet sign-in may last at most 48 hours (studio#1888). The token

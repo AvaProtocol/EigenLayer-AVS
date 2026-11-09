@@ -1425,6 +1425,15 @@ func (response AuthExchange429ApplicationProblemPlusJSONResponse) VisitAuthExcha
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type AuthExchange503ApplicationProblemPlusJSONResponse Problem
+
+func (response AuthExchange503ApplicationProblemPlusJSONResponse) VisitAuthExchangeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ListExecutionsRequestObject struct {
 	Params ListExecutionsParams
 }

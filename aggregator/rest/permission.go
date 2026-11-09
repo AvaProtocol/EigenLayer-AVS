@@ -3,6 +3,7 @@ package rest
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo/v4"
@@ -201,6 +202,13 @@ func (s *Server) ensurePermission(ctx echo.Context, op string) (*Principal, erro
 		return s.authPartnerRead(ctx, level)
 
 	case LevelPartnerAuth:
+		// Issuance must always be bound to this gateway/environment. Preserve
+		// the legacy optional audience behavior only for delegated read routes.
+		if s.config == nil || strings.TrimSpace(s.config.PartnerAssertionAudience) == "" {
+			return nil, partnerError(http.StatusServiceUnavailable, "PARTNER_AUTH_AUDIENCE_REQUIRED",
+				"Partner wallet authentication is not configured",
+				"Set partner_assertion_audience before enabling wallet JWT issuance.")
+		}
 		return s.authPartner(ctx, level, scopeAuthExchange)
 
 	case LevelPartnerWalletPreview:
