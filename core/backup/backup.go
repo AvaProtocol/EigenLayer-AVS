@@ -1,11 +1,14 @@
 package backup
 
 import (
+	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,25 +25,45 @@ type Service struct {
 	interval      time.Duration
 	stop          chan struct{}
 	wg            sync.WaitGroup
+	workMu        sync.Mutex // serializes migration and periodic backup writes/pruning
+	options       Options
+	freeBytes     func(string) (int64, error)
+	createFile    func(string) (archiveFile, error)
+	rename        func(string, string) error
+	syncDir       func(string) error
 }
 
-func NewService(logger logging.Logger, db storage.Storage, backupDir string) *Service {
+func NewService(logger logging.Logger, db storage.Storage, backupDir string, options ...Options) *Service {
+	opts := Options{}.withDefaults()
+	if len(options) > 0 {
+		opts = options[0].withDefaults()
+	}
 	return &Service{
 		logger:        logger,
 		db:            db,
 		backupDir:     backupDir,
 		backupEnabled: false,
+		options:       opts,
+		freeBytes:     availableBytes,
+		createFile: func(path string) (archiveFile, error) {
+			return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		},
+		rename:  os.Rename,
+		syncDir: syncDirectory,
 	}
 }
 
 func (s *Service) StartPeriodicBackup(interval time.Duration) error {
+	if err := s.options.Validate(); err != nil {
+		return err
+	}
 	if interval <= 0 {
 		return fmt.Errorf("backup interval must be positive")
 	}
 	if s.backupDir == "" {
 		return fmt.Errorf("backup directory is empty")
 	}
-	if err := os.MkdirAll(s.backupDir, 0755); err != nil {
+	if err := s.ensureBackupDirectory(); err != nil {
 		return fmt.Errorf("failed to create backup directory: %v", err)
 	}
 
@@ -99,82 +122,101 @@ func (s *Service) backupLoop(stop <-chan struct{}) {
 }
 
 func (s *Service) PerformBackup() (string, error) {
-	timestamp := time.Now().Format("06-01-02-15-04")
-	backupPath := filepath.Join(s.backupDir, timestamp)
-
-	if err := os.MkdirAll(backupPath, 0755); err != nil {
-		return "", fmt.Errorf("failed to create backup timestamp directory: %v", err)
+	s.workMu.Lock()
+	defer s.workMu.Unlock()
+	if err := s.options.Validate(); err != nil {
+		return "", err
 	}
-
-	backupFile := filepath.Join(backupPath, "full-backup.db")
-	f, err := os.Create(backupFile)
+	if strings.TrimSpace(s.backupDir) == "" {
+		return "", fmt.Errorf("backup directory is empty")
+	}
+	if err := s.ensureBackupDirectory(); err != nil {
+		return "", fmt.Errorf("create backup directory: %w", err)
+	}
+	retained, err := s.listBackups()
 	if err != nil {
-		// Remove the just-created timestamp dir so a failed attempt doesn't linger as an
-		// orphan that pruneOldBackups would count toward backupRetention.
-		os.RemoveAll(backupPath)
-		return "", fmt.Errorf("failed to create backup file: %v", err)
+		return "", err
 	}
-	defer f.Close()
-
-	s.logger.Infof("Running backup to %s", backupFile)
-	since := uint64(0) // Full backup
-	_, err = s.db.Backup(context.Background(), f, since)
+	// Make a count slot before writing, but never delete the final existing
+	// backup before its replacement is durably published (including count=1).
+	count := max(1, s.options.RetentionCount-1)
+	for len(retained) > count {
+		if err := s.removeOldest(&retained); err != nil {
+			return "", err
+		}
+	}
+	w := &boundedWriter{service: s, retained: retained}
+	if err := w.makeRoom(1); err != nil {
+		return "", err
+	}
+	stamp := time.Now().UTC().Format(archiveTimeLayout)
+	partial, err := os.MkdirTemp(s.backupDir, ".partial-"+stamp+"-")
 	if err != nil {
-		// Drop the partial backup: its timestamp dir + empty/partial full-backup.db would
-		// otherwise count toward backupRetention and prune a valid backup on the next success.
-		f.Close()
-		os.RemoveAll(backupPath)
-		return "", fmt.Errorf("backup operation failed: %v", err)
+		return "", fmt.Errorf("create partial backup: %w", err)
 	}
-
-	s.logger.Infof("Backup completed successfully to %s", backupFile)
-	s.pruneOldBackups()
+	cleanupPath := partial
+	complete := false
+	defer func() {
+		if !complete {
+			if err := os.RemoveAll(cleanupPath); err != nil {
+				s.logger.Error("backup partial cleanup failed", "path", cleanupPath, "error", err)
+			}
+		}
+	}()
+	path := filepath.Join(partial, archiveName)
+	s.logger.Info("running compressed backup", "path", path,
+		"retention_count", s.options.RetentionCount,
+		"max_bytes", s.options.MaxBytes, "min_free_bytes", s.options.MinFreeBytes)
+	if err := s.writeArchive(path, w); err != nil {
+		return "", fmt.Errorf("backup operation failed: %w", err)
+	}
+	if err := s.syncDir(partial); err != nil {
+		return "", fmt.Errorf("sync backup directory: %w", err)
+	}
+	published := filepath.Join(s.backupDir, strings.TrimPrefix(filepath.Base(partial), ".partial-"))
+	if _, err := os.Lstat(published); !os.IsNotExist(err) {
+		return "", fmt.Errorf("backup destination is not available: %s", published)
+	}
+	if err := s.rename(partial, published); err != nil {
+		return "", fmt.Errorf("publish backup: %w", err)
+	}
+	cleanupPath = published
+	if err := s.syncDir(s.backupDir); err != nil {
+		return "", fmt.Errorf("sync backup publication: %w", err)
+	}
+	complete = true
+	backupFile := filepath.Join(published, archiveName)
+	s.logger.Info("backup completed", "path", backupFile, "compressed_bytes", w.written)
+	s.pruneOldBackups(published)
 	return backupFile, nil
 }
 
-// backupRetention is the number of most-recent full-backup directories kept
-// under backupDir; older ones are pruned after each successful backup. These
-// backups are a pre-migration / periodic safety net living on the SAME volume
-// as the DB, so they're redundant with Railway's own volume snapshots — keeping
-// a few is plenty. Not pruning them silently bloats the volume: one
-// ~0.5–0.7 GB full-backup.db is written per migration-bearing release.
-const backupRetention = 3
+type archiveFile interface {
+	io.Writer
+	Sync() error
+	Close() error
+}
 
-// pruneOldBackups removes all but the most recent backupRetention timestamped
-// backup directories under backupDir. Names use a lexicographically-sortable
-// timestamp (06-01-02-15-04), so a name sort is a chronological sort. Failures
-// are logged, never returned — a prune problem must not fail the backup (or the
-// migration that triggered it).
-func (s *Service) pruneOldBackups() {
-	entries, err := os.ReadDir(s.backupDir)
+func (s *Service) writeArchive(path string, w *boundedWriter) (err error) {
+	f, err := s.createFile(path)
 	if err != nil {
-		s.logger.Warnf("backup retention: cannot read %s: %v", s.backupDir, err)
-		return
+		return err
 	}
-
-	var stamps []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		// Only real backup dirs — names that parse as the backup timestamp.
-		if _, perr := time.Parse("06-01-02-15-04", e.Name()); perr != nil {
-			continue
-		}
-		stamps = append(stamps, e.Name())
+	defer func() { err = errors.Join(err, f.Close()) }()
+	w.destination = f
+	// BestSpeed keeps migration/startup backups from spending minutes at the
+	// default compression level. The compressed byte budget remains enforced.
+	gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+	if err != nil {
+		return err
 	}
-
-	if len(stamps) <= backupRetention {
-		return
+	if _, err := s.db.Backup(context.Background(), gz, 0); err != nil {
+		// Badger's parallel stream may return context.Canceled after a writer
+		// failure; retain the actual space/budget/I/O cause for operators.
+		return errors.Join(err, w.failure)
 	}
-
-	sort.Strings(stamps) // oldest first
-	for _, name := range stamps[:len(stamps)-backupRetention] {
-		path := filepath.Join(s.backupDir, name)
-		if rmErr := os.RemoveAll(path); rmErr != nil {
-			s.logger.Errorf("backup retention: failed to prune %s: %v", path, rmErr)
-		} else {
-			s.logger.Infof("backup retention: pruned old backup %s", path)
-		}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("finish gzip backup: %w", err)
 	}
+	return f.Sync()
 }

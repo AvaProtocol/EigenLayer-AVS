@@ -85,6 +85,11 @@ type Config struct {
 	// BackupInterval is 0 when periodic backups are off (migration-only).
 	// Set from yaml backup_interval_hours.
 	BackupInterval time.Duration
+	// Zero limits select service defaults: 3 copies, 12 GiB including the
+	// in-flight archive, and a 2 GiB filesystem free-space reserve.
+	BackupRetentionCount    int
+	BackupRetentionMaxBytes int64
+	BackupMinFreeBytes      int64
 
 	JwtSecret []byte
 
@@ -508,6 +513,14 @@ func validatePeriodicBackup(dir string, interval time.Duration) error {
 	return nil
 }
 
+// validateBackupLimits also checks limits when periodic backups are disabled.
+func validateBackupLimits(count int, maxBytes, minFreeBytes int64) error {
+	if count < 0 || maxBytes < 0 || minFreeBytes < 0 {
+		return fmt.Errorf("backup_retention_count, backup_retention_max_bytes and backup_min_free_bytes must not be negative")
+	}
+	return nil
+}
+
 // SmartWalletConfigRaw represents the raw YAML config for smart wallet operations.
 // Used both in the top-level aggregator config and in per-chain gateway configs.
 type SmartWalletConfigRaw struct {
@@ -574,10 +587,13 @@ type ConfigRaw struct {
 	OperatorStateRetrieverAddr string `yaml:"operator_state_retriever_address"`
 	AVSRegistryCoordinatorAddr string `yaml:"avs_registry_coordinator_address"`
 
-	DbPath              string `yaml:"db_path"`
-	BackupDir           string `yaml:"backup_dir"`
-	BackupIntervalHours int    `yaml:"backup_interval_hours"`
-	JwtSecret           string `yaml:"jwt_secret"`
+	DbPath                  string `yaml:"db_path"`
+	BackupDir               string `yaml:"backup_dir"`
+	BackupIntervalHours     int    `yaml:"backup_interval_hours"`
+	BackupRetentionCount    int    `yaml:"backup_retention_count"`
+	BackupRetentionMaxBytes int64  `yaml:"backup_retention_max_bytes"`
+	BackupMinFreeBytes      int64  `yaml:"backup_min_free_bytes"`
+	JwtSecret               string `yaml:"jwt_secret"`
 
 	// SessionSignerPrivateKey is required; see Config.SessionSignerPrivateKey.
 	SessionSignerPrivateKey           string             `yaml:"session_signer_private_key"`
@@ -862,10 +878,13 @@ func NewConfig(configFilePath string) (*Config, error) {
 		TxMgr:                             txMgr,
 		AggregatorAddress:                 aggregatorAddr,
 
-		DbPath:         configRaw.DbPath,
-		BackupDir:      resolveBackupDir(configRaw.DbPath, configRaw.BackupDir),
-		BackupInterval: resolveBackupInterval(configRaw.BackupIntervalHours),
-		JwtSecret:      []byte(configRaw.JwtSecret),
+		DbPath:                  configRaw.DbPath,
+		BackupDir:               resolveBackupDir(configRaw.DbPath, configRaw.BackupDir),
+		BackupInterval:          resolveBackupInterval(configRaw.BackupIntervalHours),
+		BackupRetentionCount:    configRaw.BackupRetentionCount,
+		BackupRetentionMaxBytes: configRaw.BackupRetentionMaxBytes,
+		BackupMinFreeBytes:      configRaw.BackupMinFreeBytes,
+		JwtSecret:               []byte(configRaw.JwtSecret),
 
 		SessionSignerPrivateKey:           sessionSignerPrivateKey,
 		OwnerExecutionEnabled:             configRaw.OwnerExecutionEnabled,
@@ -1022,6 +1041,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
 	config.validate()
 	if err := validatePeriodicBackup(config.BackupDir, config.BackupInterval); err != nil {
+		return nil, err
+	}
+	if err := validateBackupLimits(config.BackupRetentionCount, config.BackupRetentionMaxBytes, config.BackupMinFreeBytes); err != nil {
 		return nil, err
 	}
 	return config, nil

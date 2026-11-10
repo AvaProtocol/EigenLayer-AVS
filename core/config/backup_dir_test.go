@@ -3,6 +3,9 @@ package config
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
 )
 
 func TestResolveBackupDir(t *testing.T) {
@@ -24,6 +27,26 @@ func TestResolveBackupDir(t *testing.T) {
 			t.Errorf("resolveBackupDir(%q, %q) = %q, want %q", c.dbPath, c.backupDir, got, c.want)
 		}
 	}
+}
+
+func TestBackupLimitConfiguration(t *testing.T) {
+	var raw ConfigRaw
+	require.NoError(t, yaml.Unmarshal([]byte(`
+backup_retention_count: 2
+backup_retention_max_bytes: 12884901888
+backup_min_free_bytes: 2147483648
+`), &raw))
+	require.Equal(t, 2, raw.BackupRetentionCount)
+	require.EqualValues(t, 12<<30, raw.BackupRetentionMaxBytes)
+	require.EqualValues(t, 2<<30, raw.BackupMinFreeBytes)
+	require.NoError(t, validateBackupLimits(raw.BackupRetentionCount, raw.BackupRetentionMaxBytes, raw.BackupMinFreeBytes))
+	require.NoError(t, validateBackupLimits(0, 0, 0), "omitted limits select defaults")
+	for _, input := range []string{"backup_retention_count: -1", "backup_retention_max_bytes: -1", "backup_min_free_bytes: -1"} {
+		var raw ConfigRaw
+		require.NoError(t, yaml.Unmarshal([]byte(input), &raw))
+		require.Error(t, validateBackupLimits(raw.BackupRetentionCount, raw.BackupRetentionMaxBytes, raw.BackupMinFreeBytes))
+	}
+	require.Error(t, yaml.Unmarshal([]byte("backup_retention_max_bytes: 9223372036854775808"), &raw), "reject overflow")
 }
 
 func TestValidatePeriodicBackup(t *testing.T) {

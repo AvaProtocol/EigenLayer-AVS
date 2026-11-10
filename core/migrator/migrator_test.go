@@ -1,12 +1,15 @@
 package migrator
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/backup"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMigrator(t *testing.T) {
@@ -104,4 +107,27 @@ func TestMigrator(t *testing.T) {
 	if !exists {
 		t.Fatalf("Second migration was not marked as complete")
 	}
+}
+
+func TestMigrationDoesNotRunWhenBackupCannotFit(t *testing.T) {
+	db, err := storage.NewWithPath(t.TempDir())
+	require.NoError(t, err)
+	defer db.Close()
+	root := t.TempDir()
+	previous := filepath.Join(root, "26-01-01-00-00")
+	require.NoError(t, os.Mkdir(previous, 0700))
+	previous = filepath.Join(previous, "full-backup.db")
+	require.NoError(t, os.WriteFile(previous, []byte("last backup"), 0600))
+	svc := backup.NewService(testutil.GetLogger(), db, root, backup.Options{MaxBytes: 1, MinFreeBytes: 1})
+	called := false
+	m := NewMigrator(db, svc, []Migration{{Name: "must-not-run", Function: func(storage.Storage) (int, error) { called = true; return 1, nil }}})
+	err = m.Run()
+	require.ErrorIs(t, err, backup.ErrBudgetExceeded)
+	require.False(t, called)
+	exists, err := db.Exist([]byte("migration:must-not-run"))
+	require.NoError(t, err)
+	require.False(t, exists)
+	data, err := os.ReadFile(previous)
+	require.NoError(t, err)
+	require.Equal(t, "last backup", string(data))
 }
