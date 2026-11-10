@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"reflect"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -416,7 +417,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	}
 
 	// Execute the script
-	result, err := r.jsvm.RunString(codeToExecute)
+	result, err := r.runScript(codeToExecute)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("\nError executing script: %s", err.Error()))
 		err = fmt.Errorf("failed to execute script: %w", err)
@@ -451,6 +452,30 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	finalizeStep(executionStep, true, nil, "", sb.String())
 
 	return executionStep, nil
+}
+
+// runScript evaluates the (already transformed) source in the processor's goja
+// runtime. goja only turns JS values and errors returned by Go functions into JS
+// exceptions; any other Go panic raised while the script runs — a Go-side bug in
+// a macro, a module, or goja itself — propagates out of RunString untouched and
+// would unwind the whole request into the HTTP recover middleware as a 500. It
+// is recovered here and reported as the node's error instead. It is still logged
+// at error level (Sentry in production) because it indicates a bug, not bad user
+// input: user-input failures must surface as errors returned from the macro so
+// the script's try/catch can handle them.
+func (r *JSProcessor) runScript(code string) (result goja.Value, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if r.vm != nil && r.vm.logger != nil {
+				r.vm.logger.Error("panic while executing custom code",
+					"panic", fmt.Sprintf("%v", recovered),
+					"stack", string(debug.Stack()))
+			}
+			result = nil
+			err = fmt.Errorf("internal error while executing script: %v", recovered)
+		}
+	}()
+	return r.jsvm.RunString(code)
 }
 
 // sanitizeGojaExportForProtobuf recursively walks an exported Goja value and

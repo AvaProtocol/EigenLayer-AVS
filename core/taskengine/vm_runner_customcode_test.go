@@ -688,6 +688,73 @@ return { result: a * b, items: [a, b, "hello"] }
 	assert.Equal(t, "hello", items[2].GetStringValue())
 }
 
+// TestCustomCodeMacroErrorIsCatchable reproduces Sentry EIGENLAYER-AVS-3J: a
+// CustomCode node called parseUnit('1', 65535) inside try/catch, and instead of
+// the catch running, the Go panic from the macro escaped goja and the REST
+// request died with a 500. A macro failure must surface as a JS exception the
+// script can handle.
+func TestCustomCodeMacroErrorIsCatchable(t *testing.T) {
+	node, err := CreateNodeFromType("customCode", map[string]interface{}{
+		"lang":   "javascript",
+		"source": `try { var x = parseUnit('1', 65535); return { s: String(x) } } catch (e) { return { err: String(e) } }`,
+	}, "")
+	require.NoError(t, err)
+	node.Name = "code1"
+
+	step, err := NewVM().RunNodeWithInputs(node, map[string]interface{}{})
+	require.NoError(t, err)
+	require.True(t, step.Success, "expected the script's catch to handle the macro error, got: %s", step.Error)
+
+	data := step.GetCustomCode().GetData().GetStructValue()
+	require.NotNil(t, data)
+	assert.Contains(t, data.Fields["err"].GetStringValue(), "decimals 65535 out of range (max 78)")
+}
+
+// TestCustomCodeMacroErrorUncaughtFailsStep covers the same bad call without a
+// try/catch: the step fails with the macro's message rather than panicking.
+func TestCustomCodeMacroErrorUncaughtFailsStep(t *testing.T) {
+	node, err := CreateNodeFromType("customCode", map[string]interface{}{
+		"lang":   "javascript",
+		"source": `return parseUnit('1', 65535)`,
+	}, "")
+	require.NoError(t, err)
+	node.Name = "code1"
+
+	var step *avsproto.Execution_Step
+	require.NotPanics(t, func() {
+		step, err = NewVM().RunNodeWithInputs(node, map[string]interface{}{})
+	})
+	require.Error(t, err)
+	require.NotNil(t, step)
+	require.False(t, step.Success)
+	assert.Contains(t, step.Error, "decimals 65535 out of range (max 78)")
+}
+
+// TestCustomCodeGoPanicFailsStep verifies that a Go panic raised while the
+// script runs (a Go-side bug, as opposed to bad input) is recovered into a step
+// error instead of unwinding the request into the HTTP recover middleware.
+func TestCustomCodeGoPanicFailsStep(t *testing.T) {
+	processor := NewJSProcessor(NewVM())
+	require.NotNil(t, processor)
+	require.NoError(t, processor.jsvm.Set("boom", func() { panic("kaboom") }))
+
+	node := &avsproto.CustomCodeNode{
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
+			Source: `boom(); return 1`,
+		},
+	}
+	var step *avsproto.Execution_Step
+	var err error
+	require.NotPanics(t, func() {
+		step, err = processor.Execute("code1", node)
+	})
+	require.Error(t, err)
+	require.NotNil(t, step)
+	assert.False(t, step.Success)
+	assert.Contains(t, step.Error, "kaboom")
+}
+
 // TestCustomCodeDateSupport verifies that JS Date objects are converted to
 // ISO 8601 strings instead of failing with "proto: invalid type: time.Time".
 func TestCustomCodeDateSupport(t *testing.T) {
