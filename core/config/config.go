@@ -94,8 +94,8 @@ type Config struct {
 	RestRateLimitPerSecond float64
 	RestRateLimitBurst     int
 
-	// Partners are the registered delegated tenants permitted to call the
-	// simulate family on behalf of their own end users. See PartnerConfig.
+	// Partners are the registered tenants permitted to admit wallet JWT
+	// issuance and call delegated reads. See PartnerConfig.
 	Partners []PartnerConfig
 
 	// PartnerAssertionAudience binds partner assertions to this gateway;
@@ -539,7 +539,8 @@ type ChainConfigRaw struct {
 // signature verifies against one of PublicKeys.
 //
 // Scope "read" covers partner-gated token metadata and preview wallet
-// list/create. Simulate/runNode require a user JWT; fund-moving and
+// list/create. Scope "auth:exchange" admits wallet-signature JWT exchange.
+// Simulate/runNode require a user JWT; fund-moving and
 // session policies never accept partner. Which REST ops accept partner
 // credentials is defined in aggregator/rest/permission.go.
 type PartnerConfig struct {

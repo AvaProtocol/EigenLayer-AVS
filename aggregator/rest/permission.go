@@ -3,6 +3,7 @@ package rest
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo/v4"
@@ -17,8 +18,12 @@ import (
 type Level string
 
 const (
-	// LevelPublic — no credentials (health, auth exchange).
+	// LevelPublic — no credentials (health, operator monitoring).
 	LevelPublic Level = "public"
+
+	// LevelPartnerAuth — a registered partner admits a wallet to signature exchange.
+	// AuthExchange separately verifies the wallet signature and matching subject.
+	LevelPartnerAuth Level = "partner_auth"
 
 	// LevelPartnerRead — registered partner with scope "read" only.
 	// Token metadata and similar non-secret chain reads. No user JWT.
@@ -102,7 +107,7 @@ const (
 // Fail closed: ensurePermission rejects unknown ops.
 var permissionMap = map[string]Level{
 	OpGetHealth:    LevelPublic,
-	OpAuthExchange: LevelPublic,
+	OpAuthExchange: LevelPartnerAuth,
 
 	// Partner-gated public-ish reads (no user JWT).
 	OpGetToken: LevelPartnerRead,
@@ -196,6 +201,16 @@ func (s *Server) ensurePermission(ctx echo.Context, op string) (*Principal, erro
 	case LevelPartnerRead:
 		return s.authPartnerRead(ctx, level)
 
+	case LevelPartnerAuth:
+		// Issuance must always be bound to this gateway/environment. Preserve
+		// the legacy optional audience behavior only for delegated read routes.
+		if s.config == nil || strings.TrimSpace(s.config.PartnerAssertionAudience) == "" {
+			return nil, partnerError(http.StatusServiceUnavailable, "PARTNER_AUTH_AUDIENCE_REQUIRED",
+				"Partner wallet authentication is not configured",
+				"Set partner_assertion_audience before enabling wallet JWT issuance.")
+		}
+		return s.authPartner(ctx, level, scopeAuthExchange)
+
 	case LevelPartnerWalletPreview:
 		return s.authPartnerWalletPreview(ctx, level)
 
@@ -229,7 +244,11 @@ func (s *Server) ensurePermission(ctx echo.Context, op string) (*Principal, erro
 // authPartnerRead requires a valid partner assertion with scope "read".
 // User JWT alone is not enough (partner-gated gateway traffic).
 func (s *Server) authPartnerRead(ctx echo.Context, level Level) (*Principal, error) {
-	pp, err := s.verifyPartnerAssertion(ctx, scopeRead)
+	return s.authPartner(ctx, level, scopeRead)
+}
+
+func (s *Server) authPartner(ctx echo.Context, level Level, scope string) (*Principal, error) {
+	pp, err := s.verifyPartnerAssertion(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -238,11 +257,11 @@ func (s *Server) authPartnerRead(ctx echo.Context, level Level) (*Principal, err
 			Status: http.StatusUnauthorized,
 			Code:   "PARTNER_REQUIRED",
 			Title:  "Partner assertion required",
-			Detail: "This endpoint requires a partner assertion (X-Partner-Assertion) with scope \"read\".",
+			Detail: fmt.Sprintf("This endpoint requires a partner assertion (X-Partner-Assertion) with scope %q.", scope),
 		}
 	}
 	user := userFromPartnerSubject(pp.subject)
-	s.logger.Info("partner-gated read call",
+	s.logger.Info("partner-gated call",
 		"partner_id", pp.partnerID,
 		"subject", pp.subject,
 		"level", string(level),
