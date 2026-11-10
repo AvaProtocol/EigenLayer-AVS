@@ -22,7 +22,7 @@ func TestBackup(t *testing.T) {
 		db := testutil.TestMustDB()
 		tempDir := t.TempDir()
 
-		service := NewService(logger, db, tempDir)
+		service := NewService(logger, db, tempDir, Options{MinFreeBytes: 1})
 
 		// Test starting backup service
 		err := service.StartPeriodicBackup(1 * time.Hour)
@@ -50,7 +50,7 @@ func TestBackup(t *testing.T) {
 		db := testutil.TestMustDB()
 		tempDir := t.TempDir()
 
-		service := NewService(logger, db, tempDir)
+		service := NewService(logger, db, tempDir, Options{MinFreeBytes: 1})
 
 		// Start and then stop
 		_ = service.StartPeriodicBackup(1 * time.Hour)
@@ -79,7 +79,7 @@ func TestBackup(t *testing.T) {
 		db := testutil.TestMustDB()
 		tempDir := t.TempDir()
 
-		service := NewService(logger, db, tempDir)
+		service := NewService(logger, db, tempDir, Options{MinFreeBytes: 1})
 
 		// Test performing a backup
 		backupFile, err := service.PerformBackup()
@@ -178,7 +178,7 @@ func TestStopPeriodicBackupWaitsForInFlightBackup(t *testing.T) {
 		started: started,
 		release: release,
 	}
-	svc := NewService(logger, db, t.TempDir())
+	svc := NewService(logger, db, t.TempDir(), Options{MinFreeBytes: 1})
 	if err := svc.StartPeriodicBackup(15 * time.Millisecond); err != nil {
 		t.Fatalf("start: %v", err)
 	}

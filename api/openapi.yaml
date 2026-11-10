@@ -86,8 +86,10 @@ components:
         Short-lived Ed25519-signed partner assertion (JWT). `iss` must
         match a registered partner id; `scope` must include the required
         scope for the route (typically `read`); short-lived `exp` is
-        required. For preview wallet list/create, `sub` must be the
-        end-user's non-zero 0x EOA. See partners[] in gateway config.
+        required. For preview wallet list/create and `auth:exchange`, `sub`
+        must be the end-user's non-zero 0x EOA. Wallet JWT issuance requires
+        scope `auth:exchange` and an independent wallet signature.
+        See partners[] in gateway config.
 
   parameters:
     PageBefore:
@@ -3105,11 +3107,19 @@ paths:
         chain). SDKs construct the message locally — there is no
         `GetSignatureFormat` endpoint.
 
+        Requires `X-Partner-Assertion`, signed by a registered active partner
+        granted `auth:exchange`. The assertion must declare that scope and its
+        `sub` must match `ownerAddress`. Partner admission never replaces the
+        wallet signature. The issued JWT records the verified `partner_id`.
+        `partner_assertion_audience` must be configured; otherwise issuance
+        fails closed with `503 PARTNER_AUTH_AUDIENCE_REQUIRED`.
+
         The token expires at the message's `Expire At`, which may be at most
         48 hours from now. A message that expires later is refused with
         `AUTH_EXPIRY_TOO_FAR`.
       operationId: authExchange
-      security: []
+      security:
+        - partnerAssertion: []
       requestBody:
         required: true
         content:
@@ -3127,8 +3137,16 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/RateLimited'
+        '503':
+          description: Partner JWT issuance is missing its gateway audience configuration.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
   # =====================================================================
   # Workflows

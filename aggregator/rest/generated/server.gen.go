@@ -169,6 +169,8 @@ type ServerInterfaceWrapper struct {
 func (w *ServerInterfaceWrapper) AuthExchange(ctx echo.Context) error {
 	var err error
 
+	ctx.Set(PartnerAssertionScopes, []string{})
+
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.AuthExchange(ctx)
 	return err
@@ -1397,6 +1399,17 @@ func (response AuthExchange401ApplicationProblemPlusJSONResponse) VisitAuthExcha
 	return json.NewEncoder(w).Encode(response)
 }
 
+type AuthExchange403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response AuthExchange403ApplicationProblemPlusJSONResponse) VisitAuthExchangeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type AuthExchange429ApplicationProblemPlusJSONResponse struct {
 	RateLimitedApplicationProblemPlusJSONResponse
 }
@@ -1410,6 +1423,15 @@ func (response AuthExchange429ApplicationProblemPlusJSONResponse) VisitAuthExcha
 	w.WriteHeader(429)
 
 	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type AuthExchange503ApplicationProblemPlusJSONResponse Problem
+
+func (response AuthExchange503ApplicationProblemPlusJSONResponse) VisitAuthExchangeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type ListExecutionsRequestObject struct {

@@ -44,6 +44,12 @@ db_path: /tmp/ap-avs/gateway
 # backup_interval_hours > 0; otherwise backups run on migration only.
 backup_dir: /tmp/ap-avs-gateway-backup
 backup_interval_hours: 0
+# Streaming gzip backups; zero/omitted limits select these defaults. The byte
+# budget includes completed backups plus the in-flight archive. The newest
+# existing backup is protected until its replacement is durably published.
+backup_retention_count: 3
+backup_retention_max_bytes: 12884901888 # 12 GiB
+backup_min_free_bytes: 2147483648 # 2 GiB for normal DB writes
 
 # AVS operator EOA private key (testnet). Anything funded on Sepolia
 # will do — this signs EigenLayer registration + task-aggregation txs.
@@ -193,7 +199,7 @@ chains:
       controller_private_key: <testnet-controller-private-key-hex>
       max_wallets_per_owner:  3
 
-# Optional: delegated partners (tenants). Manual registration only (no API).
+# Registered partners (tenants). Manual registration only (no API).
 # A partner sends a short-lived Ed25519 assertion in `X-Partner-Assertion`.
 # Scope "read" authorizes partner-gated reads (GET /tokens/{address}) and
 # preview wallet resolve (GET/POST /wallets; assertion `sub` must be the
@@ -201,7 +207,9 @@ chains:
 # alone is not enough. Fund-moving and session policies never accept partner.
 # Assertion `iss` must equal `id`; signature must verify against `public_keys`;
 # short-lived `exp` required; `aud` must match partner_assertion_audience when set.
-# See GATEWAY_CHANGE_REQUIRED_PARTNER_GATED_READS.md. Omit to disable partner auth.
+# Scope "auth:exchange" is required to mint wallet JWTs. Its assertion sub
+# must match ownerAddress; a valid wallet signature is still required.
+# Omitting the registry disables public wallet JWT issuance.
 partners:
   - id: studio
     # Base64-encoded Ed25519 public key(s); list several to rotate.
@@ -209,6 +217,7 @@ partners:
       - "${STUDIO_PARTNER_PUBLIC_KEY_BASE64}"
     scopes:
       - read
+      - auth:exchange
     status: active
 # Bind partner assertions to this gateway/environment so a captured assertion
 # can't be replayed elsewhere; assertions must carry a matching `aud`.

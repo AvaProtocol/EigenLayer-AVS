@@ -28,6 +28,8 @@ import (
 //
 //   - scope "read": token metadata (partner only) and preview wallet
 //     list/create (partner with EOA sub, or user JWT)
+//   - scope "auth:exchange": admit a wallet-signature JWT exchange; the
+//     assertion subject must match the wallet proving control
 //
 // Simulate / runNode / runTrigger require a user JWT (LevelUser) — partner
 // alone is not enough. Fund-moving and session policies never accept
@@ -38,6 +40,9 @@ const (
 
 	// scopeRead is the partner scope for non-fund reads and preview wallet resolve.
 	scopeRead = "read"
+
+	// scopeAuthExchange permits wallet-signature exchange, never wallet authority alone.
+	scopeAuthExchange = "auth:exchange"
 
 	// maxPartnerAssertionTTL bounds how far in the future an assertion's
 	// `exp` may sit. Assertions are meant to be minted per session/call and
