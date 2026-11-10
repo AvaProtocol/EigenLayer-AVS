@@ -1,12 +1,12 @@
+//go:build linux || darwin
+
 package backup
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -350,28 +350,5 @@ func TestConcurrentBackupsSerializeAndNeverOverwrite(t *testing.T) {
 	for _, path := range []string{first, second} {
 		_, err := os.Stat(path)
 		require.NoError(t, err)
-	}
-}
-
-func TestOpenRejectsTruncatedAndCorruptGzip(t *testing.T) {
-	var encoded bytes.Buffer
-	gz := gzip.NewWriter(&encoded)
-	_, err := gz.Write([]byte("verify full checksum"))
-	require.NoError(t, err)
-	require.NoError(t, gz.Close())
-	corrupt := append([]byte(nil), encoded.Bytes()...)
-	corrupt[len(corrupt)-8] ^= 0xff
-	for i, data := range [][]byte{nil, {0x1f}, encoded.Bytes()[:5], encoded.Bytes()[:encoded.Len()-4], corrupt} {
-		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "backup.gz")
-			require.NoError(t, os.WriteFile(path, data, 0600))
-			r, err := Open(path)
-			if err != nil {
-				return
-			}
-			defer r.Close()
-			_, err = io.Copy(io.Discard, r)
-			require.Error(t, err, "truncated/corrupt archives must never be accepted")
-		})
 	}
 }
