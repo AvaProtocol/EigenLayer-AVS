@@ -149,6 +149,63 @@ jobs:
       # - name: Run golangci-lint
       #   run: $(go env GOPATH)/bin/golangci-lint run ./...
 
+  release-builds:
+    name: Release Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: check-changes
+    if: needs.check-changes.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep aligned with artifacts published by the GoReleaser hook in
+        # .github/workflows/release-on-pr-close.yml when release targets change.
+        include:
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: linux, goarch: '386' }
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: windows, goarch: '386' }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.branch || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+      - name: Compile published executable target
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -o "$RUNNER_TEMP/ap-release-check" .
+
+  windows-recovery:
+    name: Windows Backup Safety and Recovery
+    needs: check-changes
+    if: needs.check-changes.outputs.should_run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.branch || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+      - name: Verify unsupported writes fail closed and recovery remains available
+        run: go test ./core/backup -short -count=1
+      - name: Verify gateway startup stops on backup failures
+        run: go test ./aggregator -short -count=1 -run '^TestAggregatorStartupRejects.*BackupFailure$'
+
   test:
     environment: Test
     name: Unit Test

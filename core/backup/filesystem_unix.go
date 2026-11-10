@@ -1,3 +1,8 @@
+//go:build linux || darwin
+
+// Only Linux and macOS have a supported durability implementation. Other
+// Unix platforms deliberately use filesystem_unsupported.go until their
+// directory-sync and free-space behavior has been validated.
 package backup
 
 import (

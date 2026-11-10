@@ -57,6 +57,19 @@ recovery copies through a restore before relying on them.
 
 ## Restore and compatibility
 
+Durable application backup creation is supported on Linux and macOS. Other
+platforms, including Windows and FreeBSD, return an explicit unsupported-platform
+error before creating or pruning backups. Windows operator/client binaries and
+raw/gzip recovery remain available; a Windows gateway with pending migrations
+or enabled periodic backups refuses the unsupported operation. This preserves
+the durability requirement rather than silently skipping directory sync.
+
+CI exercises gateway startup with failing migration and periodic backups,
+including the unsupported-platform errors on native Windows. The Windows job
+has a 15-minute limit and uses the same recursive checkout as the release
+builds. The release-build target matrix follows the GoReleaser hook in
+`.github/workflows/release-on-pr-close.yml`.
+
 New backups contain `full-backup.db.gz`. `backup.Open` selects raw format for
 `.db` files and gzip for `.gz` files. Other names use gzip-header detection,
 rewinding to raw format on header failure only when the Badger batch length
