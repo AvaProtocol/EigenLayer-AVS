@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"math/big"
@@ -90,17 +92,47 @@ func TestRestoreBackupFindsLegacyWallets(t *testing.T) {
 	require.NoError(t, out.Close())
 	require.NoError(t, source.Close())
 
-	dir, cleanup, err := restoreBackup(backupPath)
+	data, err := os.ReadFile(backupPath)
 	require.NoError(t, err)
-	defer cleanup()
-	restored, err := storage.NewWithPath(dir)
+	var compressed bytes.Buffer
+	gz := gzip.NewWriter(&compressed)
+	_, err = gz.Write(data)
 	require.NoError(t, err)
-	defer restored.Close()
+	require.NoError(t, gz.Close())
+	gzipPath := backupPath + ".gz"
+	require.NoError(t, os.WriteFile(gzipPath, compressed.Bytes(), 0600))
+	for _, path := range []string{backupPath, gzipPath} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			dir, cleanup, err := restoreBackup(path)
+			require.NoError(t, err)
+			defer cleanup()
+			restored, err := storage.NewWithPath(dir)
+			require.NoError(t, err)
+			defer restored.Close()
+			wallets, err := collect(restored, "")
+			require.NoError(t, err)
+			require.Len(t, wallets, 1, "only the legacy-factory wallet is selected")
+			assert.Equal(t, legacy, wallets[0].Address)
+			assert.Equal(t, "pending", wallets[0].State)
+			assert.Equal(t, uint64(84532), wallets[0].ChainID)
+		})
+	}
+}
 
-	wallets, err := collect(restored, "")
+func TestRestoreBackupRejectsCorruptGzipAndRemovesScratch(t *testing.T) {
+	var compressed bytes.Buffer
+	gz := gzip.NewWriter(&compressed)
+	require.NoError(t, gz.Close()) // valid backup of an empty database
+	corrupt := append([]byte(nil), compressed.Bytes()...)
+	corrupt[len(corrupt)-8] ^= 0xff
+	input := filepath.Join(t.TempDir(), "corrupt.db.gz")
+	require.NoError(t, os.WriteFile(input, corrupt, 0600))
+	scratch := t.TempDir()
+	t.Setenv("TMPDIR", scratch)
+	_, cleanup, err := restoreBackup(input)
+	require.Error(t, err)
+	require.Nil(t, cleanup)
+	entries, err := os.ReadDir(scratch)
 	require.NoError(t, err)
-	require.Len(t, wallets, 1, "only the legacy-factory wallet is selected")
-	assert.Equal(t, legacy, wallets[0].Address)
-	assert.Equal(t, "pending", wallets[0].State)
-	assert.Equal(t, uint64(84532), wallets[0].ChainID)
+	require.Empty(t, entries, "a failed restore must close and remove its scratch DB")
 }

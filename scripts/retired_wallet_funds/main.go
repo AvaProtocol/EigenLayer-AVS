@@ -11,8 +11,8 @@
 // READ-ONLY in intent, but BadgerDB takes an exclusive directory lock, so run
 // it against a COPY or backup of the gateway DB, never the live directory.
 // --backup-file takes an app-level backup as the gateway writes it
-// (`<backup_dir>/<YY-MM-DD-HH-MM>/full-backup.db`) and loads it into a
-// throwaway directory first, so no separate restore step is needed.
+// (legacy full-backup.db or compressed full-backup.db.gz) and loads it into
+// a throwaway directory first, so no separate restore step is needed.
 //
 // Usage:
 //
@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"sort"
@@ -46,6 +47,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/backup"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/tokenwhitelist"
 	"github.com/AvaProtocol/EigenLayer-AVS/migrations"
@@ -110,7 +112,7 @@ func main() {
 func run() error {
 	rpcs := rpcFlags{}
 	gatewayPath := flag.String("gateway-path", "", "Path to a COPY of the gateway BadgerDB directory (not the live DB)")
-	backupFile := flag.String("backup-file", "", "Path to a gateway full-backup.db; loaded into a temporary directory")
+	backupFile := flag.String("backup-file", "", "Path to a raw or gzip-compressed gateway backup; loaded into a temporary directory")
 	ownerFilter := flag.String("owner", "", "Only this owner EOA (optional)")
 	all := flag.Bool("all", false, "Also print wallets that hold nothing")
 	concurrency := flag.Int("concurrency", 8, "Parallel wallet balance reads")
@@ -159,7 +161,7 @@ func run() error {
 // restoreBackup loads a Badger backup stream (what core/backup writes) into a
 // new temporary directory and returns it with a cleanup func.
 func restoreBackup(path string) (string, func(), error) {
-	file, err := os.Open(path)
+	file, err := backup.Open(path)
 	if err != nil {
 		return "", nil, fmt.Errorf("open backup %s: %w", path, err)
 	}
@@ -180,6 +182,12 @@ func restoreBackup(path string) (string, func(), error) {
 		_ = restored.Close()
 		cleanup()
 		return "", nil, fmt.Errorf("load backup %s: %w", path, err)
+	}
+	// Verify the gzip trailer even if the database loader stops reading early.
+	if _, err := io.Copy(io.Discard, file); err != nil {
+		_ = restored.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("verify backup %s: %w", path, err)
 	}
 	if err := restored.Close(); err != nil {
 		cleanup()

@@ -44,6 +44,12 @@ db_path: /tmp/ap-avs/gateway
 # backup_interval_hours > 0; otherwise backups run on migration only.
 backup_dir: /tmp/ap-avs-gateway-backup
 backup_interval_hours: 0
+# Streaming gzip backups; zero/omitted limits select these defaults. The byte
+# budget includes completed backups plus the in-flight archive. The newest
+# existing backup is protected until its replacement is durably published.
+backup_retention_count: 3
+backup_retention_max_bytes: 12884901888 # 12 GiB
+backup_min_free_bytes: 2147483648 # 2 GiB for normal DB writes
 
 # AVS operator EOA private key (testnet). Anything funded on Sepolia
 # will do — this signs EigenLayer registration + task-aggregation txs.

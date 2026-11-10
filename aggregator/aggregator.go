@@ -280,7 +280,11 @@ func (agg *Aggregator) init() {
 }
 
 func (agg *Aggregator) migrate() {
-	agg.backup = backup.NewService(agg.logger, agg.db, agg.config.BackupDir)
+	agg.backup = backup.NewService(agg.logger, agg.db, agg.config.BackupDir, backup.Options{
+		RetentionCount: agg.config.BackupRetentionCount,
+		MaxBytes:       agg.config.BackupRetentionMaxBytes,
+		MinFreeBytes:   agg.config.BackupMinFreeBytes,
+	})
 	// Build the migration list. Static migrations are registered first;
 	// chain-aware migrations are appended via closures so they have access
 	// to agg.chainID detected in init().
