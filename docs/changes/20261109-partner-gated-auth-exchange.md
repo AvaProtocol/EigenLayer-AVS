@@ -13,6 +13,14 @@ Bearer token alone, or a `read` assertion cannot authorize issuance. Health
 remains anonymous. Subsequent workflow and fund-authority calls retain their
 existing user-JWT requirements; a partner assertion is not wallet authority.
 
+Mint `auth:exchange` assertions per exchange with a lifetime of **60 seconds or
+less**; Studio's merged adapter uses 60 seconds for this scope. Assertions are
+not single-use: there is no nonce/`jti` replay store, so a captured assertion and
+the matching wallet signature can be reused until the assertion expires (while
+the wallet proof remains valid). The verifier's shared one-hour maximum is a
+compatibility ceiling, not the recommended issuance lifetime. This short
+assertion lifetime does not shorten the wallet JWT's signed expiry.
+
 JWT issuance additionally refuses an unset or blank `partner_assertion_audience`
 with `503 PARTNER_AUTH_AUDIENCE_REQUIRED`, preventing an accidental unbound
 environment from accepting assertions issued for another gateway. Delegated
@@ -56,3 +64,15 @@ registry scope and status, subject mismatch, an invalid wallet signature with a
 valid assertion, successful issuance with partner attribution, and the existing
 wallet-sign-in expiration bounds. Permission-map tests and generated OpenAPI
 security metadata reflect partner-gated issuance.
+
+Malformed, opaque, non-string and zero-address subjects are refused. Address
+comparison is by bytes, so a lowercase representation of the same wallet is
+accepted. Issued tokens are exercised through the REST JWT middleware, the
+wallet JWT verifier and typed CLI claims to confirm `partner_id` is tolerated
+without changing wallet identity or roles. Operator Node authentication uses
+its own signed headers and does not parse these wallet JWTs.
+
+For rollout monitoring, filter gateway logs for `wallet JWT exchange refused`
+with `operation=authExchange` and `code=PARTNER_REQUIRED`. These info-level logs
+record only the operation, status and error code; credentials, signed messages
+and caller identities are omitted.

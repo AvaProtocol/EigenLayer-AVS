@@ -48,6 +48,15 @@ const authMessageRequired = 8
 func (s *Server) AuthExchange(ctx echo.Context) error {
 	principal, err := s.ensurePermission(ctx, OpAuthExchange)
 	if err != nil {
+		if authErr, ok := err.(*restmw.HTTPError); ok && authErr.Code == "PARTNER_REQUIRED" {
+			// Keep cutover refusals observable without recording either
+			// credential, the signed message, or caller-supplied identity.
+			s.logger.Info("wallet JWT exchange refused",
+				"operation", OpAuthExchange,
+				"code", authErr.Code,
+				"status", authErr.Status,
+			)
+		}
 		return err
 	}
 	var body generated.AuthExchangeRequest

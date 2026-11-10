@@ -3141,7 +3141,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/RateLimited'
-
         '503':
           description: Partner JWT issuance is missing its gateway audience configuration.
           content:
