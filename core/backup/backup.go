@@ -64,7 +64,7 @@ func (s *Service) StartPeriodicBackup(interval time.Duration) error {
 		return fmt.Errorf("backup directory is empty")
 	}
 	if err := s.ensureBackupDirectory(); err != nil {
-		return fmt.Errorf("failed to create backup directory: %v", err)
+		return fmt.Errorf("failed to create backup directory: %w", err)
 	}
 
 	s.mu.Lock()
