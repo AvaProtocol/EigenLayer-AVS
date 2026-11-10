@@ -12,6 +12,8 @@ Each attempt uses a unique private `.partial-*` directory on the backup
 filesystem. The gzip stream must finish, and the file must sync and close
 successfully. The directory is synced, renamed atomically to its completed
 name, and its parent synced before the backup is reported successful.
+The ancestor chain within the backup filesystem is synced on every attempt,
+including retries and restarts after a failed sync left directories in place.
 Migration and periodic calls through the same service are serialized.
 
 Failed attempts are removed and do not count toward retention. The newest
@@ -55,9 +57,13 @@ recovery copies through a restore before relying on them.
 
 ## Restore and compatibility
 
-New backups contain `full-backup.db.gz`. `backup.Open` detects raw Badger streams
-or gzip headers; callers must consume the stream to EOF to verify gzip's
-checksum. The retired-wallet-funds tool supports both formats directly and
+New backups contain `full-backup.db.gz`. `backup.Open` selects raw format for
+`.db` files and gzip for `.gz` files. Other names use gzip-header detection,
+rewinding to raw format on header failure only when the Badger batch length
+fits the file. A raw batch length can mimic even a complete valid gzip header;
+use a `.db` filename to select raw format unambiguously. Files named `.gz` do
+not fall back to raw format on corruption. Consume gzip through EOF to
+verify its checksum. The retired-wallet-funds tool supports both formats and
 checks the trailer before accepting a restore. Its restore database remains
 temporary, separate from the running gateway.
 
@@ -77,4 +83,6 @@ values; exercise CLI restoration of both formats and corrupt-checksum cleanup;
 inject source, write, close, sync and publication failures; exhaust byte/free
 space limits during writing; preserve the last existing backup; exercise
 count/byte retention, unknown/symlink entries, clock rollback and concurrent
-backup calls; and prove migrations do not execute after backup failure.
+backup calls; retry ancestor syncs in the same and restarted service; restore
+real protobuf batches whose length mimics gzip headers; and prove migrations
+do not execute after backup failure.
