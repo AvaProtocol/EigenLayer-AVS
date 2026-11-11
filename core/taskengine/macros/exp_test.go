@@ -17,7 +17,10 @@ func TestChainlinkLatestRoundData(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 
 	// https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306
-	value := chainlinkLatestRoundData("0x694AA1769357215DE4FAC081bf1f309aDC325306", testNoStaleBound)
+	value, err := chainlinkLatestRoundData("0x694AA1769357215DE4FAC081bf1f309aDC325306", testNoStaleBound)
+	if err != nil {
+		t.Fatalf("fail to query chainlink answer: %v", err)
+	}
 	if value == nil {
 		t.Errorf("fail to query chainlink answer. expect a value, got nil")
 	}
