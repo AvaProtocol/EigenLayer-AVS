@@ -240,3 +240,37 @@ func TestSentryLogger_ImplementsLoggerInterface(t *testing.T) {
 	// Compile-time check that SentryLogger satisfies sdklogging.Logger
 	var _ sdklogging.Logger = (*SentryLogger)(nil)
 }
+
+// fingerprintedError stands in for aggregator/rest/middleware.HTTPError,
+// which pkg/logger cannot import.
+type fingerprintedError struct{ code string }
+
+func (e *fingerprintedError) Error() string { return "problem " + e.code }
+
+func (e *fingerprintedError) SentryFingerprint() []string {
+	return []string{"{{ default }}", e.code}
+}
+
+// Every REST 5xx is captured from the same frame, so without a fingerprint
+// Sentry merged unrelated failures into one issue (EIGENLAYER-AVS-3C). The
+// fingerprint must survive wrapping, and plain errors keep the default.
+func TestSentryLogger_ErrorHonorsFingerprint(t *testing.T) {
+	transport := initTestSentry(t)
+	sl := NewSentryLogger(&spyLogger{}, "aggregator")
+
+	sl.Error("REST handler error", "error", fmt.Errorf("wrapped: %w", &fingerprintedError{code: "POLICIES_UNAVAILABLE"}))
+	sl.Error("REST handler error", "error", errors.New("plain"))
+
+	sentry.Flush(2 * time.Second)
+	events := transport.Events()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 sentry events, got %d", len(events))
+	}
+	want := fmt.Sprint([]string{"{{ default }}", "POLICIES_UNAVAILABLE"})
+	if got := fmt.Sprint(events[0].Fingerprint); got != want {
+		t.Errorf("expected fingerprint %s, got %s", want, got)
+	}
+	if len(events[1].Fingerprint) != 0 {
+		t.Errorf("expected plain error to keep the default grouping, got %v", events[1].Fingerprint)
+	}
+}

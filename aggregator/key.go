@@ -39,6 +39,9 @@ func CreateAdminKey(configPath string, opt CreateApiKeyOption) error {
 	if !common.IsHexAddress(opt.Subject) {
 		return fmt.Errorf("error: subject must be a valid 0x-prefixed EOA address (got %q). The subject is used as the owner identity bound to this API key.", opt.Subject)
 	}
+	if common.HexToAddress(opt.Subject) == (common.Address{}) {
+		return fmt.Errorf("error: subject must not be the zero address. The gateway refuses tokens bound to it (AUTH_INVALID_SUBJECT), so this key would never authenticate.")
+	}
 
 	if len(opt.Roles) < 1 {
 		return fmt.Errorf("error: at least one role is required")

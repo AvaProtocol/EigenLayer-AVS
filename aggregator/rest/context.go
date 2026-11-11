@@ -30,16 +30,23 @@ func (s *Server) requireUser(ctx echo.Context) (*model.User, error) {
 			Detail: "This endpoint requires a Bearer JWT. Obtain one via POST /api/v1/auth:exchange.",
 		}
 	}
-	if !common.IsHexAddress(authed.Subject) {
+	// The zero address is hex-shaped, so IsHexAddress alone let a token
+	// bound to it through. Nobody can sign as 0x0, so such a token is
+	// either a create-api-key mistake or a forged subject. It used to
+	// reach the engine, derive wallets for owner 0x0, and fail deep in the
+	// policy prepare path as a 503 (EIGENLAYER-AVS-3C). auth:exchange and
+	// the partner wallet-preview path already refuse it; do the same here.
+	owner := common.HexToAddress(authed.Subject)
+	if !common.IsHexAddress(authed.Subject) || owner == (common.Address{}) {
 		return nil, &restmw.HTTPError{
 			Status: http.StatusUnauthorized,
 			Code:   "AUTH_INVALID_SUBJECT",
 			Title:  "Invalid JWT subject",
-			Detail: "Subject must be a valid 0x-prefixed EOA address.",
+			Detail: "Subject must be a valid, non-zero 0x-prefixed EOA address.",
 		}
 	}
 	return &model.User{
-		Address: common.HexToAddress(authed.Subject),
+		Address: owner,
 		// Propagate the JWT-derived chain ID. Engine.GetWallet treats
 		// this as authoritative for the chain context. SetWallet and
 		// ListWallets still use their legacy owner-only signatures and
