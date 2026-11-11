@@ -692,22 +692,66 @@ return { result: a * b, items: [a, b, "hello"] }
 // CustomCode node called parseUnit('1', 65535) inside try/catch, and instead of
 // the catch running, the Go panic from the macro escaped goja and the REST
 // request died with a 500. A macro failure must surface as a JS exception the
-// script can handle.
+// script can handle. The other cases cover the remaining user-reachable macro
+// failures that used to panic.
 func TestCustomCodeMacroErrorIsCatchable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		call    string
+		wantErr string
+	}{
+		{"parseUnit decimals out of range", `parseUnit('1', 65535)`, "decimals 65535 out of range (max 78)"},
+		// goja coerces a negative JS number into a huge uint; it must still be
+		// rejected by the range check rather than silently scaled.
+		{"parseUnit negative decimals", `parseUnit('1', -1)`, "out of range (max 78)"},
+		{"parseUnit malformed value", `parseUnit('abc', 8)`, "is not a non-negative decimal number"},
+		// toBigInt used to return a nil *big.Int for unparsable input, which goja
+		// nil-dereferenced while wrapping it as a JS BigInt.
+		{"toBigInt unparsable", `toBigInt('nope')`, "is not a decimal or 0x-prefixed hex integer"},
+		// The comparators used to nil-dereference a null operand.
+		{"bigCmp null operand", `bigCmp(null, toBigInt('1'))`, "nil operand"},
+		{"bigGt undefined operand", `bigGt(toBigInt('1'), undefined)`, "nil operand"},
+		{"bigLt null operand", `bigLt(null, toBigInt('1'))`, "nil operand"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node, err := CreateNodeFromType("customCode", map[string]interface{}{
+				"lang":   "javascript",
+				"source": `try { var x = ` + tc.call + `; return { s: String(x) } } catch (e) { return { err: String(e) } }`,
+			}, "")
+			require.NoError(t, err)
+			node.Name = "code1"
+
+			step, err := NewVM().RunNodeWithInputs(node, map[string]interface{}{})
+			require.NoError(t, err)
+			require.True(t, step.Success, "expected the script's catch to handle the macro error, got: %s", step.Error)
+
+			data := step.GetCustomCode().GetData().GetStructValue()
+			require.NotNil(t, data)
+			assert.Contains(t, data.Fields["err"].GetStringValue(), tc.wantErr)
+			assert.Empty(t, data.Fields["s"], "the macro must not return a value on error")
+		})
+	}
+}
+
+// TestCustomCodeBigCmpStillWorks guards the happy path of the comparators after
+// they gained an error return: goja must unwrap (value, nil) to the value.
+func TestCustomCodeBigCmpStillWorks(t *testing.T) {
 	node, err := CreateNodeFromType("customCode", map[string]interface{}{
 		"lang":   "javascript",
-		"source": `try { var x = parseUnit('1', 65535); return { s: String(x) } } catch (e) { return { err: String(e) } }`,
+		"source": `return { cmp: bigCmp(toBigInt('2'), toBigInt('1')), gt: bigGt(toBigInt('2'), toBigInt('1')), lt: bigLt(toBigInt('2'), toBigInt('1')) }`,
 	}, "")
 	require.NoError(t, err)
 	node.Name = "code1"
 
 	step, err := NewVM().RunNodeWithInputs(node, map[string]interface{}{})
 	require.NoError(t, err)
-	require.True(t, step.Success, "expected the script's catch to handle the macro error, got: %s", step.Error)
+	require.True(t, step.Success, "unexpected error: %s", step.Error)
 
 	data := step.GetCustomCode().GetData().GetStructValue()
 	require.NotNil(t, data)
-	assert.Contains(t, data.Fields["err"].GetStringValue(), "decimals 65535 out of range (max 78)")
+	assert.Equal(t, float64(1), data.Fields["cmp"].GetNumberValue())
+	assert.True(t, data.Fields["gt"].GetBoolValue())
+	assert.False(t, data.Fields["lt"].GetBoolValue())
 }
 
 // TestCustomCodeMacroErrorUncaughtFailsStep covers the same bad call without a
@@ -752,7 +796,8 @@ func TestCustomCodeGoPanicFailsStep(t *testing.T) {
 	require.Error(t, err)
 	require.NotNil(t, step)
 	assert.False(t, step.Success)
-	assert.Contains(t, step.Error, "kaboom")
+	assert.Contains(t, step.Error, "internal error while executing script")
+	assert.NotContains(t, step.Error, "kaboom", "the raw panic payload belongs in the log, not the step error")
 }
 
 // TestCustomCodeDateSupport verifies that JS Date objects are converted to

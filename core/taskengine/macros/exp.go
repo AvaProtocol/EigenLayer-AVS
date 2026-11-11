@@ -36,6 +36,9 @@ func SetRpc(rpcURL string) {
 // A generic function to query any contract. The method andcontractABI is
 // necessary so we can unpack the result
 func readContractData(contractAddress string, data string, method string, contractABI string) []any {
+	if rpcConn == nil {
+		return nil
+	}
 	parsedABI, err := abi.JSON(strings.NewReader(contractABI))
 	if err != nil {
 		return nil
@@ -155,16 +158,35 @@ func chainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...int) (*big.Int,
 	return answer, nil
 }
 
-func BigCmp(a *big.Int, b *big.Int) (r int) {
-	return a.Cmp(b)
+// bigOperands rejects a nil operand up front: goja passes a JS null or undefined
+// as a nil *big.Int, and (*big.Int).Cmp dereferences both sides, so without this
+// check bigCmp(null, x) would panic instead of failing.
+func bigOperands(a *big.Int, b *big.Int) error {
+	if a == nil || b == nil {
+		return fmt.Errorf("big.Int comparison: nil operand (got null or undefined)")
+	}
+	return nil
 }
 
-func BigGt(a *big.Int, b *big.Int) bool {
-	return a.Cmp(b) > 0
+func BigCmp(a *big.Int, b *big.Int) (int, error) {
+	if err := bigOperands(a, b); err != nil {
+		return 0, err
+	}
+	return a.Cmp(b), nil
 }
 
-func BigLt(a *big.Int, b *big.Int) bool {
-	return a.Cmp(b) < 0
+func BigGt(a *big.Int, b *big.Int) (bool, error) {
+	if err := bigOperands(a, b); err != nil {
+		return false, err
+	}
+	return a.Cmp(b) > 0, nil
+}
+
+func BigLt(a *big.Int, b *big.Int) (bool, error) {
+	if err := bigOperands(a, b); err != nil {
+		return false, err
+	}
+	return a.Cmp(b) < 0, nil
 }
 
 // parseUnitRe matches a non-negative decimal number with an optional fractional
@@ -214,17 +236,19 @@ func ParseUnit(val string, decimal uint) (*big.Int, error) {
 	return result, nil
 }
 
-func ToBigInt(val string) *big.Int {
-	// parse either string or hex
+// ToBigInt parses a decimal or 0x-prefixed hex integer (up to 256 bits). It
+// returns an error rather than a nil *big.Int for input it cannot parse: goja
+// maps *big.Int to a JS BigInt by copying it (new(big.Int).Set), so a nil result
+// panics inside the runtime instead of reaching the script as null.
+func ToBigInt(val string) (*big.Int, error) {
 	b, ok := ethmath.ParseBig256(val)
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("toBigInt: %q is not a decimal or 0x-prefixed hex integer of at most 256 bits", val)
 	}
-
-	return b
+	return b, nil
 }
 
-func (bi *Builtin) ToBigInt(val string) *big.Int {
+func (bi *Builtin) ToBigInt(val string) (*big.Int, error) {
 	return ToBigInt(val)
 }
 
@@ -232,15 +256,15 @@ func (bi *Builtin) ChainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...i
 	return chainlinkLatestRoundData(tokenPair, maxAgeSeconds...)
 }
 
-func (bi *Builtin) BigCmp(a *big.Int, b *big.Int) (r int) {
+func (bi *Builtin) BigCmp(a *big.Int, b *big.Int) (int, error) {
 	return BigCmp(a, b)
 }
 
-func (bi *Builtin) BigGt(a *big.Int, b *big.Int) bool {
+func (bi *Builtin) BigGt(a *big.Int, b *big.Int) (bool, error) {
 	return BigGt(a, b)
 }
 
-func (bi *Builtin) BigLt(a *big.Int, b *big.Int) bool {
+func (bi *Builtin) BigLt(a *big.Int, b *big.Int) (bool, error) {
 	return BigLt(a, b)
 }
 
@@ -249,13 +273,15 @@ func (bi *Builtin) ParseUnit(val string, decimal uint) (*big.Int, error) {
 }
 
 var (
-	// exprEnv is the macro table shared by the expr VM (task conditions) and the
-	// goja VM (CustomCode nodes). A macro that can fail must return a trailing
-	// error, never panic: expr reports a returned error as an evaluation failure
-	// and goja throws it as a JS GoError that the script's try/catch can handle
-	// (uncaught, it fails the node). A Go panic, by contrast, is not a JS
-	// exception — goja re-panics it out of RunString past the script's try/catch,
-	// and the whole request dies in the HTTP recover middleware with a 500.
+	// exprEnv is the macro table registered into the goja VM for CustomCode
+	// nodes, and into the expr VM through CompileExpression/RunExpressionQuery
+	// (no production callers in this repo today; kept for expression tests). A
+	// macro that can fail must return a trailing error, never panic: expr
+	// reports a returned error as an evaluation failure and goja throws it as a
+	// JS GoError that the script's try/catch can handle (uncaught, it fails the
+	// node). A Go panic, by contrast, is not a JS exception — goja re-panics it
+	// out of RunString past the script's try/catch, and the whole request dies
+	// in the HTTP recover middleware with a 500.
 	exprEnv = map[string]any{
 		// bind and simular JS fetch api
 		"fetch": Fetch,

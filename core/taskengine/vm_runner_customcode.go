@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -462,7 +463,9 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 // is recovered here and reported as the node's error instead. It is still logged
 // at error level (Sentry in production) because it indicates a bug, not bad user
 // input: user-input failures must surface as errors returned from the macro so
-// the script's try/catch can handle them.
+// the script's try/catch can handle them. The panic payload stays in the log and
+// out of the returned error: it is a Go-side detail, and an arbitrary panic value
+// from a module is not something the script author should receive verbatim.
 func (r *JSProcessor) runScript(code string) (result goja.Value, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -472,7 +475,7 @@ func (r *JSProcessor) runScript(code string) (result goja.Value, err error) {
 					"stack", string(debug.Stack()))
 			}
 			result = nil
-			err = fmt.Errorf("internal error while executing script: %v", recovered)
+			err = errors.New("internal error while executing script; see the gateway log")
 		}
 	}()
 	return r.jsvm.RunString(code)
