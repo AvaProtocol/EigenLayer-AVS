@@ -268,3 +268,18 @@ func TestHTTPErrorTextAndUnwrapRetainPrivateCause(t *testing.T) {
 		t.Fatal("private diagnostic chain was lost")
 	}
 }
+
+// Every handler 5xx is captured from one frame in pkg/logger, so the
+// problem code is what keeps unrelated failures in separate Sentry issues.
+func TestHTTPErrorSentryFingerprintUsesCode(t *testing.T) {
+	err := &HTTPError{
+		Status: http.StatusServiceUnavailable,
+		Code:   "POLICIES_UNAVAILABLE",
+		Title:  "Policy service is unavailable",
+		Cause:  errors.New("owner and wallet are required"),
+	}
+	got := err.SentryFingerprint()
+	if len(got) != 2 || got[0] != "{{ default }}" || got[1] != "POLICIES_UNAVAILABLE" {
+		t.Fatalf("unexpected fingerprint %v", got)
+	}
+}

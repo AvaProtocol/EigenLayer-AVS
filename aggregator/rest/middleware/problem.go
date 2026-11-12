@@ -119,6 +119,15 @@ func (e *HTTPError) Error() string {
 
 func (e *HTTPError) Unwrap() error { return e.Cause }
 
+// SentryFingerprint groups Sentry events by problem code on top of the
+// default grouping. Sentry groups exceptions by stack trace, and every 5xx
+// that ProblemErrorHandler logs is captured from the same frame in
+// pkg/logger, so unrelated failures (an RPC outage, a simulate compile
+// error, an auth defect) all landed in one issue (EIGENLAYER-AVS-3C).
+func (e *HTTPError) SentryFingerprint() []string {
+	return []string{"{{ default }}", e.Code}
+}
+
 // httpStatusFromGRPCCode maps gRPC status codes to the closest HTTP
 // status. Based on the canonical table in google.golang.org/grpc/status
 // (also mirrored by grpc-gateway). Anything not in the table falls back
@@ -221,7 +230,9 @@ func ProblemErrorHandler(logger sdklogging.Logger) echo.HTTPErrorHandler {
 			// every route report as the same `*errors.errorString: REST
 			// handler error`, collapsing unrelated root causes into one
 			// Sentry issue (EIGENLAYER-AVS-1J / -2A). Passing the error
-			// itself makes Sentry group on the actual failure.
+			// itself makes Sentry group on the actual failure, and an
+			// *HTTPError adds its code to the fingerprint because every
+			// capture here shares one stack (EIGENLAYER-AVS-3C).
 			logger.Error("REST handler error",
 				"status", p.Status,
 				"path", c.Request().URL.Path,
