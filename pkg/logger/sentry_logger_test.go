@@ -3,6 +3,7 @@ package logger
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -272,5 +273,53 @@ func TestSentryLogger_ErrorHonorsFingerprint(t *testing.T) {
 	}
 	if len(events[1].Fingerprint) != 0 {
 		t.Errorf("expected plain error to keep the default grouping, got %v", events[1].Fingerprint)
+	}
+}
+
+// Captures from concurrent goroutines must not read each other's scope. The
+// global hub shares one scope stack, so an overlapping capture could pick up
+// another call's fingerprint and group unrelated errors (Copilot on PR #906).
+func TestSentryLogger_ConcurrentCapturesKeepOwnFingerprint(t *testing.T) {
+	transport := initTestSentry(t)
+	sl := NewSentryLogger(&spyLogger{}, "aggregator")
+
+	const workers = 64
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if i%2 == 0 {
+				sl.Error("REST handler error", "error", &fingerprintedError{code: fmt.Sprintf("CODE_%d", i)})
+				return
+			}
+			sl.Error("REST handler error", "error", fmt.Errorf("plain %d", i))
+		}(i)
+	}
+	wg.Wait()
+	sentry.Flush(2 * time.Second)
+
+	events := transport.Events()
+	if len(events) != workers {
+		t.Fatalf("expected %d sentry events, got %d", workers, len(events))
+	}
+	for _, event := range events {
+		if len(event.Exception) == 0 {
+			t.Fatalf("event without exception: %+v", event)
+		}
+		value := event.Exception[len(event.Exception)-1].Value
+		switch {
+		case strings.HasPrefix(value, "problem "):
+			want := fmt.Sprint([]string{"{{ default }}", strings.TrimPrefix(value, "problem ")})
+			if got := fmt.Sprint(event.Fingerprint); got != want {
+				t.Errorf("expected fingerprint %s for %q, got %s", want, value, got)
+			}
+		case strings.HasPrefix(value, "plain "):
+			if len(event.Fingerprint) != 0 {
+				t.Errorf("expected plain error %q to keep the default grouping, got %v", value, event.Fingerprint)
+			}
+		default:
+			t.Errorf("unexpected exception value %q", value)
+		}
 	}
 }
