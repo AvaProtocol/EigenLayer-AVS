@@ -33,7 +33,7 @@ func TestOwnerNativeWorkflowCollectsOneAtomicBatchAndSubmitsSameHash(t *testing.
 			}
 			nodes = append(nodes, ownerNativeNode())
 			input["settings"].(map[string]interface{})["runner"] = user.SmartAccountAddress.Hex()
-			p, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+			p, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 			require.NoError(t, err)
 			require.Equal(t, "native", p.WriteNodeID)
 			expectedCalls := 3
@@ -84,7 +84,7 @@ func TestOwnerNativeAmountRejectsLeadingPlus(t *testing.T) {
 	native.GetEthTransfer().Config.Amount = "+1000000000000000000"
 	nodes = append(nodes, native)
 	edges = append(edges, &avsproto.TaskEdge{Id: "nativeEdge", Source: "transfer", Target: "native"})
-	_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+	_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 	require.Error(t, err)
 }
 

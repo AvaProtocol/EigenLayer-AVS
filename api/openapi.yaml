@@ -1354,6 +1354,20 @@ components:
           maxItems: 128
           items: { $ref: '#/components/schemas/Edge' }
         inputVariables: { $ref: '#/components/schemas/InputVariables' }
+        gasFunding:
+          type: string
+          enum: [sponsored, source]
+          description: |
+            Who pays the network fee. Omitted keeps the chain default: the
+            operation is sponsored when the chain has a Gas Manager policy,
+            otherwise the source wallet pays. sponsored requires that policy;
+            on a chain without one prepare returns 400 OWNER_EXECUTION_INVALID.
+            A declined sponsorship is refused, never charged to the source.
+            source never requests sponsorship: the source wallet pays from its
+            native balance and EntryPoint deposit, the operation carries no
+            paymaster fields, and an ETHTransfer with reserveGas keeps the
+            maximum network fee back. When the source cannot cover that fee,
+            prepare returns 409 OWNER_EXECUTION_FEE_INSUFFICIENT_ETH.
 
     OwnerUserOperationV07:
       type: object
@@ -1416,7 +1430,9 @@ components:
         gasFunding:
           type: string
           enum: [source, sponsored]
-          description: Final funding choice; sponsorship refusal never silently charges the source.
+          description: |
+            Final funding choice; sponsorship refusal never silently charges
+            the source. Always source when the request asked for source.
         maxGasCostWei:
           type: string
           description: Signed maximum gas cost in decimal wei, before any paymaster sponsorship.
@@ -3461,11 +3477,20 @@ paths:
             OWNER_ACCOUNT_UNSUPPORTED — the account implementation, fallback
             owner or EntryPoint is not supported; preparing again cannot fix it.
             ownerDelegate names the observed EIP-7702 delegate, when present.
+            OWNER_EXECUTION_FEE_INSUFFICIENT_ETH — gasFunding source was
+            requested and the source wallet cannot cover the maximum network
+            fee. neededWei is that fee and availableWei is what the source can
+            spend on it (native balance after transfers plus EntryPoint
+            deposit); both are absent when the bundler refused before quoting.
+            Add ETH to the source wallet, then prepare again.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         '412':
-          description: Checks, source compatibility, funding or pricing failed; refresh the preparation.
+          description: |
+            Checks, source compatibility, funding or pricing failed; refresh the
+            preparation. With gasFunding omitted, a source wallet that cannot
+            pay is still reported here.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }

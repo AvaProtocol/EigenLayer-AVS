@@ -48,7 +48,11 @@ func (s *Server) PrepareWorkflow(ctx echo.Context) error {
 			edges = append(edges, mapping.OpenAPIEdgeToProto(edge))
 		}
 	}
-	prepared, err := s.engine.PrepareOwnerWorkflow(ctx.Request().Context(), p.User, trigger, nodes, edges, map[string]interface{}(body.InputVariables), body.ChainId)
+	gasFunding, err := ownerGasFunding(body.GasFunding)
+	if err != nil {
+		return err
+	}
+	prepared, err := s.engine.PrepareOwnerWorkflow(ctx.Request().Context(), p.User, trigger, nodes, edges, map[string]interface{}(body.InputVariables), body.ChainId, gasFunding)
 	if err != nil {
 		return s.reportOwnerExecutionError(err)
 	}
@@ -80,6 +84,21 @@ func (s *Server) PrepareWorkflow(ctx echo.Context) error {
 		ExpiresAt:     prepared.ExpiresAt, WriteNodeId: prepared.WriteNodeID,
 		Calls: calls, GasFunding: funding, MaxGasCostWei: preset.MaxOwnerGasCost(prepared.Operation).String(),
 	})
+}
+
+// ownerGasFunding maps the optional request field. Omitted keeps the chain
+// default; any value outside the enum is a 400 before the graph runs.
+func ownerGasFunding(requested *generated.PrepareWorkflowRequestGasFunding) (taskengine.OwnerGasFunding, error) {
+	if requested == nil {
+		return taskengine.OwnerGasFundingChainDefault, nil
+	}
+	switch *requested {
+	case generated.PrepareWorkflowRequestGasFundingSponsored:
+		return taskengine.OwnerGasFundingSponsored, nil
+	case generated.PrepareWorkflowRequestGasFundingSource:
+		return taskengine.OwnerGasFundingSource, nil
+	}
+	return "", badRequest("OWNER_EXECUTION_INVALID", "Invalid owner execution request", `gasFunding must be "sponsored" or "source"`)
 }
 
 // SubmitExecution receives no operation fields, only the owner's signature.
@@ -124,9 +143,34 @@ func (s *Server) reportOwnerExecutionError(err error) error {
 	return mapped
 }
 
+// OwnerExecutionFeeInsufficientCode refuses a gasFunding=source preparation
+// whose source wallet cannot cover the maximum network fee. It mirrors the
+// budget route's BUDGET_FEE_INSUFFICIENT_ETH shape (409, neededWei and
+// availableWei when known). Preparing again succeeds only after funding.
+const OwnerExecutionFeeInsufficientCode = "OWNER_EXECUTION_FEE_INSUFFICIENT_ETH"
+
+func ownerFundingHTTP(fee *preset.OwnerFundingError) *restmw.HTTPError {
+	problem := &restmw.HTTPError{Status: http.StatusConflict, Code: OwnerExecutionFeeInsufficientCode,
+		Title:  "Source wallet cannot pay the network fee",
+		Detail: "Add ETH to the source wallet for network fees, then prepare again.", Cause: fee}
+	if fee.Required != nil {
+		problem.NeededWei = fee.Required.String()
+	}
+	if fee.Available != nil {
+		problem.AvailableWei = fee.Available.String()
+	}
+	return problem
+}
+
 func mapOwnerExecutionError(err error) error {
 	if problem := ownerAccountHTTP(err); problem != nil {
 		return problem
+	}
+	// Only a gasFunding=source preparation returns this typed error. The
+	// chain-default path flattens it into FailedPrecondition, unchanged.
+	var fee *preset.OwnerFundingError
+	if errors.As(err, &fee) {
+		return ownerFundingHTTP(fee)
 	}
 	st, ok := status.FromError(err)
 	if ok {

@@ -36,12 +36,30 @@ import (
 // decoder. Only the external chain/bundler are local HTTP fixtures. No real
 // network, controller/session key, testnet wallet or transaction is used.
 func TestOwnerWorkflowHTTPPrepareSignSubmitAndExistingStatus(t *testing.T) {
-	t.Run("derived", func(t *testing.T) { ownerWorkflowHTTPRoundTrip(t, false) })
-	t.Run("delegated EOA", func(t *testing.T) { ownerWorkflowHTTPRoundTrip(t, true) })
+	t.Run("derived", func(t *testing.T) { ownerWorkflowHTTPRoundTrip(t, ownerHTTPCase{}) })
+	t.Run("delegated EOA", func(t *testing.T) { ownerWorkflowHTTPRoundTrip(t, ownerHTTPCase{eoa: true}) })
+	t.Run("derived, source pays", func(t *testing.T) { ownerWorkflowHTTPRoundTrip(t, ownerHTTPCase{gasFunding: "source"}) })
 }
 
-func ownerWorkflowHTTPRoundTrip(t *testing.T, eoa bool) {
+// gasFunding=source through the real self-funded pricing: a source with no
+// native balance or deposit gets the funding problem. Omitted gasFunding keeps
+// today's 412 for the same wallet.
+func TestOwnerWorkflowHTTPSourceCannotPayIsRefused(t *testing.T) {
+	t.Run("source", func(t *testing.T) { ownerWorkflowHTTPRoundTrip(t, ownerHTTPCase{gasFunding: "source", unfunded: true}) })
+	t.Run("omitted", func(t *testing.T) { ownerWorkflowHTTPRoundTrip(t, ownerHTTPCase{unfunded: true}) })
+}
+
+// ownerHTTPCase varies the round trip. gasFunding is sent when set. unfunded
+// gives the source no native balance and expects prepare to be refused.
+type ownerHTTPCase struct {
+	eoa        bool
+	gasFunding string
+	unfunded   bool
+}
+
+func ownerWorkflowHTTPRoundTrip(t *testing.T, tc ownerHTTPCase) {
 	t.Helper()
+	eoa := tc.eoa
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	owner := crypto.PubkeyToAddress(key.PublicKey)
@@ -86,6 +104,9 @@ func ownerWorkflowHTTPRoundTrip(t *testing.T, eoa bool) {
 			result = hexutil.Encode(common.LeftPadBytes(implementation.Bytes(), 32))
 		case "eth_getBalance":
 			result = "0xde0b6b3a7640000"
+			if tc.unfunded {
+				result = "0x0"
+			}
 		case "eth_blockNumber":
 			result = "0x1"
 		case "eth_getBlockByNumber":
@@ -211,8 +232,39 @@ func ownerWorkflowHTTPRoundTrip(t *testing.T, eoa bool) {
 		},
 		"edges": []interface{}{map[string]string{"id": "a", "source": "start", "target": "usdc"}, map[string]string{"id": "b", "source": "usdc", "target": "weth"}, map[string]string{"id": "c", "source": "weth", "target": "transfer"}},
 	}
+	if tc.gasFunding != "" {
+		definition["gasFunding"] = tc.gasFunding
+	}
+	if tc.unfunded {
+		var problem generated.Problem
+		defer func() {
+			mu.Lock()
+			defer mu.Unlock()
+			require.Zero(t, sendCount)
+		}()
+		if tc.gasFunding != "source" {
+			call(http.MethodPost, "/workflows:prepare", definition, &problem, http.StatusPreconditionFailed)
+			require.Equal(t, "OWNER_EXECUTION_PREPARE_REQUIRED", *problem.Code)
+			require.Nil(t, problem.NeededWei)
+			return
+		}
+		call(http.MethodPost, "/workflows:prepare", definition, &problem, http.StatusConflict)
+		require.NotNil(t, problem.Code)
+		require.Equal(t, OwnerExecutionFeeInsufficientCode, *problem.Code)
+		require.NotNil(t, problem.NeededWei)
+		needed, ok := new(big.Int).SetString(*problem.NeededWei, 10)
+		require.True(t, ok)
+		require.Positive(t, needed.Sign())
+		require.NotNil(t, problem.AvailableWei)
+		require.Equal(t, "0", *problem.AvailableWei)
+		return
+	}
 	var prepared generated.PrepareWorkflowResponse
 	call(http.MethodPost, "/workflows:prepare", definition, &prepared, http.StatusOK)
+	// The fixture chain has no Gas Manager policy, so every case is source funded.
+	require.Equal(t, generated.PrepareWorkflowResponseGasFundingSource, prepared.GasFunding)
+	require.Nil(t, prepared.UserOperation.Paymaster)
+	require.Nil(t, prepared.UserOperation.PaymasterData)
 	require.Equal(t, generated.PrepareWorkflowResponseSigningMethod("personal_sign"), prepared.SigningMethod)
 	require.Equal(t, "waiting", string(prepared.Execution.Status))
 	require.Len(t, prepared.Calls, 2)

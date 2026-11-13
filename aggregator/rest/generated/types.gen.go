@@ -233,10 +233,16 @@ const (
 	PolicySigningSigningMethodPersonalSign PolicySigningSigningMethod = "personal_sign"
 )
 
+// Defines values for PrepareWorkflowRequestGasFunding.
+const (
+	PrepareWorkflowRequestGasFundingSource    PrepareWorkflowRequestGasFunding = "source"
+	PrepareWorkflowRequestGasFundingSponsored PrepareWorkflowRequestGasFunding = "sponsored"
+)
+
 // Defines values for PrepareWorkflowResponseGasFunding.
 const (
-	Source    PrepareWorkflowResponseGasFunding = "source"
-	Sponsored PrepareWorkflowResponseGasFunding = "sponsored"
+	PrepareWorkflowResponseGasFundingSource    PrepareWorkflowResponseGasFunding = "source"
+	PrepareWorkflowResponseGasFundingSponsored PrepareWorkflowResponseGasFunding = "sponsored"
 )
 
 // Defines values for PrepareWorkflowResponseSigningMethod.
@@ -1659,6 +1665,18 @@ type PrepareWorkflowRequest struct {
 	ChainId ChainId `json:"chainId"`
 	Edges   *[]Edge `json:"edges,omitempty"`
 
+	// GasFunding Who pays the network fee. Omitted keeps the chain default: the
+	// operation is sponsored when the chain has a Gas Manager policy,
+	// otherwise the source wallet pays. sponsored requires that policy;
+	// on a chain without one prepare returns 400 OWNER_EXECUTION_INVALID.
+	// A declined sponsorship is refused, never charged to the source.
+	// source never requests sponsorship: the source wallet pays from its
+	// native balance and EntryPoint deposit, the operation carries no
+	// paymaster fields, and an ETHTransfer with reserveGas keeps the
+	// maximum network fee back. When the source cannot cover that fee,
+	// prepare returns 409 OWNER_EXECUTION_FEE_INSUFFICIENT_ETH.
+	GasFunding *PrepareWorkflowRequestGasFunding `json:"gasFunding,omitempty"`
+
 	// InputVariables Free-form key-value bag of values used to resolve `{{variable.path}}`
 	// template references inside trigger and node configs. Conventional
 	// well-known keys: `settings.runner` (smart wallet address),
@@ -1668,6 +1686,18 @@ type PrepareWorkflowRequest struct {
 	Nodes          []Node         `json:"nodes"`
 	Trigger        Trigger        `json:"trigger"`
 }
+
+// PrepareWorkflowRequestGasFunding Who pays the network fee. Omitted keeps the chain default: the
+// operation is sponsored when the chain has a Gas Manager policy,
+// otherwise the source wallet pays. sponsored requires that policy;
+// on a chain without one prepare returns 400 OWNER_EXECUTION_INVALID.
+// A declined sponsorship is refused, never charged to the source.
+// source never requests sponsorship: the source wallet pays from its
+// native balance and EntryPoint deposit, the operation carries no
+// paymaster fields, and an ETHTransfer with reserveGas keeps the
+// maximum network fee back. When the source cannot cover that fee,
+// prepare returns 409 OWNER_EXECUTION_FEE_INSUFFICIENT_ETH.
+type PrepareWorkflowRequestGasFunding string
 
 // PrepareWorkflowResponse defines model for PrepareWorkflowResponse.
 type PrepareWorkflowResponse struct {
@@ -1690,7 +1720,8 @@ type PrepareWorkflowResponse struct {
 	// This is not an on-chain signature expiry or revocation mechanism.
 	ExpiresAt int64 `json:"expiresAt"`
 
-	// GasFunding Final funding choice; sponsorship refusal never silently charges the source.
+	// GasFunding Final funding choice; sponsorship refusal never silently charges
+	// the source. Always source when the request asked for source.
 	GasFunding PrepareWorkflowResponseGasFunding `json:"gasFunding"`
 
 	// MaxGasCostWei Signed maximum gas cost in decimal wei, before any paymaster sponsorship.
@@ -1714,7 +1745,8 @@ type PrepareWorkflowResponse struct {
 	WriteNodeId   string                `json:"writeNodeId"`
 }
 
-// PrepareWorkflowResponseGasFunding Final funding choice; sponsorship refusal never silently charges the source.
+// PrepareWorkflowResponseGasFunding Final funding choice; sponsorship refusal never silently charges
+// the source. Always source when the request asked for source.
 type PrepareWorkflowResponseGasFunding string
 
 // PrepareWorkflowResponseSigningMethod Sign the 32 raw bytes of userOpHash, with the EIP-191 prefix applied

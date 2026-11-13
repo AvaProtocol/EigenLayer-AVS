@@ -50,15 +50,48 @@ type ownerBackendFixture struct {
 	releaseSubmit chan struct{}
 	enterOnce     sync.Once
 	submitCtxErr  error
+
+	// selfFunded counts PrepareSelfFunded calls. pricedWith is the chain
+	// configuration the last prepare of either kind received.
+	selfFunded   atomic.Int32
+	pricingMu    sync.Mutex
+	pricedWith   *config.SmartWalletConfig
+	prepareError error
+	// selfFundedPaymaster makes PrepareSelfFunded misbehave and return a
+	// sponsored operation, to prove the engine refuses it.
+	selfFundedPaymaster bool
 }
 
-func (f *ownerBackendFixture) Prepare(_ context.Context, _ *config.SmartWalletConfig, _, sender common.Address, _ *big.Int, batch preset.OwnerBatch, _ logger.Logger) (*preset.PreparedOwnerUserOp, error) {
+// Prepare sponsors exactly when the configuration it receives can, like
+// preset.PrepareOwnerBatch.
+func (f *ownerBackendFixture) Prepare(_ context.Context, sw *config.SmartWalletConfig, _, sender common.Address, _ *big.Int, batch preset.OwnerBatch, _ logger.Logger) (*preset.PreparedOwnerUserOp, error) {
 	f.prepared.Add(1)
+	return f.price(sw, sender, batch, sw.SponsorshipPolicyID() != "")
+}
+
+func (f *ownerBackendFixture) PrepareSelfFunded(_ context.Context, sw *config.SmartWalletConfig, _, sender common.Address, _ *big.Int, batch preset.OwnerBatch, _ logger.Logger) (*preset.PreparedOwnerUserOp, error) {
+	f.selfFunded.Add(1)
+	return f.price(sw, sender, batch, f.selfFundedPaymaster)
+}
+
+func (f *ownerBackendFixture) price(sw *config.SmartWalletConfig, sender common.Address, batch preset.OwnerBatch, sponsored bool) (*preset.PreparedOwnerUserOp, error) {
+	seen := *sw
+	f.pricingMu.Lock()
+	f.pricedWith = &seen
+	f.pricingMu.Unlock()
+	if f.prepareError != nil {
+		return nil, f.prepareError
+	}
 	nonce, err := userop.EncodeNonceMAv2(0, userop.ValidationOptionGlobal, 0)
 	if err != nil {
 		return nil, err
 	}
 	op := &userop.UserOperationV07{Sender: sender, Nonce: nonce, CallGasLimit: big.NewInt(100000), VerificationGasLimit: big.NewInt(50000), PreVerificationGas: big.NewInt(30000), MaxFeePerGas: big.NewInt(1000000000), MaxPriorityFeePerGas: big.NewInt(100000000)}
+	if sponsored {
+		paymaster := common.HexToAddress("0x5555555555555555555555555555555555555555")
+		op.Paymaster, op.PaymasterData = &paymaster, []byte{0x01}
+		op.PaymasterVerificationGasLimit, op.PaymasterPostOpGasLimit = big.NewInt(40000), big.NewInt(20000)
+	}
 	calls, err := batch.Resolve(op)
 	if err != nil {
 		return nil, err
@@ -134,7 +167,7 @@ func ownerWorkflowFixture() (*avsproto.TaskTrigger, []*avsproto.TaskNode, []*avs
 func prepareOwnerFixture(t *testing.T, n *Engine, u *model.User) *OwnerWorkflowPreparation {
 	t.Helper()
 	trigger, nodes, edges, input := ownerWorkflowFixture()
-	p, err := n.PrepareOwnerWorkflow(context.Background(), u, trigger, nodes, edges, input, 11155111)
+	p, err := n.PrepareOwnerWorkflow(context.Background(), u, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 	require.NoError(t, err)
 	return p
 }
@@ -212,7 +245,7 @@ func prepareOwnerEOAFixture(t *testing.T, n *Engine, user *model.User) *OwnerWor
 	t.Helper()
 	trigger, nodes, edges, input := ownerWorkflowFixture()
 	input["settings"].(map[string]interface{})["runner"] = user.Address.Hex()
-	p, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+	p, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 	require.NoError(t, err)
 	return p
 }
@@ -250,7 +283,7 @@ func TestOwnerEOAWorkflowHonorsFlagAndStoredAssociation(t *testing.T) {
 				n.ResolveSmartWalletConfig(11155111).EOA7702Execute = false
 				trigger, nodes, edges, input := ownerWorkflowFixture()
 				input["settings"].(map[string]interface{})["runner"] = user.Address.Hex()
-				_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+				_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 				require.Equal(t, codes.FailedPrecondition, status.Code(err))
 				require.Equal(t, config.EOA7702ExecuteDisabledDetail, status.Convert(err).Message())
 				require.Zero(t, backend.prepared.Load(), "disabled execution must stop before graph capture/pricing")
@@ -437,7 +470,7 @@ func TestOwnerWorkflowRejectsUnsupportedGraphsBeforeRunning(t *testing.T) {
 			case "failed check":
 				nodes[0].GetCustomCode().Config.Source = "throw new Error('Balances changed');"
 			}
-			_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+			_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 			require.Error(t, err)
 		})
 	}
@@ -481,7 +514,7 @@ func TestOwnerWorkflowKeepsCapturedReadWithoutResimulation(t *testing.T) {
 	nodes[0] = &avsproto.TaskNode{Id: "amounts", Name: "amounts", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_READ, TaskType: &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{Config: &avsproto.ContractReadNode_Config{ChainId: 11155111, ContractAddress: "0x6666666666666666666666666666666666666666", ContractAbi: []*structpb.Value{readABI}, MethodCalls: []*avsproto.ContractReadNode_MethodCall{{MethodName: "balanceOf", MethodParams: []string{input["settings"].(map[string]interface{})["runner"].(string)}}}}}}}
 	nodes[1].GetContractWrite().Config.MethodCalls[0].MethodParams[1] = "{{amounts.data.balanceOf}}"
 	nodes[1].GetContractWrite().Config.MethodCalls[1].MethodParams[1] = "1"
-	p, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+	p, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 	require.NoError(t, err)
 	sig := signOwnerFixture(t, p, key)
 	require.EqualValues(t, 1, reads.Load())
@@ -598,7 +631,7 @@ func TestOwnerWorkflowFlagAndRetentionCap(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
 		n, user, _, backend := ownerEngineFixture(t)
 		n.config.OwnerExecutionEnabled = false
-		_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+		_, err := n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 		require.Equal(t, codes.FailedPrecondition, status.Code(err))
 		require.Equal(t, OwnerExecutionDisabledDetail, status.Convert(err).Message())
 		require.Zero(t, backend.prepared.Load())
@@ -612,7 +645,7 @@ func TestOwnerWorkflowFlagAndRetentionCap(t *testing.T) {
 			require.NoError(t, n.db.SetWithTTL(ownerExecutionKey(user.Address, model.GenerateID()), []byte("not-json"), time.Minute))
 			require.NoError(t, n.db.SetWithTTL(ownerExecutionKey(user.Address, model.GenerateID()), submitted, time.Minute))
 		}
-		_, err = n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+		_, err = n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 		require.NoError(t, err)
 		require.EqualValues(t, 1, backend.prepared.Load())
 	})
@@ -623,7 +656,7 @@ func TestOwnerWorkflowFlagAndRetentionCap(t *testing.T) {
 		for i := 0; i < ownerPreparationMaxPerOwner; i++ {
 			require.NoError(t, n.db.SetWithTTL(ownerExecutionKey(user.Address, model.GenerateID()), prepared, time.Minute))
 		}
-		_, err = n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111)
+		_, err = n.PrepareOwnerWorkflow(context.Background(), user, trigger, nodes, edges, input, 11155111, OwnerGasFundingChainDefault)
 		require.Equal(t, codes.ResourceExhausted, status.Code(err))
 		require.Contains(t, err.Error(), "prepared")
 		require.Zero(t, backend.prepared.Load())

@@ -53,6 +53,21 @@ const (
 	ownerSubmissionUnsent     = "unsent"
 )
 
+// OwnerGasFunding is the caller's choice of who pays an owner operation's
+// network fee.
+type OwnerGasFunding string
+
+const (
+	// OwnerGasFundingChainDefault sponsors the operation when the chain has a
+	// Gas Manager policy, otherwise the source pays.
+	OwnerGasFundingChainDefault OwnerGasFunding = ""
+	// OwnerGasFundingSponsored requires the chain's Gas Manager policy. A
+	// declined sponsorship is refused, never charged to the source.
+	OwnerGasFundingSponsored OwnerGasFunding = "sponsored"
+	// OwnerGasFundingSource never requests sponsorship; the source pays.
+	OwnerGasFundingSource OwnerGasFunding = "source"
+)
+
 type ownerPreparationContextKey struct{}
 
 // OwnerWorkflowPreparation is the existing graph's resolved, priced signing
@@ -109,6 +124,9 @@ func ownerExecutionKey(owner common.Address, executionID string) []byte {
 
 type ownerExecutionBackend interface {
 	Prepare(context.Context, *config.SmartWalletConfig, common.Address, common.Address, *big.Int, preset.OwnerBatch, logger.Logger) (*preset.PreparedOwnerUserOp, error)
+	// PrepareSelfFunded never requests sponsorship. A source that cannot pay
+	// returns *preset.OwnerFundingError.
+	PrepareSelfFunded(context.Context, *config.SmartWalletConfig, common.Address, common.Address, *big.Int, preset.OwnerBatch, logger.Logger) (*preset.PreparedOwnerUserOp, error)
 	Validate(context.Context, *config.SmartWalletConfig, common.Address, *big.Int, *preset.PreparedOwnerUserOp) error
 	Submit(context.Context, *config.SmartWalletConfig, *userop.UserOperationV07) (common.Hash, error)
 	// UserOpKnown reports whether the bundler already has this hash.
@@ -121,6 +139,9 @@ type defaultOwnerExecutionBackend struct{}
 
 func (defaultOwnerExecutionBackend) Prepare(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, batch preset.OwnerBatch, l logger.Logger) (*preset.PreparedOwnerUserOp, error) {
 	return preset.PrepareOwnerBatch(ctx, sw, owner, sender, salt, batch, l)
+}
+func (defaultOwnerExecutionBackend) PrepareSelfFunded(ctx context.Context, sw *config.SmartWalletConfig, owner, sender common.Address, salt *big.Int, batch preset.OwnerBatch, l logger.Logger) (*preset.PreparedOwnerUserOp, error) {
+	return preset.PrepareSelfFundedOwnerBatch(ctx, sw, owner, sender, salt, batch, l)
 }
 func (defaultOwnerExecutionBackend) Validate(ctx context.Context, sw *config.SmartWalletConfig, owner common.Address, salt *big.Int, p *preset.PreparedOwnerUserOp) error {
 	return preset.ValidateOwnerUserOp(ctx, sw, owner, salt, p)
@@ -330,7 +351,8 @@ func (r *ContractWriteProcessor) collectOwnerWrite(stepID string, node *avsproto
 
 // PrepareOwnerWorkflow reuses the existing graph runner in read/check mode;
 // ContractWrite and terminal ETHTransfer are intercepted to build one owner batch.
-func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, input map[string]interface{}, chainID int64) (*OwnerWorkflowPreparation, error) {
+// funding chooses who pays the network fee; see OwnerGasFunding.
+func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, input map[string]interface{}, chainID int64, funding OwnerGasFunding) (*OwnerWorkflowPreparation, error) {
 	if user == nil || user.Address == (common.Address{}) {
 		return nil, status.Error(codes.Unauthenticated, "owner JWT required")
 	}
@@ -357,6 +379,9 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 	if err := checkOwnerWalletConfig(sw, wallet, chainID); err != nil {
 		return nil, ownerPreconditionError(err, "")
 	}
+	if err = checkOwnerGasFunding(sw, funding); err != nil {
+		return nil, err
+	}
 	// Serialize this owner's cap check with the insert. executionMutex is a
 	// fixed 256-shard array, not a map that grows with execution ids, and
 	// defer releases the shard when prepare returns. The lock stays held
@@ -382,9 +407,9 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 		return nil, status.Error(codes.FailedPrecondition, "owner workflow checks failed or did not reach its terminal write; refresh and simulate again")
 	}
 	batch := collector.batch()
-	prepared, err := n.ownerBackend().Prepare(ctx, sw, user.Address, *wallet.Address, wallet.Salt, batch, n.logger)
+	prepared, err := n.prepareOwnerBatch(ctx, sw, user.Address, wallet, batch, funding)
 	if err != nil {
-		return nil, ownerPreconditionError(err, "owner operation could not be prepared: %v")
+		return nil, err
 	}
 	resolvedCalls, err := batch.Resolve(prepared.Operation)
 	if err != nil {
@@ -429,6 +454,55 @@ func (n *Engine) PrepareOwnerWorkflow(ctx context.Context, user *model.User, tri
 		n.logger.Info("owner workflow awaiting signature", "execution_id", execution.Id, "chain_id", chainID, "user_op_hash", hash.Hex(), "calls", len(calls))
 	}
 	return &OwnerWorkflowPreparation{Execution: execution, Operation: op, UserOpHash: hash.Hex(), ChainID: chainID, ExpiresAt: expires, WriteNodeID: writeID, Calls: calls}, nil
+}
+
+// checkOwnerGasFunding refuses an unknown choice, and an explicit sponsorship
+// request on a chain that cannot sponsor rather than charging the source.
+func checkOwnerGasFunding(sw *config.SmartWalletConfig, funding OwnerGasFunding) error {
+	switch funding {
+	case OwnerGasFundingChainDefault, OwnerGasFundingSource:
+		return nil
+	case OwnerGasFundingSponsored:
+		if sw.SponsorshipPolicyID() == "" {
+			return status.Errorf(codes.InvalidArgument, "gasFunding %q is not available on this chain; omit gasFunding or use %q", OwnerGasFundingSponsored, OwnerGasFundingSource)
+		}
+		return nil
+	default:
+		return status.Errorf(codes.InvalidArgument, "gasFunding must be %q or %q", OwnerGasFundingSponsored, OwnerGasFundingSource)
+	}
+}
+
+// prepareOwnerBatch prices the batch with the chain configuration, or, for
+// source funding, with a copy that cannot request sponsorship (the same
+// self-funded path as wallet budget preparation). Only a source preparation
+// returns *preset.OwnerFundingError; the chain default keeps its
+// FailedPrecondition so omitted gasFunding behaves as before.
+func (n *Engine) prepareOwnerBatch(ctx context.Context, sw *config.SmartWalletConfig, owner common.Address, wallet *model.SmartWallet, batch preset.OwnerBatch, funding OwnerGasFunding) (*preset.PreparedOwnerUserOp, error) {
+	backend := n.ownerBackend()
+	if funding != OwnerGasFundingSource {
+		prepared, err := backend.Prepare(ctx, sw, owner, *wallet.Address, wallet.Salt, batch, n.logger)
+		if err != nil {
+			return nil, ownerPreconditionError(err, "owner operation could not be prepared: %v")
+		}
+		return prepared, nil
+	}
+	selfFunded := *sw
+	selfFunded.DisableGasSponsorship = true
+	selfFunded.AlchemyPaymasterPolicyID = ""
+	prepared, err := backend.PrepareSelfFunded(ctx, &selfFunded, owner, *wallet.Address, wallet.Salt, batch, n.logger)
+	if err != nil {
+		var fee *preset.OwnerFundingError
+		if errors.As(err, &fee) {
+			return nil, err
+		}
+		return nil, ownerPreconditionError(err, "owner operation could not be prepared: %v")
+	}
+	// The response reports funding from the paymaster field; a source
+	// preparation must never carry one.
+	if op := prepared.Operation; op != nil && (op.Paymaster != nil || len(op.PaymasterData) != 0 || op.PaymasterVerificationGasLimit != nil || op.PaymasterPostOpGasLimit != nil) {
+		return nil, fmt.Errorf("self-funded owner operation carries paymaster fields")
+	}
+	return prepared, nil
 }
 
 func validOwnerWallet(wallet *model.SmartWallet, owner, sender common.Address) bool {

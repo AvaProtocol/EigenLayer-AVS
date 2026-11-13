@@ -186,7 +186,7 @@ func runOwnerNativeSweepSepolia(t *testing.T, salt *big.Int, depositCoversGas bo
 		}}}}
 	prepared, err := engine.PrepareOwnerWorkflow(ctx, user, trigger, []*avsproto.TaskNode{native},
 		[]*avsproto.TaskEdge{{Id: "sweep", Source: "start", Target: "native"}},
-		map[string]interface{}{"settings": map[string]interface{}{"runner": runner.Hex()}}, chainID.Int64())
+		map[string]interface{}{"settings": map[string]interface{}{"runner": runner.Hex()}}, chainID.Int64(), OwnerGasFundingChainDefault)
 	require.NoError(t, err, "real bundler must estimate the final near-full-balance calldata")
 	op := prepared.Operation
 	require.Nil(t, op.Paymaster)

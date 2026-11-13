@@ -54,6 +54,26 @@ func TestOwnerNativeReservePricesFinalCalldataAndNeverBroadcasts(t *testing.T) {
 	}
 }
 
+// gasFunding=source uses this path on chains that have a Gas Manager policy.
+// The reserve still applies because the self-funded copy cannot sponsor.
+func TestOwnerNativeReserveAppliesToSelfFundedBatch(t *testing.T) {
+	f, sw := newOwnerRPCFixture(t)
+	sw.DisableGasSponsorship = false
+	sw.AlchemyPaymasterPolicyID = "must-not-use"
+	f.sponsorRefused = true
+	captured := new(big.Int).SetUint64(1_000_000_000_000_000_000)
+	p, err := PrepareSelfFundedOwnerBatch(context.Background(), sw, f.owner, f.sender, big.NewInt(0), nativeOwnerBatch(captured), nil)
+	require.NoError(t, err)
+	require.Nil(t, p.Operation.Paymaster)
+	reserve := MaxOwnerGasCost(p.Operation)
+	require.Positive(t, reserve.Sign())
+	_, values, _, err := aa.UnpackExecuteCalldata(p.Operation.CallData)
+	require.NoError(t, err)
+	require.Equal(t, new(big.Int).Sub(captured, reserve), values[len(values)-1])
+	require.Zero(t, f.sendCount)
+	require.NoError(t, ValidateOwnerUserOp(context.Background(), sw, f.owner, big.NewInt(0), p))
+}
+
 func TestOwnerNativeFundingIncludesTransfersEvenWhenSponsored(t *testing.T) {
 	for _, sponsored := range []bool{false, true} {
 		t.Run(map[bool]string{false: "self funded", true: "sponsored"}[sponsored], func(t *testing.T) {

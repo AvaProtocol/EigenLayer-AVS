@@ -2,6 +2,8 @@ package rest
 
 import (
 	"errors"
+	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -85,6 +88,46 @@ func TestOwnerExecutionProblemMapping(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, httpErr.Status)
 	require.Equal(t, "OWNER_EXECUTION_FAILED", httpErr.Code)
 	require.Empty(t, httpErr.Detail)
+}
+
+func TestOwnerExecutionFundingRefusalProblem(t *testing.T) {
+	fee := &preset.OwnerFundingError{Required: big.NewInt(3_000_000_000_000), Available: big.NewInt(12)}
+	var httpErr *restmw.HTTPError
+	require.ErrorAs(t, mapOwnerExecutionError(fmt.Errorf("pricing: %w", fee)), &httpErr)
+	require.Equal(t, http.StatusConflict, httpErr.Status)
+	require.Equal(t, OwnerExecutionFeeInsufficientCode, httpErr.Code)
+	require.Equal(t, "3000000000000", httpErr.NeededWei)
+	require.Equal(t, "12", httpErr.AvailableWei)
+	require.NotContains(t, httpErr.Detail, "wei", "the private engine message stays out of the body")
+	// A bundler that refused before quoting has no amounts to report.
+	require.ErrorAs(t, mapOwnerExecutionError(&preset.OwnerFundingError{}), &httpErr)
+	require.Equal(t, OwnerExecutionFeeInsufficientCode, httpErr.Code)
+	require.Empty(t, httpErr.NeededWei)
+	require.Empty(t, httpErr.AvailableWei)
+}
+
+func TestOwnerPrepareValidatesGasFunding(t *testing.T) {
+	n := taskengine.New(nil, &config.Config{SmartWallet: &config.SmartWalletConfig{EthRpcUrl: "http://127.0.0.1:1", ChainID: 11155111}}, nil, testutil.GetLogger())
+	s := &Server{engine: n}
+	prepare := func(gasFunding string) error {
+		body := `{"chainId":11155111,"trigger":{"id":"start","name":"start","type":"manual","config":{"lang":"json","data":{}}},"nodes":[],"inputVariables":{"settings":{"runner":"0x2222222222222222222222222222222222222222"}}` + gasFunding + `}`
+		ctx := ctxWithUser("0x1111111111111111111111111111111111111111")
+		ctx.SetRequest(httptest.NewRequest(http.MethodPost, "/api/v1/workflows:prepare", strings.NewReader(body)))
+		return s.PrepareWorkflow(ctx)
+	}
+	for _, invalid := range []string{`,"gasFunding":"free"`, `,"gasFunding":""`, `,"gasFunding":"SOURCE"`, `,"gasFunding":1`} {
+		var httpErr *restmw.HTTPError
+		require.ErrorAs(t, prepare(invalid), &httpErr, invalid)
+		require.Equal(t, http.StatusBadRequest, httpErr.Status, invalid)
+		require.Equal(t, "OWNER_EXECUTION_INVALID", httpErr.Code, invalid)
+	}
+	// Valid choices pass the strict decoder and reach the engine, which is
+	// disabled here.
+	for _, valid := range []string{``, `,"gasFunding":null`, `,"gasFunding":"sponsored"`, `,"gasFunding":"source"`} {
+		var httpErr *restmw.HTTPError
+		require.ErrorAs(t, prepare(valid), &httpErr, valid)
+		require.Equal(t, "OWNER_EXECUTION_DISABLED", httpErr.Code, valid)
+	}
 }
 
 func TestOwnerPrepareDisabledIsActionable(t *testing.T) {
