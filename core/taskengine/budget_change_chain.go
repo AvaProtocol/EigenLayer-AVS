@@ -216,8 +216,15 @@ func refuseUnsupportedBudgetRoutes(chain int64, p SessionPermissions) error {
 		}
 	}
 	add(budgetContracts["swapRouter"][chain], "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))", "exactInput((bytes,address,uint256,uint256))", "exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))", "exactOutput((bytes,address,uint256,uint256))", "multicall(bytes[])", "multicall(uint256,bytes[])", "wrapETH(uint256)", "unwrapWETH9(uint256,address)", "refundETH()")
-	add(budgetContracts["aavePool"][chain], "supply(address,uint256,address,uint16)", "repay(address,uint256,uint256,address)", "withdraw(address,uint256,address)", "borrow(address,uint256,uint256,uint16,address)")
+	// Legacy standard permissions include collateral configuration. It remains
+	// an explicitly disclosed unmetered call, like the carried withdraw/borrow rights.
+	add(budgetContracts["aavePool"][chain], "supply(address,uint256,address,uint16)", "repay(address,uint256,uint256,address)", "withdraw(address,uint256,address)", "borrow(address,uint256,uint256,uint16,address)", "setUserUseReserveAsCollateral(address,bool)")
 	add(budgetContracts["wrappedNative"][chain], "deposit()", "withdraw(uint256)")
+	// Studio's first-budget catalog includes Lido staking. Its ETH input must
+	// be metered by the native limit, matching unmeteredKind's classification.
+	if p.NativeSpendCap != nil {
+		add(budgetContracts["lidoStake"][chain], "submit(address)")
+	}
 	for _, a := range p.AllowedActions {
 		if a.Target == nil {
 			return budgetInputError("budget action target is missing")
