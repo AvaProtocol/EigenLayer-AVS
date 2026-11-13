@@ -776,3 +776,180 @@ func TestBatchSendPricesERC20OpsOnTheNativeCap(t *testing.T) {
 		t.Fatalf("a known batch must not be unsized: %#v", changes.Summary)
 	}
 }
+
+const sweepDestination = "0x00000000000000000000000000000000000000e5"
+
+// sweepTask is the compiled Sweep graph, run once: sweepPlan picks the held
+// selections, one loop sends each ERC-20's balance and one sends ETH as MAX.
+func sweepTask(t *testing.T, source string, settings map[string]any) *avsproto.Task {
+	t.Helper()
+	task := &avsproto.Task{
+		Id:           "sweep",
+		Name:         "Sweep all tokens from a smart wallet",
+		MaxExecution: 1,
+		Nodes: []*avsproto.TaskNode{
+			{
+				Name: "sweepPlan",
+				TaskType: &avsproto.TaskNode_CustomCode{
+					CustomCode: &avsproto.CustomCodeNode{
+						Config: &avsproto.CustomCodeNode_Config{Source: source},
+					},
+				},
+			},
+			loopTransferNode("sendTokens", "{{sweepPlan.data.tokenSends}}", "value", "{{value.token}}", "{{value.recipient}}", "{{value.amount}}"),
+			loopEthNode("sendEth", "{{sweepPlan.data.ethSends}}", "value", "{{value.recipient}}", "MAX"),
+		},
+	}
+	if settings == nil {
+		return task
+	}
+	raw, err := structpb.NewValue(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.InputVariables = map[string]*structpb.Value{"settings": raw}
+	return task
+}
+
+func sweepSettings(selections ...any) map[string]any {
+	return map[string]any{"tokenSelections": selections, "destination": sweepDestination}
+}
+
+func TestSweepSizesSelectedTokensAndEth(t *testing.T) {
+	now := skillNow()
+
+	// Amounts are balances at run time: the transfer is named, the cap is
+	// left to the simulated run.
+	tokens := deriveSepolia(sweepTask(t, sweepPlanSource, sweepSettings(strings.ToLower(skillUSDC), skillUSDT)), now)
+	if tokens == nil || tokens.Unresolved || !tokens.CapNeedsInput || len(tokens.Caps) != 0 || tokens.GasUnsized {
+		t.Fatalf("tokens only = %#v", tokens)
+	}
+	if !actionHasSelector(tokens.Actions, skillUSDC, selectorTransfer) || !actionHasSelector(tokens.Actions, skillUSDT, selectorTransfer) || len(tokens.Actions) != 2 {
+		t.Fatalf("tokens only actions = %+v", tokens.Actions)
+	}
+	if len(tokens.NativeRecipients) != 0 || tokens.NativeSpendCap != nil || tokens.NativeUnsized {
+		t.Fatalf("tokens only must not touch native: %#v", tokens)
+	}
+	if tokens.NativeValueOps != 2 || tokens.NativeSendOps != 0 {
+		t.Fatalf("tokens only ops = %d ERC-20, %d native; want 2 and 0", tokens.NativeValueOps, tokens.NativeSendOps)
+	}
+
+	eth := deriveSepolia(sweepTask(t, sweepPlanSource, sweepSettings(skillETH)), now)
+	if eth == nil || eth.Unresolved || len(eth.Actions) != 0 || len(eth.Caps) != 0 {
+		t.Fatalf("ETH only = %#v", eth)
+	}
+	if got := nativeRecipientSet(eth); len(got) != 1 || got[0] != sweepDestination {
+		t.Fatalf("ETH only recipients = %v, want %s", got, sweepDestination)
+	}
+	if !eth.NativeUnsized || !eth.CapNeedsInput || eth.NativeSpendCap != nil || eth.NativeSendOps != 1 {
+		t.Fatalf("ETH only = %#v", eth)
+	}
+
+	// Checksummed sentinel, as Studio's token list may store it.
+	both := deriveSepolia(sweepTask(t, sweepPlanSource, sweepSettings(skillUSDC, "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE")), now)
+	if both == nil || both.Unresolved || !actionHasSelector(both.Actions, skillUSDC, selectorTransfer) || len(both.Actions) != 1 {
+		t.Fatalf("both = %#v", both)
+	}
+	if got := nativeRecipientSet(both); len(got) != 1 || got[0] != sweepDestination || !both.NativeUnsized {
+		t.Fatalf("both recipients = %v, need = %#v", got, both)
+	}
+	if both.NativeValueOps != 1 || both.NativeSendOps != 1 {
+		t.Fatalf("both ops = %d ERC-20, %d native; want 1 and 1", both.NativeValueOps, both.NativeSendOps)
+	}
+
+	crlf := sweepTask(t, strings.ReplaceAll(sweepPlanSource, "\n", "\r\n"), sweepSettings(skillUSDC))
+	if got := deriveSepolia(crlf, now); got == nil || got.Unresolved || !actionHasSelector(got.Actions, skillUSDC, selectorTransfer) {
+		t.Fatalf("CRLF sweepPlan = %#v", got)
+	}
+
+	if got := deriveSepolia(sweepTask(t, sweepPlanSource, map[string]any{"tokenSelections": []any{}}), now); got != nil {
+		t.Fatalf("nothing selected must not move funds, got %#v", got)
+	}
+}
+
+func TestSweepShapeStaysUnresolved(t *testing.T) {
+	now := skillNow()
+	settings := sweepSettings(skillUSDC, skillETH)
+	assertUnresolved := func(name string, task *avsproto.Task) {
+		t.Helper()
+		got := deriveSepolia(task, now)
+		if got == nil || !got.Unresolved {
+			t.Fatalf("%s = %#v", name, got)
+		}
+	}
+
+	assertUnresolved("one character of sweepPlan", sweepTask(t, strings.Replace(sweepPlanSource, "have <= BigInt(0)", "have < BigInt(0)", 1), settings))
+	assertUnresolved("batch send code1", sweepTask(t, batchSendFundingSource, settings))
+
+	tokenContract := sweepTask(t, sweepPlanSource, settings)
+	tokenContract.Nodes[1].GetLoop().GetContractWrite().Config.ContractAddress = "{{value.token_amount.address}}"
+	assertUnresolved("token loop contract expression", tokenContract)
+
+	tokenAmount := sweepTask(t, sweepPlanSource, settings)
+	tokenAmount.Nodes[1].GetLoop().GetContractWrite().Config.MethodCalls[0].MethodParams[1] = "MAX"
+	assertUnresolved("token loop amount expression", tokenAmount)
+
+	ethAmount := sweepTask(t, sweepPlanSource, settings)
+	ethAmount.Nodes[2].GetLoop().GetEthTransfer().Config.Amount = "{{value.amount}}"
+	assertUnresolved("ETH loop amount expression", ethAmount)
+
+	ethRecipient := sweepTask(t, sweepPlanSource, settings)
+	ethRecipient.Nodes[2].GetLoop().GetEthTransfer().Config.Destination = "{{value.to}}"
+	assertUnresolved("ETH loop recipient expression", ethRecipient)
+
+	swapped := sweepTask(t, sweepPlanSource, settings)
+	swapped.Nodes[1].GetLoop().Config.InputVariable = "{{sweepPlan.data.ethSends}}"
+	swapped.Nodes[2].GetLoop().Config.InputVariable = "{{sweepPlan.data.tokenSends}}"
+	assertUnresolved("runners swapped", swapped)
+
+	for name, s := range map[string]map[string]any{
+		"selection that is not a string":   sweepSettings(skillUSDC, 7),
+		"selection that is not an address": sweepSettings(skillUSDC, "USDC"),
+		"zero address selection":           sweepSettings("0x0000000000000000000000000000000000000000"),
+		"no destination":                   {"tokenSelections": []any{skillUSDC}},
+		"zero destination":                 {"tokenSelections": []any{skillETH}, "destination": "0x0000000000000000000000000000000000000000"},
+		"no selections":                    {"destination": sweepDestination},
+	} {
+		assertUnresolved(name, sweepTask(t, sweepPlanSource, s))
+	}
+	assertUnresolved("no settings", sweepTask(t, sweepPlanSource, nil))
+}
+
+// In budget mode a sweep's whole balances are sized by the simulated run
+// against what is left: a balance above the remainder is cap_too_low, not a
+// smaller send.
+func TestSweepBudgetSizesFromTheSimulatedRun(t *testing.T) {
+	dest := common.HexToAddress(sweepDestination)
+	task := sweepTask(t, sweepPlanSource, sweepSettings(skillUSDC, skillETH))
+	for _, tc := range []struct {
+		name          string
+		token, native int64
+		want          string
+	}{
+		{"balances fit the remainder", 300, 200, AuthCovered},
+		{"token balance above the remainder", 500, 200, AuthCapTooLow},
+		{"ETH balance above the remainder", 300, 500, AuthCapTooLow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, rem := semanticsBudget()
+			p.NativeRecipients = []*common.Address{&dest}
+			need := budgetNeedForTask(task, nil, p.ChainID, time.Now())
+			if need == nil || need.Unresolved {
+				t.Fatalf("budget need = %#v", need)
+			}
+			report := &SessionGrantReport{}
+			report.observeCalls([]PlannedCall{{Target: testTokenAddr, Selector: selectorTransfer, Calldata: common.FromHex(transferCalldata(dest, big.NewInt(tc.token)))}})
+			report.observeNative(dest, big.NewInt(tc.native))
+			got := BuildBudgetAuthorization(BudgetAuthorizationInput{Policy: p, Remainder: rem, Need: need, Report: report})
+			if got.Status != tc.want {
+				t.Fatalf("status = %s (%s), want %s", got.Status, got.Detail, tc.want)
+			}
+			if amt, _ := needCap(got.Required, skillUSDC); amt != big.NewInt(tc.token).String() {
+				t.Fatalf("required token = %q, want the observed %d", amt, tc.token)
+			}
+			if got.Required.NativeSpendCap == nil || got.Required.NativeSpendCap.Amount != big.NewInt(tc.native).String() {
+				t.Fatalf("required native = %#v, want the observed %d", got.Required.NativeSpendCap, tc.native)
+			}
+		})
+	}
+}

@@ -13,14 +13,15 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
-// Compiled Split Incoming Payments, On-Demand Batch Transfer and Batch send
-// to wallets loops do not iterate a settings list. {{value}} stays unbound,
-// and the generic walk would mark the transfer unresolved. These shapes are
-// recognized from the stored protobuf only: the split source is scanned
-// against the generator's grammar, and each batch source must equal the
+// Compiled Split Incoming Payments, On-Demand Batch Transfer, Batch send to
+// wallets and Sweep loops do not iterate a settings list. {{value}} stays
+// unbound, and the generic walk would mark the transfer unresolved. These
+// shapes are recognized from the stored protobuf only: the split source is
+// scanned against the generator's grammar, each batch source must equal the
 // shipped code1 in studio templates/on-demand-batch-transfer-telegram.json or
-// templates/on-demand-batch-send.json. A Studio edit that is not copied here
-// stays unresolved. The code is not executed.
+// templates/on-demand-batch-send.json, and the sweep source must equal
+// sweepPlan in templates/wallet-sweep.json. A Studio edit that is not copied
+// here stays unresolved. The code is not executed.
 
 const batchFundingSource = `// Multi-token aware funding check. For each transfer row we draw down the
 // available balance of that row's token. Rows are funded in order, so two
@@ -91,10 +92,42 @@ for (const t of settings.transfers) {
 return { tokenSends, ethSends, fundedCount, skippedCount: settings.transfers.length - fundedCount, skippedTokens };`
 
 // The two outputs of batchSendFundingSource a Batch send to wallets loop reads.
+// sweepPlanSource names its outputs the same.
 const (
 	batchSendTokens = "tokenSends"
 	batchSendEth    = "ethSends"
 )
+
+// sweepPlanSource is the code of sweepPlan in studio templates/wallet-sweep.json
+// and must match it exactly. It sends the whole balance of each selected token
+// the wallet holds to settings.destination: ERC-20 rows to
+// {{sweepPlan.data.tokenSends}}, and ETH, when selected, as one row to
+// {{sweepPlan.data.ethSends}}, whose loop sends amount MAX.
+const sweepPlanSource = `// Sends each selected token's whole balance to the destination, and leaves
+// out a token the wallet doesn't hold. ETH goes in its own loop, after the
+// tokens, with amount MAX: the whole ETH balance at that point, which needs
+// the network's gas sponsorship. A loop sends every row with one runner, so
+// ETH and ERC-20 rows can't share one.
+const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+const held = {};
+for (const b of balances.data) {
+  if (!b) continue;
+  const addr = typeof b.tokenAddress === 'string' ? b.tokenAddress.toLowerCase() : '';
+  const key = b.nativeToken === true || addr === '' || addr === NATIVE ? NATIVE : addr;
+  held[key] = BigInt(b.balance || '0');
+}
+
+const tokenSends = [];
+const ethSends = [];
+for (const selected of settings.tokenSelections) {
+  const addr = typeof selected === 'string' ? selected.toLowerCase() : '';
+  const have = held[addr] !== undefined ? held[addr] : BigInt(0);
+  if (!addr || have <= BigInt(0)) continue;
+  if (addr === NATIVE) ethSends.push({ recipient: settings.destination });
+  else tokenSends.push({ token: addr, recipient: settings.destination, amount: have.toString() });
+}
+
+return { tokenSends, ethSends, sendCount: tokenSends.length + ethSends.length };`
 
 var (
 	nodeOutputRef    = regexp.MustCompile(`^\{\{([A-Za-z_][A-Za-z0-9_]*)\.data\}\}$`)
@@ -127,6 +160,9 @@ func boundNodeOutputLoop(nodes []*avsproto.TaskNode, settings map[string]any, tr
 		return sites, true
 	}
 	if sites, ok := boundBatchSendLoop(nodes, settings, loop); ok {
+		return sites, true
+	}
+	if sites, ok := boundSweepLoop(nodes, settings, loop); ok {
 		return sites, true
 	}
 	return boundBatchLoop(nodes, settings, loop)
@@ -428,6 +464,136 @@ func batchSendRows(settings map[string]any) (batchSendPlan, bool) {
 			plan.tokenTotals[token].Add(plan.tokenTotals[token], amount)
 			plan.tokenRows[token]++
 		}
+	}
+	return plan, true
+}
+
+// boundSweepLoop recognizes either loop of the compiled Sweep graph. Each loop
+// is sized from settings.tokenSelections: the most one run can send, since
+// sweepPlan drops a token the wallet doesn't hold but never adds one. Every
+// amount is that token's balance at run time, so each site is amountUnknown
+// and the simulated run sizes it, as for any transfer of a node output. The
+// ERC-20 loop gets one transfer site per selected token, one UserOp per
+// selection. The ETH loop gets one native site to settings.destination when
+// ETH is selected, so the destination is listed on the grant.
+func boundSweepLoop(nodes []*avsproto.TaskNode, settings map[string]any, loop *avsproto.LoopNode) ([]fundSite, bool) {
+	cfg := loop.GetConfig()
+	if cfg == nil {
+		return nil, false
+	}
+	ref := nodeSendsRef.FindStringSubmatch(strings.TrimSpace(cfg.GetInputVariable()))
+	if ref == nil {
+		return nil, false
+	}
+	codeNode := nodeByName(nodes, ref[1])
+	if codeNode == nil || codeNode.GetCustomCode() == nil || codeNode.GetCustomCode().GetConfig() == nil {
+		return nil, false
+	}
+	if normalizeJS(codeNode.GetCustomCode().GetConfig().GetSource()) != normalizeJS(sweepPlanSource) {
+		return nil, false
+	}
+	iter, ok := loopIter(cfg.GetIterVal())
+	if !ok {
+		return nil, false
+	}
+	plan, ok := sweepSelections(settings)
+	if !ok {
+		return nil, false
+	}
+	switch ref[2] {
+	case batchSendTokens:
+		chain, ok := loopTransferRunner(loop,
+			"{{"+iter+".token}}",
+			"{{"+iter+".recipient}}",
+			"{{"+iter+".amount}}",
+		)
+		if !ok {
+			return nil, false
+		}
+		tokens := make([]common.Address, 0, len(plan.tokenRows))
+		for token := range plan.tokenRows {
+			tokens = append(tokens, token)
+		}
+		sort.Slice(tokens, func(i, j int) bool {
+			return bytes.Compare(tokens[i].Bytes(), tokens[j].Bytes()) < 0
+		})
+		sites := make([]fundSite, 0, len(tokens))
+		for _, token := range tokens {
+			sites = append(sites, fundSite{
+				chain: chain, kind: fundCall,
+				target: token, targetOK: true,
+				selector: selectorTransfer, selectorOK: true,
+				amountUnknown: true, loopMult: 1,
+				userOp: plan.tokenRows[token],
+			})
+		}
+		return sites, true
+	case batchSendEth:
+		chain, ok := loopEthRunner(loop, "{{"+iter+".recipient}}", "MAX")
+		if !ok {
+			return nil, false
+		}
+		if plan.ethRows == 0 {
+			return nil, true
+		}
+		return []fundSite{{
+			chain: chain, kind: fundEth,
+			recipient: plan.destination, recipientOK: true,
+			amountUnknown: true, loopMult: 1,
+			userOp: plan.ethRows,
+		}}, true
+	default:
+		return nil, false
+	}
+}
+
+// sweepPlanRows is settings read for sizing a sweep: how many rows each
+// ERC-20 selection and the ETH selection send, and where they all go.
+type sweepPlanRows struct {
+	destination common.Address
+	tokenRows   map[common.Address]int
+	ethRows     int
+}
+
+// sweepSelections reads settings the way sweepPlan does. Each entry of
+// tokenSelections is a token address, the 0xeeee sentinel is ETH, and every
+// row goes to settings.destination. An entry that is not an address string,
+// the zero address, or a destination that is not a concrete address leaves
+// the whole loop unrecognized. With nothing selected, nothing is sent.
+func sweepSelections(settings map[string]any) (sweepPlanRows, bool) {
+	plan := sweepPlanRows{tokenRows: map[common.Address]int{}}
+	if settings == nil {
+		return plan, false
+	}
+	list, ok := settings["tokenSelections"].([]any)
+	if !ok {
+		return plan, false
+	}
+	if len(list) == 0 {
+		return plan, true
+	}
+	destText, ok := scalarString(settings["destination"])
+	if !ok || !common.IsHexAddress(destText) {
+		return plan, false
+	}
+	plan.destination = common.HexToAddress(destText)
+	if plan.destination == (common.Address{}) {
+		return plan, false
+	}
+	for _, item := range list {
+		text, ok := item.(string)
+		if !ok || !common.IsHexAddress(text) {
+			return plan, false
+		}
+		if common.HexToAddress(text) == ethTokenSentinel {
+			plan.ethRows++
+			continue
+		}
+		token, ok := concreteToken(text)
+		if !ok {
+			return plan, false
+		}
+		plan.tokenRows[token]++
 	}
 	return plan, true
 }
