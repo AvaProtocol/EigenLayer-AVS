@@ -2,11 +2,13 @@ package taskengine
 
 import (
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
@@ -66,6 +68,13 @@ func TestBudgetLegacyStandardPermissionMigration(t *testing.T) {
 	}
 	require.Empty(t, missingActions(draft.Permissions.AllowedActions, p.AllowedActions), "migration must keep every legacy action")
 	require.NoError(t, refuseUnsupportedBudgetRoutes(1, draft.Permissions))
+	withoutStake := in
+	withoutStake.Addition = nil
+	withoutStake.Budget = &WalletBudgetInput{ERC20: in.Budget.ERC20, ValidUntil: p.ValidUntil}
+	plain, err := MergeBudgetPolicy(withoutStake)
+	require.NoError(t, err)
+	require.Nil(t, plain.Permissions.NativeSpendCap)
+	require.NoError(t, refuseUnsupportedBudgetRoutes(1, plain.Permissions), "the legacy migration needs no Lido or native addition")
 	// Keeping WETH callable must not weaken the cap/selector invariant.
 	in.Budget.ERC20 = append(in.Budget.ERC20, model.ERC20SpendCap{Token: &weth, Amount: "1"})
 	_, err = MergeBudgetPolicy(in)
@@ -77,24 +86,33 @@ func TestBudgetCatalogCollateralAndStakeRoutes(t *testing.T) {
 	collateral, stake := functionSelector("setUserUseReserveAsCollateral(address,bool)"), functionSelector("submit(address)")
 	for _, tc := range []struct {
 		name     string
+		chain    int64
 		target   common.Address
 		selector string
-		native   bool
+		native   string
 		allowed  bool
 	}{
-		{"catalog collateral", pool, collateral, false, true},
-		{"catalog stake with native limit", lido, stake, true, true},
-		{"stake without native limit", lido, stake, false, false},
-		{"uncatalogued collateral", common.HexToAddress("0xbad"), collateral, false, false},
-		{"uncatalogued stake", common.HexToAddress("0xbad"), stake, true, false},
-		{"other Lido selector", lido, collateral, true, false},
+		{"catalog collateral", 1, pool, collateral, "", true},
+		{"catalog stake with native limit", 1, lido, stake, "1", true},
+		{"catalog stake with zero native limit", 1, lido, stake, "0", true},
+		{"stake without native limit", 1, lido, stake, "", false},
+		{"uncatalogued collateral", 1, common.HexToAddress("0xbad"), collateral, "", false},
+		{"uncatalogued stake", 1, common.HexToAddress("0xbad"), stake, "1", false},
+		{"other Lido selector", 1, lido, collateral, "1", false},
+		{"wrong chain collateral", testPolicyChain, pool, collateral, "", false},
+		{"wrong chain stake", testPolicyChain, lido, stake, "1", false},
+		{"collateral on WETH", 1, budgetContracts["wrappedNative"][1], collateral, "", false},
+		{"stake on pool", 1, pool, stake, "1", false},
+		{"stake on WETH", 1, budgetContracts["wrappedNative"][1], stake, "1", false},
+		{"uppercase collateral", 1, pool, strings.ToUpper(collateral), "", true},
+		{"uppercase stake", 1, lido, strings.ToUpper(stake), "1", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := SessionPermissions{AllowedActions: []model.AllowedAction{{Target: &tc.target, Selectors: []string{tc.selector}}}}
-			if tc.native {
-				p.NativeSpendCap = &model.NativeSpendCap{Amount: "1"}
+			if tc.native != "" {
+				p.NativeSpendCap = &model.NativeSpendCap{Amount: tc.native}
 			}
-			err := refuseUnsupportedBudgetRoutes(1, p)
+			err := refuseUnsupportedBudgetRoutes(tc.chain, p)
 			if tc.allowed {
 				require.NoError(t, err)
 			} else {
@@ -104,4 +122,41 @@ func TestBudgetCatalogCollateralAndStakeRoutes(t *testing.T) {
 	}
 	policy := &model.SessionPolicy{ChainID: 1, AllowedActions: []model.AllowedAction{{Target: &pool, Selectors: []string{collateral}}}}
 	require.Equal(t, UnmeteredOther, unmeteredKind(policy, pool, collateral), "collateral changes must remain disclosed as unmetered")
+}
+
+func TestBudgetLidoNativeRecipientDoesNotGrantUnrestrictedSelectors(t *testing.T) {
+	lido := budgetContracts["lidoStake"][1]
+	for _, amount := range []string{"0", "10000000000000000"} {
+		t.Run(amount, func(t *testing.T) {
+			p := SessionPermissions{budgetMode: true, NativeSpendCap: &model.NativeSpendCap{Amount: amount},
+				NativeRecipients: []*common.Address{&lido}, AllowContractRecipient: true, ValidUntilMs: budgetPolicy().ValidUntil}
+			require.NoError(t, p.Validate())
+			rows, err := p.allowlistInputs()
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.False(t, rows[0].HasSelectorAllowlist, "a native recipient would allow every Lido selector")
+			require.False(t, rows[0].HasERC20SpendLimit)
+			require.ErrorContains(t, refuseUnsupportedBudgetRoutes(1, p), BudgetRouteUnsupportedCode)
+		})
+	}
+	for _, target := range []common.Address{budgetContracts["aavePool"][1], budgetContracts["swapRouter"][1], budgetContracts["wrappedNative"][1]} {
+		p := SessionPermissions{NativeSpendCap: &model.NativeSpendCap{Amount: "1"}, NativeRecipients: []*common.Address{&target}, AllowContractRecipient: true}
+		require.NoError(t, refuseUnsupportedBudgetRoutes(1, p), "previously admitted native fallback targets remain admitted")
+	}
+}
+
+func TestBudgetLidoZeroNativeLimitKeepsBothEnforcementHooks(t *testing.T) {
+	lido := budgetContracts["lidoStake"][1]
+	p := SessionPermissions{budgetMode: true, NativeSpendCap: &model.NativeSpendCap{Amount: "0"},
+		AllowedActions: []model.AllowedAction{{Target: &lido, Selectors: []string{functionSelector("submit(address)")}}}, ValidUntilMs: budgetPolicy().ValidUntil}
+	require.NoError(t, refuseUnsupportedBudgetRoutes(1, p))
+	hooks, err := p.HooksFor(123)
+	require.NoError(t, err)
+	nativeHooks := 0
+	for _, hook := range hooks {
+		if common.BytesToAddress(hook[:20]) == aa.NativeTokenLimitModuleAddress() {
+			nativeHooks++
+		}
+	}
+	require.Equal(t, 2, nativeHooks, "an exhausted budget keeps native validation and execution hooks")
 }

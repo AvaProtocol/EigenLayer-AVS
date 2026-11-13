@@ -245,13 +245,25 @@ func refuseUnsupportedBudgetRoutes(chain int64, p SessionPermissions) error {
 			return refuse(target, s)
 		}
 	}
-	// Unknown callable fallback code is not established safe by an EOA label.
+	// Native recipient rows allow every selector on the target. Keep their
+	// eligibility separate from a catalog's approval of one specific call.
 	if p.AllowContractRecipient {
 		for _, target := range p.NativeRecipients {
-			if target != nil && permitted[*target] == nil {
+			if target != nil && !budgetNativeFallbackAllowed(chain, *target) {
 				return refuse(*target, "native fallback")
 			}
 		}
 	}
 	return nil
+}
+
+// Preserve the previously admitted native targets. Adding a selector-scoped
+// route (such as Lido submit) must never grant unrestricted calls on that target.
+func budgetNativeFallbackAllowed(chain int64, target common.Address) bool {
+	if target == (common.Address{}) {
+		return false
+	}
+	return target == budgetContracts["swapRouter"][chain] ||
+		target == budgetContracts["aavePool"][chain] ||
+		target == budgetContracts["wrappedNative"][chain]
 }
