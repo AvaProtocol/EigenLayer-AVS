@@ -44,12 +44,62 @@ func SendUserOpMAv2(
 	auth *SessionAuthorization,
 	lgr logger.Logger,
 ) (*userop.UserOperationV07, *types.Receipt, error) {
+	op, receipt, _, err := sendUserOpMAv2(smartWalletConfig, owner, callData, senderOverride, saltOverride, auth, nil, lgr)
+	return op, receipt, err
+}
+
+// SendNativeReserveMAv2 sends a self-funded native transfer of everything the
+// balance and the grant's native limit allow after the operation's own maximum
+// fee (nativeReserveValue). The value is fixed while pricing, before signing,
+// and the result reports it. A sponsored MAX sends the whole balance through
+// SendUserOpMAv2 instead, so this refuses a sponsored chain.
+func SendNativeReserveMAv2(
+	smartWalletConfig *config.SmartWalletConfig,
+	owner common.Address,
+	reserve *NativeReserve,
+	senderOverride *common.Address,
+	saltOverride *big.Int,
+	lgr logger.Logger,
+) (*userop.UserOperationV07, *types.Receipt, *NativeReserveResult, error) {
+	if reserve == nil {
+		return nil, nil, nil, fmt.Errorf("missing native reserve")
+	}
+	return sendUserOpMAv2(smartWalletConfig, owner, nil, senderOverride, saltOverride, nil, reserve, lgr)
+}
+
+// sendUserOpMAv2 is SendUserOpMAv2 with an optional native reserve. With a
+// reserve, callData is ignored: the operation's only call is the native
+// transfer the reserve sizes while pricing.
+func sendUserOpMAv2(
+	smartWalletConfig *config.SmartWalletConfig,
+	owner common.Address,
+	callData []byte,
+	senderOverride *common.Address,
+	saltOverride *big.Int,
+	auth *SessionAuthorization,
+	reserve *NativeReserve,
+	lgr logger.Logger,
+) (*userop.UserOperationV07, *types.Receipt, *NativeReserveResult, error) {
 	l := logger.EnsureLogger(lgr)
 	if smartWalletConfig == nil {
-		return nil, nil, fmt.Errorf("nil smart wallet config")
+		return nil, nil, nil, fmt.Errorf("nil smart wallet config")
 	}
 	if err := auth.Validate(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	if reserve != nil {
+		if err := reserve.validate(); err != nil {
+			return nil, nil, nil, err
+		}
+		if smartWalletConfig.SponsorshipPolicyID() != "" {
+			return nil, nil, nil, fmt.Errorf("a native reserve is for a self-funded send; a sponsored MAX sends the whole balance")
+		}
+		// Estimated at 1 wei; priceSessionNativeReserve sets the value.
+		packed, err := packNativeTransfer(reserve.Recipient, big.NewInt(1))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		callData = packed
 	}
 
 	ctx := context.Background()
@@ -59,7 +109,7 @@ func SendUserOpMAv2(
 	// guard-only tests need no bundler URL.
 	chainRPC, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 	if err != nil {
-		return nil, nil, fmt.Errorf("dialing chain rpc: %w", err)
+		return nil, nil, nil, fmt.Errorf("dialing chain rpc: %w", err)
 	}
 	defer chainRPC.Close()
 
@@ -81,12 +131,12 @@ func SendUserOpMAv2(
 
 	sender, err := resolveSenderV07(chainRPC, owner, factory, salt, senderOverride)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	lease, err := acquireSessionSend(ctx, smartWalletConfig.ChainID, owner, sender)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer lease.Release()
 	ctx = context.WithValue(ctx, sessionSendLeaseKey{}, lease)
@@ -99,10 +149,10 @@ func SendUserOpMAv2(
 	// validate for.
 	if auth == nil {
 		if auth, err = resolveSession(smartWalletConfig.ChainID, owner, sender); err != nil {
-			return nil, nil, fmt.Errorf("resolving session authorization for %s: %w", sender.Hex(), err)
+			return nil, nil, nil, fmt.Errorf("resolving session authorization for %s: %w", sender.Hex(), err)
 		}
 		if err = auth.Validate(); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	// MA v2 operations always need a session grant. The gateway does not hold
@@ -110,14 +160,14 @@ func SendUserOpMAv2(
 	// produces opaque AA23. Callers that supply their own authorization
 	// (integration tests, spikes) pass it explicitly and never hit this.
 	if auth == nil {
-		return nil, nil, fmt.Errorf(
+		return nil, nil, nil, fmt.Errorf(
 			"no session authorization for smart wallet %s (owner %s); MA v2 execution requires a session grant — the gateway cannot sign as the owner fallback",
 			sender.Hex(), owner.Hex())
 	}
 
 	eoa7702, eoaErr := allowEOA7702Sender(ctx, smartWalletConfig, chainRPC, owner, sender)
 	if eoaErr != nil {
-		return nil, nil, eoaErr
+		return nil, nil, nil, eoaErr
 	}
 
 	// Sender must be the address this chain's factory derives for (owner, salt),
@@ -130,28 +180,21 @@ func SendUserOpMAv2(
 	if !eoa7702 {
 		derived, derr := aa.DeriveSenderAddress(chainRPC, owner, factory, salt)
 		if derr != nil {
-			return nil, nil, fmt.Errorf("deriving counterfactual address for sender %s: %w", sender.Hex(), derr)
+			return nil, nil, nil, fmt.Errorf("deriving counterfactual address for sender %s: %w", sender.Hex(), derr)
 		}
 		if derived == nil || *derived != sender {
 			want := common.Address{}
 			if derived != nil {
 				want = *derived
 			}
-			return nil, nil, fmt.Errorf(
+			return nil, nil, nil, fmt.Errorf(
 				"sender %s does not match the address derived for owner %s salt %s factory %s (derived %s); refusing MA v2 UserOp — wrong account type, salt, or factory (e.g. a legacy SimpleAccount runner on an MA v2 chain)",
 				sender.Hex(), owner.Hex(), salt.String(), factory.Hex(), want.Hex())
 		}
 	}
 
-	// A grant carrying execution hooks requires user-op context on EVERY
-	// operation under it — including the one that installs the grant, since
-	// the hooks are live from the moment the install applies mid-validation.
-	if auth.WrapExecuteUserOp {
-		wrapped, wrapErr := aa.WrapExecuteUserOp(callData)
-		if wrapErr != nil {
-			return nil, nil, fmt.Errorf("wrapping calldata for user-op context: %w", wrapErr)
-		}
-		callData = wrapped
+	if callData, err = sessionCallData(auth, callData); err != nil {
+		return nil, nil, nil, err
 	}
 
 	op := &userop.UserOperationV07{
@@ -169,15 +212,15 @@ func SendUserOpMAv2(
 	// above, so initCode is safe to attach.
 	deployed, err := isDeployed(ctx, chainRPC, sender)
 	if err != nil {
-		return nil, nil, fmt.Errorf("checking whether %s is deployed: %w", sender.Hex(), err)
+		return nil, nil, nil, fmt.Errorf("checking whether %s is deployed: %w", sender.Hex(), err)
 	}
 	if !deployed {
 		if eoa7702 {
-			return nil, nil, fmt.Errorf("EOA_DELEGATION_MISSING: sender %s has no 7702 designation; initCode is never attached for an eoa_7702 runner", sender.Hex())
+			return nil, nil, nil, fmt.Errorf("EOA_DELEGATION_MISSING: sender %s has no 7702 designation; initCode is never attached for an eoa_7702 runner", sender.Hex())
 		}
 		deployFactory, factoryData, initErr := aa.DeriveInitCode(owner, factory, salt)
 		if initErr != nil {
-			return nil, nil, fmt.Errorf("building init code: %w", initErr)
+			return nil, nil, nil, fmt.Errorf("building init code: %w", initErr)
 		}
 		op.Factory = &deployFactory
 		op.FactoryData = factoryData
@@ -192,18 +235,18 @@ func SendUserOpMAv2(
 	// ALCHEMY_GAS_POLICY_ID); when set, this check is skipped.
 	if smartWalletConfig.SponsorshipPolicyID() == "" {
 		if err := ensureSelfFundedPrefund(ctx, chainRPC, entryPoint, sender); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 
 	// Bundler is only needed from pricing onwards.
 	bundlerURL, err := smartWalletConfig.ActiveBundlerURL()
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolving bundler url: %w", err)
+		return nil, nil, nil, fmt.Errorf("resolving bundler url: %w", err)
 	}
 	bundlerRPC, err := rpc.DialContext(ctx, bundlerURL)
 	if err != nil {
-		return nil, nil, fmt.Errorf("dialing bundler: %w", err)
+		return nil, nil, nil, fmt.Errorf("dialing bundler: %w", err)
 	}
 	defer bundlerRPC.Close()
 
@@ -248,12 +291,12 @@ func SendUserOpMAv2(
 		nonce, err = NextNonceV07Managed(ctx, nonceRPC, entryPoint, sender, nonceEntity, nonceOptions)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading nonce: %w", err)
+		return nil, nil, nil, fmt.Errorf("reading nonce: %w", err)
 	}
 	op.Nonce = nonce
 
 	if err := checkDeferredCarrierNonce(auth, op.Nonce, sender); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	l.Info("v0.7 user operation prepared",
@@ -282,16 +325,41 @@ func SendUserOpMAv2(
 	if auth.Deferred() {
 		estSig, estErr := DeferredEstimationSignature(auth.DeferredData, auth.OwnerSignature)
 		if estErr != nil {
-			return nil, nil, fmt.Errorf("building the estimation signature: %w", estErr)
+			return nil, nil, nil, fmt.Errorf("building the estimation signature: %w", estErr)
 		}
 		op.Signature = estSig
 	}
 
-	if err := priceOperationV07(ctx, chainRPC, bundlerRPC, op, entryPoint, smartWalletConfig, l); err != nil {
-		if auth.Deferred() {
-			return nil, nil, wrapDeferredGrantInstallError(err)
+	var reserveResult *NativeReserveResult
+	if reserve != nil {
+		deposit, remaining, readErr := readNativeReserveInputs(ctx, chainRPC, reserve, auth, sender)
+		if readErr != nil {
+			return nil, nil, nil, readErr
 		}
-		return nil, nil, err
+		build := func(value *big.Int) ([]byte, error) {
+			packed, packErr := packNativeTransfer(reserve.Recipient, value)
+			if packErr != nil {
+				return nil, packErr
+			}
+			return sessionCallData(auth, packed)
+		}
+		reserveResult, err = priceSessionNativeReserve(op, reserve, deposit, remaining, build,
+			priceOnceThenEstimate(ctx, chainRPC, bundlerRPC, op, smartWalletConfig, l))
+		if err == nil {
+			l.Info("native reserve sized",
+				"sender", sender.Hex(), "recipient", reserve.Recipient.Hex(),
+				"balance", reserve.Balance.String(), "deposit", deposit.String(),
+				"remaining_limit", remaining, "max_gas_cost", reserveResult.MaxGasCost.String(),
+				"value", reserveResult.Value.String(), "limited_by", reserveResult.LimitedBy)
+		}
+	} else {
+		err = priceOperationV07(ctx, chainRPC, bundlerRPC, op, entryPoint, smartWalletConfig, l)
+	}
+	if err != nil {
+		if auth.Deferred() {
+			return nil, nil, nil, wrapDeferredGrantInstallError(err)
+		}
+		return nil, nil, nil, err
 	}
 
 	// Sign last: the signature covers every gas and paymaster field, so it has
@@ -302,10 +370,10 @@ func SendUserOpMAv2(
 	if auth.Deferred() {
 		if err := SignUserOpV07Deferred(op, entryPoint, chainID, signingKey,
 			auth.DeferredData, auth.OwnerSignature); err != nil {
-			return op, nil, fmt.Errorf("signing user operation with deferred action: %w", err)
+			return op, nil, reserveResult, fmt.Errorf("signing user operation with deferred action: %w", err)
 		}
 	} else if err := SignUserOpV07(op, entryPoint, chainID, signingKey); err != nil {
-		return op, nil, fmt.Errorf("signing user operation: %w", err)
+		return op, nil, reserveResult, fmt.Errorf("signing user operation: %w", err)
 	}
 
 	opHash, err := SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID, signingKey)
@@ -333,7 +401,7 @@ func SendUserOpMAv2(
 		if auth.Deferred() {
 			err = wrapDeferredGrantInstallError(err)
 		}
-		return op, nil, err
+		return op, nil, reserveResult, err
 	}
 	// Record acceptance NOW — the bundler holds the operation, so the next
 	// one on this key must use the following sequence even though nothing has
@@ -366,11 +434,11 @@ func SendUserOpMAv2(
 		// here because this path cannot distinguish that from a true
 		// validation-level failure; the next operation heals it through the
 		// consumed-carrier-nonce path above.
-		return op, nil, err
+		return op, nil, reserveResult, err
 	}
 	if receipt != nil && lease.Settled != nil {
 		if err := lease.Settled(ctx, receipt); err != nil {
-			return op, receipt, err
+			return op, receipt, reserveResult, err
 		}
 	}
 	if installsGrant {
@@ -391,7 +459,28 @@ func SendUserOpMAv2(
 			}
 		}
 	}
-	return op, receipt, nil
+	return op, receipt, reserveResult, nil
+}
+
+// packNativeTransfer is execute(recipient, value, ""): data stays empty, so
+// the send stays a plain transfer the grant's native row can authorize.
+func packNativeTransfer(recipient common.Address, value *big.Int) ([]byte, error) {
+	return aa.PackExecuteMAv2(recipient, value, []byte{})
+}
+
+// sessionCallData applies what a grant requires of every operation's calldata.
+// A grant carrying execution hooks requires user-op context on EVERY operation
+// under it, including the one that installs the grant, since the hooks are
+// live from the moment the install applies mid-validation.
+func sessionCallData(auth *SessionAuthorization, callData []byte) ([]byte, error) {
+	if auth == nil || !auth.WrapExecuteUserOp {
+		return callData, nil
+	}
+	wrapped, err := aa.WrapExecuteUserOp(callData)
+	if err != nil {
+		return nil, fmt.Errorf("wrapping calldata for user-op context: %w", err)
+	}
+	return wrapped, nil
 }
 
 // wrapDeferredGrantInstallError renames opaque AA23 / simulation failures on
@@ -469,7 +558,7 @@ func ensureSelfFundedPrefund(ctx context.Context, chainRPC *ethclient.Client, en
 }
 
 // entryPointDeposit reads EntryPoint.balanceOf(sender) for v0.7.
-func entryPointDeposit(ctx context.Context, chainRPC *ethclient.Client, entryPoint, sender common.Address) (*big.Int, error) {
+func entryPointDeposit(ctx context.Context, chainRPC aa.ContractCaller, entryPoint, sender common.Address) (*big.Int, error) {
 	// cast sig "balanceOf(address)" => 0x70a08231 — same selector as ERC-20.
 	data := append(common.FromHex("0x70a08231"), common.LeftPadBytes(sender.Bytes(), 32)...)
 	out, err := chainRPC.CallContract(ctx, ethereum.CallMsg{To: &entryPoint, Data: data}, nil)

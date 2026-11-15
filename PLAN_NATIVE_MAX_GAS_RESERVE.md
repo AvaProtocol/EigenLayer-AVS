@@ -1,7 +1,7 @@
 # ETH transfer MAX without gas sponsorship
 
 - **Date**: 2026-11-14
-- **Status**: Proposed
+- **Status**: Implemented; the live check is pending
 - **Related**: Studio #2122 (Sweep as a session Skill), #909 (Sweep's session sizing), the owner path's native reserve (`pkg/erc4337/preset/owner_native.go`)
 
 ## Problem
@@ -88,29 +88,44 @@ operation's maximum gas cost.
      which overstates what's left.
    - A failed limit read refuses the step. A failed deposit read takes `D` = 0.
      Never assume either.
+   - An operation that carries the grant's install, such as the ETH step of a
+     sweep with no tokens, starts from the granted limit. On chain the limit
+     reads 0 until that operation's validation installs it.
    - If the value comes out at zero or less, refuse with a typed error:
      `NATIVE_BALANCE_BELOW_FEE` when the balance term is the smaller one,
      `NATIVE_CAP_BELOW_FEE` when the permission term is.
-4. **Checks before sending.** `preflightSessionGrantError` checks the full
-   balance today. It keeps checking the estimated value plus the estimated gas
-   against the remaining limit. After pricing, value + `G` ≤ `C` holds by
-   construction (change 3), and the send asserts it before signing.
+4. **Checks before sending.** `preflightSessionGrantError` checked the full
+   balance, which refused a permission that covers the gas but not all the
+   ETH. For a self-funded `MAX` it now checks 0 wei: the recipient, the
+   grant's state, and that the permission covers the step's own gas. The send
+   reads the remaining limit, sizes the value to it (change 3) and asserts
+   value + `G` ≤ `C` before signing. A sponsored `MAX` and a fixed amount keep
+   today's check.
 5. **Output.** The step's `value`, transfer object and log report the amount
    actually sent, not the balance. Metadata adds `gasReserve` in wei, so Studio
    can say "minus the network fee". When the permission term set the value, it
-   also adds `limitedBy: "permission"` and the ETH left in the wallet.
-6. **Simulation.** The simulation path shows `MAX` as the full balance, with a
-   stand-in fee. Show the balance minus `nativePreflightGasUnitsSteady` × the
-   current max fee, so Test shows about what Run sends.
+   also adds `limitedBy: "permission"` and `leftInWallet`, the ETH left in the
+   wallet in wei. `NATIVE_BALANCE_BELOW_FEE` carries `INSUFFICIENT_BALANCE`;
+   `NATIVE_CAP_BELOW_FEE` keeps its code in the message, like the other
+   session-policy refusals. Both carry the amounts as error details.
+6. **Simulation.** The simulation path showed `MAX` as the full balance, with
+   a stand-in fee. A self-funded `MAX` shows the balance minus
+   `nativePreflightGasUnitsSteady` × the current max fee, so Test shows about
+   what Run sends. The grant report still observes the full balance, so
+   Review's sizing (#909) is unchanged.
 7. **Wait for earlier operations.** `MAX` reads the balance only after the
    run's earlier operations from the same wallet are included. A token send
    still pending, after a receipt timeout, hasn't paid its prefund yet, so a
-   balance read before then would overstate the ETH.
+   balance read before then would overstate the ETH. The prerequisite gate
+   (`reconciledWritePrerequisite`) already holds a write behind its graph
+   ancestors, which covers Sweep's token loop. `MAX` also checks the run's
+   other earlier writes on the same chain, reconciles each once, and fails
+   with `WRITE_PREREQUISITE_FAILED` while one may still be pending.
 
 ## A short permission completes part of a sweep
 
 Each step checks only its own operation, when it reaches it. The ETH step's
-check (`vm_runner_eth_transfer.go:396`) runs after the token loop has sent its
+check (`executeRealETHTransfer`) runs after the token loop has sent its
 operations, and the workflow's admission checks the permission's state and
 authority, not the run's native total. So with a permission that covers the
 token sends but not all the ETH:
