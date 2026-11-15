@@ -52,28 +52,53 @@ operation's maximum gas cost.
    pack-and-wrap code, so a grant with execution hooks gets wrapped calldata
    every time:
    - estimate with the value at 1 wei;
-   - set the value to the cap minus the reserve;
+   - set the value (change 3);
    - re-price, with ceilings that only rise, until the calldata stops changing;
    - then sign and send, as today.
 
    Move the owner loop into a helper both paths call, so there's one reserve
-   rule. If the value comes out at zero or less, refuse with a typed error,
-   `NATIVE_BALANCE_BELOW_FEE`.
-3. **The reserve counts the EntryPoint deposit.** A v0.7 account pays only the
-   prefund its deposit doesn't cover, so the reserve is
-   `max(0, maxGasCost − deposit)`. The owner path reserved the whole max cost,
-   which leaves up to that much behind when a deposit exists. When Sweep's ETH
-   step follows token sends, there is one: their unused prefund returned to the
-   deposit. If the deposit can't be read, reserve the full max cost; never
-   assume a deposit.
-4. **Session-grant preflight.** `preflightSessionGrantError` checks the full
-   balance today. NativeTokenLimitModule charges value plus max gas against
-   the native cap, which under the reserve totals the cap. So check the
-   estimated value with the estimated gas before sending, and the exact value
-   after pricing.
+   rule.
+3. **The value: what the balance and the permission both allow.** Let `B` be
+   the wallet's balance, `G` the signed maximum gas cost, `D` its EntryPoint
+   deposit and `C` the native permission's remaining limit.
+
+   - **Balance.** A v0.7 account pays only the prefund its deposit doesn't
+     cover, so the balance must keep `max(0, G − D)`. The owner path reserved
+     all of `G`, which leaves up to that much behind when a deposit exists.
+     Sweep's ETH step has one: the token sends' unused prefund returned to the
+     deposit.
+   - **Permission.** NativeTokenLimitModule debits the whole `G` at validation,
+     whatever pays it, and the value at execution
+     ([v2.0.0](https://github.com/alchemyplatform/modular-account/blob/v2.0.0/src/modules/permissions/NativeTokenLimitModule.sol)).
+     So the permission needs value + `G`.
+
+   `value = min(B − max(0, G − D), C − G)`.
+
+   The balance term alone would charge `B + min(G, D)`, not `B`. With `B` =
+   100, `G` = 10 and `D` = 5 it sends 95 and needs 105 of permission, and a
+   remaining limit of 100 fails the step. With the permission term it sends 90
+   and leaves 5 in the wallet.
+
+   `G` only rises between rounds, so the value only falls, and the loop still
+   converges.
+
+   - Read `C` on chain with `aa.ReadNativeSpendLimit`, as `CheckBudgetSpend`
+     does. The token sends before the ETH step have already spent part of the
+     permission. `PreflightNativePermission` compares against the granted cap,
+     which overstates what's left.
+   - A failed limit read refuses the step. A failed deposit read takes `D` = 0.
+     Never assume either.
+   - If the value comes out at zero or less, refuse with a typed error:
+     `NATIVE_BALANCE_BELOW_FEE` when the balance term is the smaller one,
+     `NATIVE_CAP_BELOW_FEE` when the permission term is.
+4. **Checks before sending.** `preflightSessionGrantError` checks the full
+   balance today. It keeps checking the estimated value plus the estimated gas
+   against the remaining limit. After pricing, value + `G` ≤ `C` holds by
+   construction (change 3), and the send asserts it before signing.
 5. **Output.** The step's `value`, transfer object and log report the amount
    actually sent, not the balance. Metadata adds `gasReserve` in wei, so Studio
-   can say "minus the network fee".
+   can say "minus the network fee". When the permission term set the value, it
+   also adds `limitedBy: "permission"` and the ETH left in the wallet.
 6. **Simulation.** The simulation path shows `MAX` as the full balance, with a
    stand-in fee. Show the balance minus `nativePreflightGasUnitsSteady` × the
    current max fee, so Test shows about what Run sends.
@@ -82,11 +107,38 @@ operation's maximum gas cost.
    still pending, after a receipt timeout, hasn't paid its prefund yet, so a
    balance read before then would overstate the ETH.
 
+## A short permission completes part of a sweep
+
+Each step checks only its own operation, when it reaches it. The ETH step's
+check (`vm_runner_eth_transfer.go:396`) runs after the token loop has sent its
+operations, and the workflow's admission checks the permission's state and
+authority, not the run's native total. So with a permission that covers the
+token sends but not all the ETH:
+
+- the token sends go through;
+- the ETH step sends what the remaining limit allows (change 3), and the
+  output says how much stayed;
+- if the remaining limit doesn't cover the ETH step's own gas, the ETH step
+  fails with `NATIVE_CAP_BELOW_FEE` and the ETH stays.
+
+This plan doesn't add a check of the whole run before its first send. Every
+transfer that does happen goes to the reviewed destination, and the rest stays
+in the wallet, so rerunning with a larger permission finishes the sweep. Such a
+check would also need to know the run's remaining operations when the first
+token send starts. #909 sizes them at Review from `sweepPlan`'s loops; the
+runner doesn't have them. It is listed under Out of scope.
+
+A correctly sized permission (below) can still end this way. A fee rise, ETH
+received after Review, or another Skill on the wallet can each change the
+numbers between Review and the ETH step.
+
 ## Edge cases
 
 - **Balance below the fee:** the ETH step fails with `NATIVE_BALANCE_BELOW_FEE`
   and plain copy in Studio ("Not enough ETH left to pay the network fee"). The
   token sends before it have already happened.
+- **Permission below the ETH step's gas:** the ETH step fails with
+  `NATIVE_CAP_BELOW_FEE` after the token sends (above).
 - **Fee rises after pricing:** no shortfall. The signed `maxFeePerGas` caps
   the prefund, and the reserve was computed from it.
 - **Bundler retry:** `SendUserOpV07WithRetry` re-signs only when it tightens
@@ -98,20 +150,28 @@ operation's maximum gas cost.
   inclusion, such as another Skill, can make the transfer revert in
   execution. The prefund is then spent. Sweep's own steps run in order;
   another Skill on the same wallet remains a small risk.
-- **What stays behind:** after a self-funded sweep, the wallet's balance is
-  zero, and the unused prefund sits in its EntryPoint deposit, where it pays
-  the wallet's next operation. Withdrawing the deposit (`withdrawTo`) is out of
-  scope.
+- **What stays behind:** when the permission covers it, the wallet's balance
+  ends at zero, and the unused prefund sits in its EntryPoint deposit, where it
+  pays the wallet's next operation. When the permission term sets the value,
+  the balance keeps the difference, which the output reports. Withdrawing the
+  deposit (`withdrawTo`) is out of scope.
 
 ## Studio and #909
 
 - **Native cap.** #909 marks Sweep's ETH step `NativeUnsized` /
-  `CapNeedsInput`, so the owner sets the ETH cap. NativeTokenLimitModule
-  charges every self-funded operation's max gas against it, and the ETH step
-  charges value plus max gas, which is the balance at that point. A cap that
-  covers a whole sweep is the ETH balance plus the token sends' max gas.
-  Review has to size it or say so. The preflight (change 4) refuses a short
-  cap before anything is sent.
+  `CapNeedsInput`, so the owner sets the ETH cap. The module charges every
+  self-funded operation's whole max gas, whatever pays it, and the ETH step's
+  value on top. The run charges the token sends' max gas, plus the ETH value,
+  plus the ETH step's max gas. The ETH value is at most the balance at Review,
+  `B₀`. So a cap that sweeps everything is
+
+  `B₀ + Σ G(token sends) + G(ETH send)`
+
+  at Review's fee estimate, with headroom. A deposit funded before the sweep
+  doesn't lower it.
+
+  Review sizes the cap that way, or says the ETH step may leave some ETH
+  behind. A smaller cap completes part of the sweep (above).
 - **Template comment.** `sweepPlan`'s comment says ETH "needs the network's gas
   sponsorship". It must change in Studio's `templates/wallet-sweep.json` and
   #909's `sweepPlanSource` together, because they must match exactly.
@@ -124,22 +184,46 @@ operation's maximum gas cost.
   - converges;
   - ceilings only rise;
   - refuses a balance at or below the fee;
-  - a deposit lowers the reserve;
-  - a failed deposit read falls back to the full reserve;
   - wrapped calldata is rebuilt each round;
   - the owner path behaves as before after the move.
+- **Value against deposit and permission.** With `B` = 100 and `G` = 10, the
+  deposit at zero, partial and full coverage, each against the remaining
+  limit:
+
+  | `D` | `C` ≥ `B` + `D` | `C` = `B` | `C` ≤ `G` |
+  | --- | --- | --- | --- |
+  | 0 | sends 90 | sends 90 | `NATIVE_CAP_BELOW_FEE` |
+  | 5 | sends 95 | sends 90, 5 stays | `NATIVE_CAP_BELOW_FEE` |
+  | 10 | sends 100 | sends 90, 10 stays | `NATIVE_CAP_BELOW_FEE` |
+
+  - A failed limit read refuses.
+  - A failed deposit read takes `D` = 0.
 - **Runner:**
-  - unsponsored `MAX` sends the balance minus the reserve;
+  - unsponsored `MAX` sends the value from change 3;
   - sponsored `MAX` sends the whole balance;
-  - the output reports the amount sent;
-  - the preflight counts value plus gas;
+  - the output reports the amount sent, and `limitedBy` when the permission
+    set it;
+  - the check counts value plus gas against the remaining limit, not the
+    granted cap;
   - simulation shows the estimate.
+- **Token sends, then ETH, with a short permission** (two cases):
+  - The permission covers the token sends but not all the ETH. The tokens are
+    sent, and the ETH step sends what's left of the permission and reports
+    the rest.
+  - The permission covers the token sends but not the ETH step's gas. The
+    tokens are sent, and the ETH step fails with `NATIVE_CAP_BELOW_FEE`.
 - **Live, Sepolia, local gateway with sponsorship off:** a Sweep of USDC and
-  ETH. Check that the destination got the reported value, the wallet's ETH
-  balance is zero, and the leftover sits in the deposit.
+  ETH, with a cap sized as Review sizes it. Check that:
+  - the destination got the reported value;
+  - the wallet's ETH balance is zero;
+  - the leftover sits in the deposit.
 
 ## Out of scope
 
 - The node's `reserveGas` field stays owner-only. The session path keys on
   `MAX`.
 - Withdrawing the EntryPoint deposit as part of a sweep.
+- A native check of the whole run before its first send. It would turn a
+  partial sweep into a refusal before anything moves. It needs the run's
+  remaining operations at the first send, which the runner doesn't have
+  today.
