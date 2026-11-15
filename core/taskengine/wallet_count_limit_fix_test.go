@@ -92,36 +92,15 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 		// then add more wallets to exceed the limit, then call GetWallet again with the same salt
 		// to access the existing wallet.
 
-		// Reset the database to have just 1 wallet initially
-		// Clean up any wallets that might have been created by previous subtests (e.g., ListWallets)
-		// by deleting all wallets and recreating just wallet1
-		dbItems, err := db.GetByPrefix(WalletByOwnerPrefix(int64(1), user.Address))
-		require.NoError(t, err)
-		for _, item := range dbItems {
-			db.Delete(item.Key)
-		}
-
-		// Recreate wallet1 to ensure clean state
-		err = StoreWallet(db, int64(1), user.Address, wallet1)
-		require.NoError(t, err)
-
-		// Now we have 1 wallet (limit=2), so we can create one more
-		// First, call GetWallet to create a wallet with salt=999 (this should succeed)
-		payload := &avsproto.GetWalletReq{
-			Salt: "999",
-		}
-
+		// Model a pre-existing over-limit inventory without deleting network
+		// projections: deleting a runtime row no longer deletes global identity.
+		config.SmartWallet.MaxWalletsPerOwner = 3
+		payload := &avsproto.GetWalletReq{Salt: "999"}
 		resp1, err1 := engine.GetWallet(user, payload)
-		require.NoError(t, err1, "Should be able to create wallet when under limit")
+		require.NoError(t, err1)
 		walletAddr := resp1.Address
-		t.Logf("DEBUG: Created wallet at address: %s", walletAddr)
+		config.SmartWallet.MaxWalletsPerOwner = 2
 
-		// Now add the second wallet back to reach the limit
-		err2 := StoreWallet(db, int64(1), user.Address, wallet2)
-		require.NoError(t, err2)
-
-		// Now we have 3 wallets (limit=2), so we're over the limit
-		// Verify we can still access the existing wallet with salt=999
 		resp2, err2 := engine.GetWallet(user, payload)
 		if err2 != nil {
 			t.Logf("DEBUG: GetWallet failed with error: %v", err2)

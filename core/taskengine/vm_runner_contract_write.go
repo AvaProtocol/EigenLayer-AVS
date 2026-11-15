@@ -695,21 +695,9 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 	logTarget string,
 	executionLogBuilder *strings.Builder,
 ) (*preset.SentUserOp, *types.Receipt, string) {
-	// Optional runner validation: if task.SmartWalletAddress is set, ensure it matches
-	// one of the owner EOA's known smart wallets (authoritative). If wallet list cannot be checked,
-	// fall back to checking the derived salt:0 address as a best-effort sanity check.
-	if r.vm.task != nil && r.vm.task.Task != nil && r.vm.task.SmartWalletAddress != "" && r.client != nil {
-		runnerStr := r.vm.task.SmartWalletAddress
-		// Derive sender at salt:0 via the per-chain reader (worker-routed in
-		// gateway mode) instead of a direct dial. Best-effort sanity check;
-		// the authoritative wallet-list validation runs in the run_node path.
-		sender, derr := r.client.GetSmartWalletAddress(ctx, r.owner, aa.MAv2FactoryAddress(), big.NewInt(0))
-		if derr == nil && (sender != common.Address{}) {
-			if !strings.EqualFold(sender.Hex(), runnerStr) {
-				r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
-			}
-		}
-	}
+	// The API/executor validates the exact registered runner and salt. The VM
+	// materializes it on this node's network before entering this processor;
+	// comparing every valid non-zero salt against salt 0 is not an ownership check.
 
 	// Sponsorship on MA v2 is the chain's Alchemy Gas Manager policy, applied
 	// inside the send path — there is nothing to attach here. Logged so ops do

@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/walletinventory"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -145,13 +146,17 @@ func (agg *Aggregator) gasManagerWebhookConfig() gasManagerWebhookConfig {
 
 // ownerOfSmartWallet resolves a smart-wallet address back to its owner EOA.
 //
-// Wallet records are keyed `w:<chain>:<owner>:<wallet>` — owner first — so
-// there is no direct reverse index. This scans the chain's key space and
+// Global MA v2 identities use the reverse owner index first, even before
+// network materialization. Historical records are keyed
+// `w:<chain>:<owner>:<wallet>`, so their fallback scans the chain's key space and
 // matches on the trailing segment, using the key-only iterator so values are
 // never loaded. Linear in wallets-per-chain, which is fine at current scale
 // (hundreds); if that stops being true, add a `wowner:<chain>:<wallet>`
 // index rather than making this smarter.
 func ownerOfSmartWallet(db storage.Storage, chainID int64, wallet common.Address) (common.Address, bool, error) {
+	if owner, found, err := walletinventory.Owner(db, wallet); found || err != nil {
+		return owner, found, err
+	}
 	prefix := []byte(fmt.Sprintf("w:%d:", chainID))
 	want := strings.ToLower(wallet.Hex())
 

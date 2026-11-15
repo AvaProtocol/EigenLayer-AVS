@@ -72,6 +72,7 @@ const (
 
 	OpListWallets    = "listWallets"
 	OpCreateWallet   = "createWallet"
+	OpAllocateWallet = "allocateWallet"
 	OpUpdateWallet   = "updateWallet"
 	OpWithdrawWallet = "withdrawWallet"
 	OpGetWalletNonce = "getWalletNonce"
@@ -146,6 +147,7 @@ var permissionMap = map[string]Level{
 	OpPutSecret:                 LevelUser,
 	OpDeleteSecret:              LevelUser,
 	OpUpdateWallet:              LevelUser,
+	OpAllocateWallet:            LevelUser,
 	OpWithdrawWallet:            LevelUser,
 	OpGetWalletNonce:            LevelUser,
 

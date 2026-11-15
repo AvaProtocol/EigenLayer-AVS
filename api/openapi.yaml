@@ -1753,6 +1753,12 @@ components:
         delegate:
           $ref: '#/components/schemas/EthereumAddress'
           description: SMA-7702 implementation the EOA designates. Set when kind is eoa_7702.
+        walletId:
+          type: string
+          description: Stable global derived-wallet identity, shared across supported networks.
+        deploymentProfile:
+          type: string
+          description: Pinned MA v2 derivation profile, independent of network runtime state.
         isHidden: { type: boolean }
         totalWorkflowCount: { type: integer, format: int64 }
         enabledWorkflowCount: { type: integer, format: int64 }
@@ -1767,6 +1773,29 @@ components:
         data:
           type: array
           items: { $ref: '#/components/schemas/Wallet' }
+        usage:
+          $ref: '#/components/schemas/WalletUsage'
+
+    WalletUsage:
+      type: object
+      required: [scope, activeCount, activeLimit, revision]
+      properties:
+        scope: { type: string, enum: [owner] }
+        activeCount: { type: integer }
+        activeLimit: { type: integer }
+        revision:
+          type: string
+          description: Monotonic owner inventory revision as a decimal integer string.
+
+    AllocateWalletRequest:
+      type: object
+      properties:
+        deploymentProfile:
+          type: string
+          description: Optional derivation profile. Defaults to the pinned semi-modular MA v2 profile.
+        chainId:
+          $ref: '#/components/schemas/ChainId'
+          description: Optional runtime/derivation network hint. Does not partition identity, quota or replay keys.
 
     CreateWalletRequest:
       type: object
@@ -3800,6 +3829,46 @@ paths:
   # Wallets
   # =====================================================================
 
+  /wallets:allocate:
+    post:
+      tags: [Wallets]
+      summary: Allocate the next global smart wallet identity
+      description: |
+        Owner JWT required. Allocates the next unused salt under the owner-wide
+        active quota across all supported networks. Hidden wallets release a slot.
+        Idempotency keys are durable and owner-scoped; replay never creates another
+        identity or restores an archived one. No account is deployed by this call.
+      operationId: allocateWallet
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AllocateWalletRequest' }
+      responses:
+        '201':
+          description: Allocated or replayed global wallet identity, with current visibility.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Wallet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Idempotency key conflict.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          description: Global active wallet limit reached.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
   /wallets:
     get:
       tags: [Wallets]
@@ -3867,7 +3936,7 @@ paths:
     patch:
       tags: [Wallets]
       summary: Update wallet properties
-      description: 'Partial update; only fields present in the body are changed (e.g., `isHidden`).'
+      description: 'Derived-wallet visibility is global across supported networks. Restoring an archived wallet requires capacity under the owner-wide active limit. Designated EOAs remain network-scoped.'
       operationId: updateWallet
       requestBody:
         required: true

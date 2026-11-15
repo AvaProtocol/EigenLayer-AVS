@@ -19,10 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Wallets are stored per chain, so the listing follows the caller's chain
-// rather than the gateway's. user.ChainID is what REST sets from ?chainId,
-// on the same precedence as CreateWallet — so a token minted for one chain
-// reaches another's wallets without a second signature.
+// Derived identities are shared; chain context selects runtime data only.
 func TestListWalletsFollowsTheResolvedChain(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -61,11 +58,11 @@ func TestListWalletsFollowsTheResolvedChain(t *testing.T) {
 
 	fromDefault := listed(defaultChain)
 	require.True(t, fromDefault[strings.ToLower(onDefault.Hex())], "the default chain's wallet must be listed on that chain")
-	require.False(t, fromDefault[strings.ToLower(onOther.Hex())], "another chain's wallet must not leak into this one")
+	require.True(t, fromDefault[strings.ToLower(onOther.Hex())], "derived inventory is shared across networks")
 
 	fromOther := listed(otherChain)
 	require.True(t, fromOther[strings.ToLower(onOther.Hex())], "naming the other chain must reach its wallets")
-	require.False(t, fromOther[strings.ToLower(onDefault.Hex())], "the default chain's wallet must not leak into the other")
+	require.True(t, fromOther[strings.ToLower(onDefault.Hex())], "derived inventory is shared across networks")
 
 	// ChainID 0 is the no-context case (gRPC, or a JWT with no aud): it
 	// resolves to the gateway default rather than erroring or listing nothing.

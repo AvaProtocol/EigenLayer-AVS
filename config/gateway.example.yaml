@@ -1,3 +1,6 @@
+smart_wallet_inventory:
+  max_active_wallets_per_owner: 3
+
 # Gateway configuration TEMPLATE for local development.
 #
 # This is a checked-in template. The real file is gitignored — copy it

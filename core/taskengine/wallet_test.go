@@ -289,8 +289,9 @@ func TestRetiredLegacyWalletDoesNotBlockMAv2OnItsChain(t *testing.T) {
 	storedNew, err := GetWallet(db, chainA, owner, resp.Address)
 	require.NoError(t, err)
 	assert.False(t, storedNew.Retired)
-	_, err = GetWallet(db, chainB, owner, resp.Address)
-	require.ErrorIs(t, err, badger.ErrKeyNotFound)
+	otherStored, err := GetWallet(db, chainB, owner, resp.Address)
+	require.NoError(t, err)
+	require.Equal(t, storedNew.WalletID, otherStored.WalletID)
 
 	userB := &model.User{Address: owner, ChainID: chainB}
 	_, err = n.GetWallet(userB, &avsproto.GetWalletReq{Salt: "1", FactoryAddress: legacyFactory.Hex()})
@@ -300,7 +301,7 @@ func TestRetiredLegacyWalletDoesNotBlockMAv2OnItsChain(t *testing.T) {
 	if err != nil {
 		require.ErrorIs(t, err, badger.ErrKeyNotFound)
 	}
-	assert.Empty(t, items)
+	require.Len(t, items, 1, "materializing a global identity creates its local runtime projection")
 
 	storedLegacy, err := GetWallet(db, chainA, owner, legacyAddr.Hex())
 	require.NoError(t, err)

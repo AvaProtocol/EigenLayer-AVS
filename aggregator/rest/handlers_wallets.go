@@ -1,19 +1,24 @@
 package rest
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
-	"sort"
+	"strconv"
 	"strings"
 
+	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo/v4"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/walletinventory"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/avsclient"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
@@ -22,10 +27,8 @@ import (
 
 // Wallets resource — see api/openapi.yaml `tags: [Wallets]`.
 //
-// The engine's wallet API has accumulated a few quirks: ListWallets
-// takes a bare address (no user struct), CreateWallet doesn't exist —
-// SetWallet doubles as upsert. The handlers below hide those quirks
-// behind the REST shape so the SDK stays clean.
+// Derived identity operations use the owner-wide registry. Network hints
+// select runtime context, including designated EOA and nonce observations.
 
 // ListWallets — GET /api/v1/wallets
 //
@@ -35,9 +38,8 @@ import (
 // preview's runner — see ensurePermission (partner_wallet_preview).
 //
 // Chain routing precedence: ?chainId override → JWT aud → gateway default,
-// matching CreateWallet. Wallets are stored per chain, so without the
-// override a token minted for one chain could never see another's — which
-// would force a second signature purely to read a list.
+// matching CreateWallet. This selects runtime context only; all supported
+// networks return the same derived identities, visibility and owner usage.
 func (s *Server) ListWallets(ctx echo.Context, params generated.ListWalletsParams) error {
 	p, err := s.ensurePermission(ctx, OpListWallets)
 	if err != nil {
@@ -49,21 +51,16 @@ func (s *Server) ListWallets(ctx echo.Context, params generated.ListWalletsParam
 		user.ChainID = int64(*params.ChainId)
 	}
 
-	resp, err := s.engine.ListWallets(user, &avsproto.ListWalletReq{})
+	rows, usage, err := s.engine.InventoryWallets(user, &avsproto.ListWalletReq{})
 	if err != nil {
-		return err
+		return walletInventoryError(err)
 	}
-
-	out := generated.WalletList{Data: make([]generated.Wallet, 0, len(resp.GetItems()))}
-	for _, w := range resp.GetItems() {
-		out.Data = append(out.Data, protoSmartWalletToOpenAPI(w))
+	out := generated.WalletList{Data: make([]generated.Wallet, 0, len(rows)), Usage: &generated.WalletUsage{
+		Scope: generated.WalletUsageScope(usage.Scope), ActiveCount: usage.ActiveCount, ActiveLimit: usage.ActiveLimit, Revision: strconv.FormatUint(usage.Revision, 10),
+	}}
+	for _, w := range rows {
+		out.Data = append(out.Data, modelWalletToOpenAPI(w))
 	}
-	// Sort by salt lexicographically so list ordering is stable and
-	// predictable across calls (BadgerDB GetByPrefix doesn't guarantee
-	// any particular order).
-	sort.SliceStable(out.Data, func(i, j int) bool {
-		return out.Data[i].Salt < out.Data[j].Salt
-	})
 	return ctx.JSON(http.StatusOK, out)
 }
 
@@ -77,9 +74,8 @@ func (s *Server) ListWallets(ctx echo.Context, params generated.ListWalletsParam
 // on first use, so it's reserved for UpdateWallet.
 //
 // Chain routing precedence: body.chainId override → JWT aud → gateway
-// default. The override lets a single JWT mint wallets on chains
-// other than the one it was signed against (the JWT only proves EOA
-// ownership, which is chain-independent).
+// default. It selects derivation/runtime context while identity admission
+// remains global (the JWT proves chain-independent EOA ownership).
 func (s *Server) CreateWallet(ctx echo.Context) error {
 	// No-fund: derives the counterfactual CREATE2 address from (owner, salt,
 	// factory) and records it. Partner-delegatable so a preview can resolve a
@@ -112,17 +108,21 @@ func (s *Server) CreateWallet(ctx echo.Context) error {
 
 	resp, err := s.engine.GetWalletWithContext(ctx.Request().Context(), user, req)
 	if err != nil {
+		return walletInventoryError(err)
+	}
+	out := protoWalletRespToOpenAPI(resp)
+	stored, err := s.engine.StoredWallet(s.engine.ResolveUserChainID(user), user.Address, resp.Address)
+	if err != nil {
 		return err
 	}
-	return ctx.JSON(http.StatusCreated, protoWalletRespToOpenAPI(resp))
+	setWalletIdentity(&out, stored)
+	return ctx.JSON(http.StatusCreated, out)
 }
 
 // UpdateWallet — PATCH /api/v1/wallets/{address}
 //
-// Today's engine only supports toggling IsHidden; that's the one field
-// that makes sense to update post-creation. The full SmartWallet record
-// is identified by (salt, factory) — we re-resolve those from the
-// address via GetWallet and then SetWallet with the new isHidden.
+// Toggle visibility for this exact stored address. Derived visibility and
+// restore admission are global; designated EOA visibility stays per network.
 func (s *Server) UpdateWallet(ctx echo.Context, address generated.EthereumAddress) error {
 	p, err := s.ensurePermission(ctx, OpUpdateWallet)
 	if err != nil {
@@ -140,44 +140,12 @@ func (s *Server) UpdateWallet(ctx echo.Context, address generated.EthereumAddres
 		return badRequest("WALLETS_NO_FIELDS", "No updatable fields supplied", "isHidden is the only supported field today.")
 	}
 
-	chainID := user.ChainID
-	stored, err := s.engine.StoredWallet(chainID, user.Address, string(address))
-	if err != nil || stored == nil {
-		stored, err = s.engine.GetWalletFromDB(user.Address, string(address))
-	}
-	if err != nil || stored == nil {
-		return &restmw.HTTPError{
-			Status: http.StatusNotFound,
-			Code:   "WALLETS_NOT_FOUND",
-			Title:  "Wallet not found",
-			Detail: "No wallet record found for the supplied address; create it first via POST /wallets.",
-		}
-	}
-
-	if stored.IsEOA7702() {
-		if chainID <= 0 && s.config != nil && s.config.SmartWallet != nil {
-			chainID = s.config.SmartWallet.ChainID
-		}
-		updated, hideErr := s.engine.SetStoredWalletHidden(chainID, user.Address, stored.Address.Hex(), *body.IsHidden)
-		if hideErr != nil {
-			return hideErr
-		}
-		return ctx.JSON(http.StatusOK, modelWalletToOpenAPI(updated))
-	}
-
-	req := &avsproto.SetWalletReq{IsHidden: *body.IsHidden}
-	if stored.Salt != nil {
-		req.Salt = stored.Salt.String()
-	}
-	if stored.Factory != nil {
-		req.FactoryAddress = stored.Factory.Hex()
-	}
-
-	resp, err := s.engine.SetWallet(user.Address, req)
+	chainID := s.engine.ResolveUserChainID(user)
+	updated, err := s.engine.SetStoredWalletHidden(chainID, user.Address, string(address), *body.IsHidden)
 	if err != nil {
-		return err
+		return walletInventoryError(err)
 	}
-	return ctx.JSON(http.StatusOK, protoWalletRespToOpenAPI(resp))
+	return ctx.JSON(http.StatusOK, modelWalletToOpenAPI(updated))
 }
 
 // WithdrawWallet — POST /api/v1/wallets/{address}:withdraw
@@ -461,6 +429,7 @@ func modelWalletToOpenAPI(in *model.SmartWallet) generated.Wallet {
 		Address:  generated.EthereumAddress(in.Address.Hex()),
 		IsHidden: ptrBool(in.IsHidden),
 	}
+	setWalletIdentity(&out, in)
 	if in.Salt != nil {
 		out.Salt = in.Salt.String()
 	}
@@ -482,4 +451,61 @@ func modelWalletToOpenAPI(in *model.SmartWallet) generated.Wallet {
 func ptrBool(b bool) *bool { return &b }
 func intPtr(v int64) *int64 {
 	return &v
+}
+
+func setWalletIdentity(out *generated.Wallet, w *model.SmartWallet) {
+	if w.WalletID != "" {
+		out.WalletId = &w.WalletID
+	}
+	if w.DeploymentProfile != "" {
+		out.DeploymentProfile = &w.DeploymentProfile
+	}
+}
+func walletInventoryError(err error) error {
+	switch {
+	case errors.Is(err, walletinventory.ErrBadAllocation):
+		return badRequest("WALLETS_BAD_REQUEST", "Invalid allocation request", err.Error())
+	case errors.Is(err, walletinventory.ErrSaltExhausted):
+		return &restmw.HTTPError{Status: http.StatusConflict, Code: "WALLET_SALT_EXHAUSTED", Title: "No automatic wallet salts remain"}
+	case errors.Is(err, walletinventory.ErrLimit) || status.Code(err) == codes.ResourceExhausted:
+		return &restmw.HTTPError{Status: http.StatusTooManyRequests, Code: "WALLETS_LIMIT_REACHED", Title: "Active smart wallet limit reached", Detail: err.Error()}
+	case errors.Is(err, walletinventory.ErrKeyReused):
+		return &restmw.HTTPError{Status: http.StatusConflict, Code: "IDEMPOTENCY_KEY_REUSED", Title: "Allocation key already used", Detail: err.Error()}
+	case errors.Is(err, walletinventory.ErrConflict) || (status.Code(err) == codes.FailedPrecondition && status.Convert(err).Message() == walletinventory.ErrConflict.Error()):
+		return &restmw.HTTPError{Status: http.StatusConflict, Code: "WALLET_IDENTITY_CONFLICT", Title: "Wallet identity needs reconciliation", Detail: err.Error()}
+	case errors.Is(err, badger.ErrKeyNotFound) || status.Code(err) == codes.NotFound:
+		return &restmw.HTTPError{Status: http.StatusNotFound, Code: "WALLETS_NOT_FOUND", Title: "Wallet not found"}
+	default:
+		return err
+	}
+}
+
+// AllocateWallet is owner-authenticated; partner preview may ensure an explicit
+// salt, but it cannot allocate new identities automatically.
+func (s *Server) AllocateWallet(ctx echo.Context, params generated.AllocateWalletParams) error {
+	principal, err := s.ensurePermission(ctx, OpAllocateWallet)
+	if err != nil {
+		return err
+	}
+	var body generated.AllocateWalletRequest
+	if ctx.Request().Body != nil {
+		if err := ctx.Bind(&body); err != nil && !errors.Is(err, io.EOF) {
+			return badRequest("WALLETS_BAD_REQUEST", "Invalid allocation request", err.Error())
+		}
+	}
+	if strings.TrimSpace(params.IdempotencyKey) == "" || len(params.IdempotencyKey) > 256 {
+		return badRequest("WALLETS_BAD_KEY", "Allocation key required", "Supply an Idempotency-Key of 1 to 256 bytes.")
+	}
+	profile := ""
+	if body.DeploymentProfile != nil {
+		profile = *body.DeploymentProfile
+	}
+	if body.ChainId != nil {
+		principal.User.ChainID = int64(*body.ChainId)
+	}
+	wallet, err := s.engine.AllocateWallet(ctx.Request().Context(), principal.User, params.IdempotencyKey, profile)
+	if err != nil {
+		return walletInventoryError(err)
+	}
+	return ctx.JSON(http.StatusCreated, modelWalletToOpenAPI(wallet))
 }

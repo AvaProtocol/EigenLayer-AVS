@@ -1317,9 +1317,9 @@ func (x *WorkflowExecutor) validateDerivedWallet(ctx context.Context, chainID in
 	// recognised.
 	factoryAddr := aa.MAv2FactoryAddress()
 
-	// Try salt values from 0 to max_wallets_per_owner to see if any produce the target wallet address
-	// This uses the configured limit from aggregator.yaml
-	maxWallets := int64(swCfg.MaxWalletsPerOwner)
+	// Legacy discovery is independently bounded. Registered global identities
+	// validate through their exact salt before this fallback, regardless of quota.
+	maxWallets := int64(3)
 
 	// Prefer the per-chain reader: in gateway mode the worker runs the whole
 	// salt scan server-side (one round-trip). Fall back to a direct dial +

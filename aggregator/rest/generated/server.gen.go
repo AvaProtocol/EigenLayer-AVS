@@ -122,6 +122,9 @@ type ServerInterface interface {
 	// Withdraw funds from a smart wallet
 	// (POST /wallets/{address}:withdraw)
 	WithdrawWallet(ctx echo.Context, address EthereumAddress) error
+	// Allocate the next global smart wallet identity
+	// (POST /wallets:allocate)
+	AllocateWallet(ctx echo.Context, params AllocateWalletParams) error
 	// List workflows
 	// (GET /workflows)
 	ListWorkflows(ctx echo.Context, params ListWorkflowsParams) error
@@ -1010,6 +1013,39 @@ func (w *ServerInterfaceWrapper) WithdrawWallet(ctx echo.Context) error {
 	return err
 }
 
+// AllocateWallet converts echo context to params.
+func (w *ServerInterfaceWrapper) AllocateWallet(ctx echo.Context) error {
+	var err error
+
+	ctx.Set(BearerAuthScopes, []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AllocateWalletParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Idempotency-Key, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Idempotency-Key: %s", err))
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Idempotency-Key is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.AllocateWallet(ctx, params)
+	return err
+}
+
 // ListWorkflows converts echo context to params.
 func (w *ServerInterfaceWrapper) ListWorkflows(ctx echo.Context) error {
 	var err error
@@ -1323,6 +1359,7 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 	router.POST(baseURL+"/wallets/:address/policies:submit", wrapper.SubmitWalletPolicy)
 	router.GET(baseURL+"/wallets/:address:getNonce", wrapper.GetWalletNonce)
 	router.POST(baseURL+"/wallets/:address:withdraw", wrapper.WithdrawWallet)
+	router.POST(baseURL+"/wallets:allocate", wrapper.AllocateWallet)
 	router.GET(baseURL+"/workflows", wrapper.ListWorkflows)
 	router.POST(baseURL+"/workflows", wrapper.CreateWorkflow)
 	router.DELETE(baseURL+"/workflows/:id", wrapper.CancelWorkflow)
@@ -3075,6 +3112,75 @@ func (response WithdrawWallet412ApplicationProblemPlusJSONResponse) VisitWithdra
 	return json.NewEncoder(w).Encode(response)
 }
 
+type AllocateWalletRequestObject struct {
+	Params AllocateWalletParams
+	Body   *AllocateWalletJSONRequestBody
+}
+
+type AllocateWalletResponseObject interface {
+	VisitAllocateWalletResponse(w http.ResponseWriter) error
+}
+
+type AllocateWallet201JSONResponse Wallet
+
+func (response AllocateWallet201JSONResponse) VisitAllocateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AllocateWallet400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response AllocateWallet400ApplicationProblemPlusJSONResponse) VisitAllocateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AllocateWallet401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response AllocateWallet401ApplicationProblemPlusJSONResponse) VisitAllocateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AllocateWallet403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response AllocateWallet403ApplicationProblemPlusJSONResponse) VisitAllocateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AllocateWallet409ApplicationProblemPlusJSONResponse Problem
+
+func (response AllocateWallet409ApplicationProblemPlusJSONResponse) VisitAllocateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AllocateWallet429ApplicationProblemPlusJSONResponse Problem
+
+func (response AllocateWallet429ApplicationProblemPlusJSONResponse) VisitAllocateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(429)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ListWorkflowsRequestObject struct {
 	Params ListWorkflowsParams
 }
@@ -3770,6 +3876,9 @@ type StrictServerInterface interface {
 	// Withdraw funds from a smart wallet
 	// (POST /wallets/{address}:withdraw)
 	WithdrawWallet(ctx context.Context, request WithdrawWalletRequestObject) (WithdrawWalletResponseObject, error)
+	// Allocate the next global smart wallet identity
+	// (POST /wallets:allocate)
+	AllocateWallet(ctx context.Context, request AllocateWalletRequestObject) (AllocateWalletResponseObject, error)
 	// List workflows
 	// (GET /workflows)
 	ListWorkflows(ctx context.Context, request ListWorkflowsRequestObject) (ListWorkflowsResponseObject, error)
@@ -4782,6 +4891,37 @@ func (sh *strictHandler) WithdrawWallet(ctx echo.Context, address EthereumAddres
 		return err
 	} else if validResponse, ok := response.(WithdrawWalletResponseObject); ok {
 		return validResponse.VisitWithdrawWalletResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// AllocateWallet operation middleware
+func (sh *strictHandler) AllocateWallet(ctx echo.Context, params AllocateWalletParams) error {
+	var request AllocateWalletRequestObject
+
+	request.Params = params
+
+	var body AllocateWalletJSONRequestBody
+	if err := ctx.Bind(&body); err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.AllocateWallet(ctx.Request().Context(), request.(AllocateWalletRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AllocateWallet")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(AllocateWalletResponseObject); ok {
+		return validResponse.VisitAllocateWalletResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

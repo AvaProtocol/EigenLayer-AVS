@@ -19,6 +19,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/walletinventory"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -1111,245 +1112,28 @@ func (n *Engine) markPreviousCanonicalStaleIfAny(chainID int64, owner common.Add
 	}
 }
 
-// storeDefaultWalletForListWallets creates and stores the default wallet (salt:0) for ListWallets.
-// Returns the stored wallet model if successful, or nil if storage failed (but logs the error).
-func (n *Engine) storeDefaultWalletForListWallets(chainID int64, owner common.Address, defaultDerivedAddress *common.Address, defaultSystemFactory common.Address, defaultSalt *big.Int) *model.SmartWallet {
-	n.logger.Info("Default wallet not found in DB for ListWallets, storing it", "chainID", chainID, "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex())
-	n.markPreviousCanonicalStaleIfAny(chainID, owner, defaultSystemFactory, defaultSalt, *defaultDerivedAddress)
-	newModelWallet := &model.SmartWallet{
-		Owner:    &owner,
-		Address:  defaultDerivedAddress,
-		Factory:  &defaultSystemFactory,
-		Salt:     defaultSalt,
-		IsHidden: false,
-	}
-	if storeErr := StoreWallet(n.db, chainID, owner, newModelWallet); storeErr != nil {
-		n.logger.Error("Error storing default wallet to DB for ListWallets", "chainID", chainID, "owner", owner.Hex(), "walletAddress", defaultDerivedAddress.Hex(), "error", storeErr)
-		// Continue and return the wallet anyway, but log the error
-		return nil
-	}
-	// Successfully stored, return the wallet model
-	return newModelWallet
-}
-
-// ListWallets corresponds to the ListWallets RPC.
-//
-// Wallet records are chain-scoped, so the listing is too: the chain comes
-// from ResolveUserChainID — the caller's explicit choice (REST sets
-// user.ChainID from the ?chainId query), then the JWT `aud` chain, then the
-// gateway default. Same precedence as GetWallet, so a wallet created on one
-// chain is listed by naming that chain rather than by holding a second JWT.
-//
-// Everything chain-dependent is resolved from that chain, not from the
-// gateway default: the factory the default wallet is derived against, the
-// per-owner wallet cap, and the storage prefix scanned.
+// ListWallets returns the owner's global derived inventory, including archived
+// identities. Chain context only selects network-specific designated-EOA rows.
 func (n *Engine) ListWallets(user *model.User, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
-	if user == nil {
-		return nil, status.Errorf(codes.InvalidArgument, "ListWallets requires an authenticated user")
+	rows, _, err := n.InventoryWallets(user, payload)
+	if err != nil {
+		return nil, inventoryStatus(err)
 	}
-	owner := user.Address
-	chainID := n.ResolveUserChainID(user)
-	swCfg := n.ResolveSmartWalletConfig(chainID)
-	walletsToReturnProto := []*avsproto.SmartWallet{}
-	processedAddresses := make(map[string]bool)
-
-	defaultSystemFactory := aa.MAv2FactoryAddress()
-	var defaultDerivedAddress *common.Address
-	var deriveErr error
-
-	// Derivation must run against THIS chain. A per-chain reader is the
-	// worker-routed path GetWallet prefers; the package-level rpcConn is the
-	// default chain's client, so it is only sound when that is the chain
-	// being listed. With neither, the default wallet is left out rather than
-	// derived against the wrong chain's factory — a wrong address here would
-	// be indistinguishable from a real one in the response. Stored wallets
-	// are unaffected: they come from the prefix scan below.
-	switch {
-	case GetChainStateReaderForChain(uint64(chainID)) != nil:
-		reader := GetChainStateReaderForChain(uint64(chainID))
-		var addr common.Address
-		addr, deriveErr = reader.GetSmartWalletAddress(context.Background(), owner, defaultSystemFactory, defaultSalt)
-		if deriveErr == nil {
-			defaultDerivedAddress = &addr
+	result := &avsproto.ListWalletResp{Items: make([]*avsproto.SmartWallet, 0, len(rows))}
+	for _, w := range rows {
+		item := &avsproto.SmartWallet{Address: w.Address.Hex(), IsHidden: w.IsHidden, Kind: w.Kind}
+		if w.Salt != nil {
+			item.Salt = w.Salt.String()
 		}
-	case rpcConn != nil && chainID == n.defaultChainID():
-		defaultDerivedAddress, deriveErr = aa.DeriveSenderAddress(rpcConn, owner, defaultSystemFactory, defaultSalt)
-	default:
-		// Test/CI (rpcConn nil), or a non-default chain with no reader
-		// registered.
-		n.logger.Debug("ListWallets: skipping default wallet derivation — no chain reader for this chain",
-			"owner", owner.Hex(), "chain_id", chainID, "has_rpc_conn", rpcConn != nil)
-		deriveErr = fmt.Errorf("no chain reader available for chain %d", chainID)
+		if w.Factory != nil {
+			item.Factory = w.Factory.Hex()
+		}
+		if w.Delegate != nil {
+			item.Delegate = w.Delegate.Hex()
+		}
+		result.Items = append(result.Items, item)
 	}
-
-	if deriveErr != nil {
-		n.logger.Warn("Failed to derive default system wallet address for ListWallets", "owner", owner.Hex(), "error", deriveErr, "hasRpcConn", rpcConn != nil)
-	} else if defaultDerivedAddress == nil || *defaultDerivedAddress == (common.Address{}) {
-		n.logger.Warn("Derived default system wallet address is nil or zero for ListWallets", "owner", owner.Hex())
-	} else {
-		includeThisDefault := true
-		if payload != nil {
-			if pfa := payload.GetFactoryAddress(); pfa != "" && !strings.EqualFold(defaultSystemFactory.Hex(), pfa) {
-				includeThisDefault = false
-			}
-			if ps := payload.GetSalt(); ps != "" && defaultSalt.String() != ps {
-				includeThisDefault = false
-			}
-		}
-
-		if includeThisDefault {
-			modelWallet, dbGetErr := GetWallet(n.db, chainID, owner, defaultDerivedAddress.Hex())
-
-			isHidden := false
-			actualSalt := defaultSalt.String()
-			actualFactory := defaultSystemFactory.Hex()
-
-			if dbGetErr == nil {
-				isHidden = modelWallet.IsHidden
-				if modelWallet.Salt != nil {
-					actualSalt = modelWallet.Salt.String()
-				}
-				if modelWallet.Factory != nil {
-					actualFactory = modelWallet.Factory.Hex()
-				}
-			} else if dbGetErr == badger.ErrKeyNotFound {
-				// Wallet not found in DB - we need to store it since we're returning it to the client
-				// Enforce max smart wallet count per owner before creating a new wallet entry
-				if swCfg != nil {
-					maxAllowed := swCfg.MaxWalletsPerOwner
-					if maxAllowed <= 0 {
-						maxAllowed = config.DefaultMaxWalletsPerOwner
-					}
-					if maxAllowed > config.HardMaxWalletsPerOwner {
-						maxAllowed = config.HardMaxWalletsPerOwner
-					}
-					// Fetch all wallets for this owner and count unique addresses
-					dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(chainID, owner))
-					if listErr == nil {
-						unique := make(map[string]struct{})
-						for _, item := range dbItems {
-							storedModelWallet := &model.SmartWallet{}
-							if err := storedModelWallet.FromStorageData(item.Value); err == nil && walletCountsTowardOwnerCap(storedModelWallet) {
-								unique[strings.ToLower(storedModelWallet.Address.Hex())] = struct{}{}
-							}
-						}
-						// Always store the default wallet even if limit is reached, since it's always returned
-						// The default wallet (salt:0) is special and should always be available
-						if len(unique) >= maxAllowed {
-							n.logger.Warn("Max wallet count reached for owner in ListWallets, but storing default wallet anyway since it's always returned", "owner", owner.Hex(), "limit", maxAllowed, "currentCount", len(unique))
-						}
-						// Store the default wallet since we're returning it to the client
-						if storedWallet := n.storeDefaultWalletForListWallets(chainID, owner, defaultDerivedAddress, defaultSystemFactory, defaultSalt); storedWallet != nil {
-							modelWallet = storedWallet
-						}
-					}
-				} else {
-					// No config but wallet not in DB - store it anyway
-					if storedWallet := n.storeDefaultWalletForListWallets(chainID, owner, defaultDerivedAddress, defaultSystemFactory, defaultSalt); storedWallet != nil {
-						modelWallet = storedWallet
-					}
-				}
-			} else {
-				n.logger.Warn("DB error fetching default derived wallet for ListWallets", "address", defaultDerivedAddress.Hex(), "error", dbGetErr)
-			}
-
-			// Prefer the stored salt, factory, and hidden flag. A missing
-			// record still uses the derived defaults, including when the
-			// store itself failed.
-			if modelWallet != nil {
-				isHidden = modelWallet.IsHidden
-				if modelWallet.Salt != nil {
-					actualSalt = modelWallet.Salt.String()
-				}
-				if modelWallet.Factory != nil {
-					actualFactory = modelWallet.Factory.Hex()
-				}
-			}
-
-			// The prefix scan below also skips Retired, but this branch
-			// runs first. A retired record at the default address — a
-			// pre-factory row the migration marks Retired — would
-			// otherwise stay in the list.
-			if modelWallet == nil || !modelWallet.Retired {
-				walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
-					Address:  defaultDerivedAddress.Hex(),
-					Salt:     actualSalt,
-					Factory:  actualFactory,
-					IsHidden: isHidden,
-				})
-				processedAddresses[strings.ToLower(defaultDerivedAddress.Hex())] = true
-			}
-		}
-	}
-
-	dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(chainID, owner))
-	if listErr != nil && listErr != badger.ErrKeyNotFound {
-		n.logger.Error("Error fetching wallets by owner prefix for ListWallets", "owner", owner.Hex(), "chainID", chainID, "error", listErr)
-		if len(walletsToReturnProto) == 0 {
-			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallets by owner: %v", listErr)
-		}
-	}
-
-	for _, item := range dbItems {
-		storedModelWallet := &model.SmartWallet{}
-		if err := storedModelWallet.FromStorageData(item.Value); err != nil {
-			n.logger.Error("Failed to parse stored wallet data for ListWallets", "key", string(item.Key), "error", err)
-			continue
-		}
-
-		// Hard-filter zombies left over from a factory account-implementation
-		// upgrade. The record is preserved on disk (the on-chain wallet may
-		// still hold assets), but it is no longer derivable from its
-		// (owner, factory, salt) and would otherwise show up as a phantom
-		// salt collision in the response.
-		if storedModelWallet.StaleDerivation {
-			continue
-		}
-
-		// Retired: a legacy-factory wallet the gateway can no longer execute
-		// (see model.SmartWallet.Retired). Kept on disk, never listed.
-		if storedModelWallet.Retired {
-			continue
-		}
-
-		if processedAddresses[strings.ToLower(storedModelWallet.Address.Hex())] {
-			continue
-		}
-
-		if pfa := payload.GetFactoryAddress(); pfa != "" {
-			if storedModelWallet.Factory == nil || !strings.EqualFold(storedModelWallet.Factory.Hex(), pfa) {
-				continue
-			}
-		}
-
-		if ps := payload.GetSalt(); ps != "" {
-			if storedModelWallet.Salt == nil || storedModelWallet.Salt.String() != ps {
-				continue
-			}
-		}
-
-		factoryString := ""
-		if storedModelWallet.Factory != nil {
-			factoryString = storedModelWallet.Factory.Hex()
-		}
-		saltString := ""
-		if storedModelWallet.Salt != nil {
-			saltString = storedModelWallet.Salt.String()
-		}
-		delegateString := ""
-		if storedModelWallet.Delegate != nil {
-			delegateString = storedModelWallet.Delegate.Hex()
-		}
-		walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
-			Address:  storedModelWallet.Address.Hex(),
-			Salt:     saltString,
-			Factory:  factoryString,
-			IsHidden: storedModelWallet.IsHidden,
-			Kind:     storedModelWallet.Kind,
-			Delegate: delegateString,
-		})
-	}
-	return &avsproto.ListWalletResp{Items: walletsToReturnProto}, nil
+	return result, nil
 }
 
 // validateNonZeroAddress validates that the factory address is not the zero address
@@ -1407,14 +1191,6 @@ func resolveFactoryOverride(overrideHex string) common.Address {
 	return aa.MAv2FactoryAddress()
 }
 
-// walletCountsTowardOwnerCap reports a stored derived wallet. A designated EOA
-// (kind eoa_7702) is the owner's existing account, so it does not consume
-// MaxWalletsPerOwner. A retired legacy-factory wallet is never listed and can
-// never execute, so it does not consume it either.
-func walletCountsTowardOwnerCap(wallet *model.SmartWallet) bool {
-	return wallet != nil && wallet.Address != nil && !wallet.IsEOA7702() && !wallet.Retired
-}
-
 // mockDerivedSenderAddress is the address wallet RPCs use when rpcConn is
 // nil. That is the unit-test and CI signal; a production gateway always has
 // a live rpcConn and never takes this path. GetWallet and SetWallet share
@@ -1441,9 +1217,8 @@ func (n *Engine) loadStoredLegacyWallet(chainID int64, owner, factory common.Add
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 //
-// Wallet records are chain-scoped. The chain context is resolved via
-// ResolveUserChainID — REST callers route by their JWT `aud` chain,
-// gRPC callers fall back to the gateway's default chain.
+// Derived identity and visibility are global. ResolveUserChainID selects only
+// derivation/runtime context; legacy recovery records remain network-scoped.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	return n.GetWalletWithContext(context.Background(), user, payload)
 }
@@ -1453,225 +1228,64 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 // the worker-routed CREATE2 derivation; the worker reader's withTimeout still
 // bounds the call when ctx carries no deadline.
 func (n *Engine) GetWalletWithContext(ctx context.Context, user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	chainID := n.ResolveUserChainID(user)
-	// Resolve the per-chain smart wallet config. In single-chain mode
-	// this returns n.smartWalletConfig (the gateway default); in
-	// gateway/multi-chain mode it returns the config for the JWT-derived
-	// chain. Factory address, RPC URL, and max-wallets-per-owner all
-	// vary per chain — using the gateway default for a non-default chain
-	// would derive against the wrong factory and store the resulting
-	// address under the right chain key, producing inconsistent state.
-	swCfg := n.ResolveSmartWalletConfig(chainID)
-	if swCfg == nil {
-		// Defensive — ResolveSmartWalletConfig falls back to
-		// n.smartWalletConfig, which is only nil in tests with a
-		// half-built Engine.
-		return nil, status.Errorf(codes.Internal, "no smart wallet config for chain %d", chainID)
+	if user == nil {
+		return nil, status.Error(codes.InvalidArgument, "authenticated owner required")
 	}
-
-	// Allow empty factory address (uses default), but validate non-empty ones
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
+		return nil, status.Error(codes.InvalidArgument, InvalidFactoryAddressError)
 	}
-
-	saltBig := defaultSalt
+	salt := new(big.Int).Set(defaultSalt)
 	if payload.GetSalt() != "" {
-		var ok bool
-		saltBig, ok = math.ParseBig256(payload.GetSalt())
-		if !ok {
-			return nil, status.Errorf(codes.InvalidArgument, "%s: %s", InvalidSmartAccountSaltError, payload.GetSalt())
+		parsed, ok := math.ParseBig256(payload.GetSalt())
+		if !ok || parsed.Sign() < 0 {
+			return nil, status.Error(codes.InvalidArgument, InvalidSmartAccountSaltError)
 		}
-		if saltBig.Sign() < 0 {
-			return nil, status.Errorf(codes.InvalidArgument, "%s: must be a non-negative integer, got %s", InvalidSmartAccountSaltError, payload.GetSalt())
-		}
+		salt = parsed
 	}
-
-	factoryAddr := resolveFactoryOverride(payload.GetFactoryAddress())
-
-	if err := n.validateNonZeroAddress(factoryAddr, "GetWallet", user.Address.Hex(), saltBig.String()); err != nil {
+	factory := resolveFactoryOverride(payload.GetFactoryAddress())
+	if err := n.validateNonZeroAddress(factory, "GetWallet", user.Address.Hex(), salt.String()); err != nil {
 		return nil, err
 	}
-
-	var dbModelWallet *model.SmartWallet
-	if factoryAddr != aa.MAv2FactoryAddress() {
-		stored, legacyErr := n.loadStoredLegacyWallet(chainID, user.Address, factoryAddr, saltBig)
-		if legacyErr == badger.ErrKeyNotFound {
-			return nil, status.Errorf(codes.InvalidArgument, "%s (factory %s)", LegacyFactoryWalletError, factoryAddr.Hex())
+	chainID := n.ResolveUserChainID(user)
+	if factory != aa.MAv2FactoryAddress() {
+		stored, err := n.loadStoredLegacyWallet(chainID, user.Address, factory, salt)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, status.Error(codes.InvalidArgument, LegacyFactoryWalletError)
 		}
-		if legacyErr != nil {
-			n.logger.Error("Error fetching legacy wallet from DB for GetWallet", "owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "error", legacyErr)
-			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallet: %v", legacyErr)
+		if err != nil {
+			return nil, err
 		}
-		dbModelWallet = stored
+		return n.walletResponse(stored), nil
 	}
-
-	if dbModelWallet == nil {
-		var derivedSenderAddress *common.Address
-		var err error
-
-		// Wallet derivation is the on-chain source of truth — different
-		// factory deployments produce different initcode and therefore
-		// different CREATE2 addresses for the same (owner, salt). Persisting
-		// a wrong address under the real chain key would permanently corrupt
-		// the (owner, factory, salt) → wallet mapping. So the rules here are:
-		//
-		//  1. In test/CI environments (signalled by the package-level
-		//     `rpcConn == nil` — set by initRPC when the configured RPC URL
-		//     is localhost/mock or when CI dial fails), use a deterministic
-		//     keccak-derived mock. This branch must NEVER fire in prod;
-		//     production gateways always have a working `rpcConn`.
-		//  2. In production, dial the per-chain RPC and derive against the
-		//     real factory. Any failure — missing chain RPC URL, dial error,
-		//     factory call error — is a HARD ERROR. Never fall back to mock.
-		//
-		// Using the package-level `rpcConn` for the test signal (rather than
-		// `swCfg.EthRpcUrl == ""`) matches the legacy gating and avoids a
-		// failure mode where a misconfigured per-chain entry silently
-		// downgrades to mock derivation in production.
-		if rpcConn == nil {
-			n.logger.Debug("GetWallet: test/CI environment (rpcConn nil), using mock derivation",
-				"owner", user.Address.Hex(), "chain_id", chainID, "salt", saltBig.String())
-			mockAddr := mockDerivedSenderAddress(user.Address, factoryAddr, saltBig)
-			derivedSenderAddress = &mockAddr
-		} else if reader := GetChainStateReaderForChain(uint64(chainID)); reader != nil {
-			// Preferred path: derive via the per-chain ChainStateReader. In
-			// gateway mode this is worker-routed, so the gateway issues no
-			// direct chain RPC for wallet derivation; in single-chain mode it's
-			// a direct reader that reuses the existing client (no per-call dial).
-			addr, deriveErr := reader.GetSmartWalletAddress(ctx, user.Address, factoryAddr, saltBig)
-			if deriveErr != nil {
-				n.logger.Error("GetWallet: factory.getAddress() failed (worker-routed)",
-					"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
-					"salt", saltBig.String(), "error", deriveErr)
-				return nil, status.Errorf(codes.Unavailable,
-					"GetWallet: derive sender on chain %d via factory %s: %v",
-					chainID, factoryAddr.Hex(), deriveErr)
-			}
-			derivedSenderAddress = &addr
-		} else {
-			// Fallback: no ChainStateReader registered for this chain (single-
-			// chain startup edge / unconfigured chain). Dial the chain RPC
-			// directly, same as before the worker-routing migration.
-			if swCfg.EthRpcUrl == "" {
-				n.logger.Error("GetWallet: no EthRpcUrl configured for chain — refusing to derive (would risk persisting a mock address under a real chain)",
-					"chain_id", chainID, "owner", user.Address.Hex())
-				return nil, status.Errorf(codes.FailedPrecondition,
-					"GetWallet: no EthRpcUrl configured for chain %d", chainID)
-			}
-			chainRPC, dialErr := ethclient.Dial(swCfg.EthRpcUrl)
-			if dialErr != nil {
-				n.logger.Error("GetWallet: failed to dial chain RPC",
-					"chain_id", chainID, "rpc_url", swCfg.EthRpcUrl, "error", dialErr)
-				return nil, status.Errorf(codes.Unavailable,
-					"GetWallet: cannot reach chain %d RPC: %v", chainID, dialErr)
-			}
-			defer chainRPC.Close()
-			derivedSenderAddress, err = aa.DeriveSenderAddress(chainRPC, user.Address, factoryAddr, saltBig)
-			if err != nil {
-				n.logger.Error("GetWallet: factory.getAddress() failed",
-					"chain_id", chainID, "owner", user.Address.Hex(), "factory", factoryAddr.Hex(),
-					"salt", saltBig.String(), "error", err)
-				return nil, status.Errorf(codes.Unavailable,
-					"GetWallet: derive sender on chain %d via factory %s: %v",
-					chainID, factoryAddr.Hex(), err)
-			}
+	existing, err := walletinventory.BySalt(n.db, user.Address, salt)
+	if err == nil {
+		existing, err = walletinventory.Materialize(n.db, chainID, user.Address, existing.Address.Hex())
+		if err != nil {
+			return nil, err
 		}
-
-		if derivedSenderAddress == nil || *derivedSenderAddress == (common.Address{}) {
-			n.logger.Warn("GetWallet: derived sender address is nil or zero",
-				"owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "salt", saltBig.String(),
-				"chain_id", chainID)
-			return nil, status.Errorf(codes.Internal,
-				"GetWallet: derived sender address is nil or zero (chain %d, factory %s)",
-				chainID, factoryAddr.Hex())
-		}
-
-		dbModelWallet, err = GetWallet(n.db, chainID, user.Address, derivedSenderAddress.Hex())
-
-		if err != nil && err != badger.ErrKeyNotFound {
-			n.logger.Error("Error fetching wallet from DB for GetWallet", "owner", user.Address.Hex(), "wallet", derivedSenderAddress.Hex(), "error", err)
-			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallet: %v", err)
-		}
-
-		if err == badger.ErrKeyNotFound {
-			// Only MA v2 accounts can be created or executed since the EntryPoint
-			// v0.7 cutover. An explicit legacy factory may still READ a wallet that
-			// already has a record (found above), but must not mint a new one: it
-			// would be listed and use up the cap, and the one-off
-			// 20261020-retire-legacy-factory-wallets migration never runs again.
-			if factoryAddr != aa.MAv2FactoryAddress() {
-				return nil, status.Errorf(codes.InvalidArgument, "%s (factory %s)", LegacyFactoryWalletError, factoryAddr.Hex())
-			}
-
-			// Enforce max smart wallet count per owner before creating a new wallet entry.
-			// This check only applies when creating new wallet entries, not accessing existing ones.
-			// Per-chain limit comes from swCfg (resolved above) — chains can configure different
-			// quotas; the gateway-default value would over-permit on quota-tightened chains.
-			{
-				maxAllowed := swCfg.MaxWalletsPerOwner
-				if maxAllowed <= 0 {
-					maxAllowed = config.DefaultMaxWalletsPerOwner
-				}
-				if maxAllowed > config.HardMaxWalletsPerOwner {
-					maxAllowed = config.HardMaxWalletsPerOwner
-				}
-				// Fetch all wallets for this owner and count unique addresses
-				dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(chainID, user.Address))
-				if listErr == nil {
-					unique := make(map[string]struct{})
-					for _, item := range dbItems {
-						storedModelWallet := &model.SmartWallet{}
-						if err := storedModelWallet.FromStorageData(item.Value); err == nil && walletCountsTowardOwnerCap(storedModelWallet) {
-							unique[strings.ToLower(storedModelWallet.Address.Hex())] = struct{}{}
-						}
-					}
-					if len(unique) >= maxAllowed {
-						return nil, status.Errorf(codes.ResourceExhausted, "max smart wallet count reached for owner (limit=%d)", maxAllowed)
-					}
-				}
-			}
-
-			n.logger.Info("Wallet not found in DB for GetWallet, creating new entry", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex())
-			n.markPreviousCanonicalStaleIfAny(chainID, user.Address, factoryAddr, saltBig, *derivedSenderAddress)
-			newModelWallet := &model.SmartWallet{
-				Owner:    &user.Address,
-				Address:  derivedSenderAddress,
-				Factory:  &factoryAddr,
-				Salt:     saltBig,
-				IsHidden: false,
-			}
-			if storeErr := StoreWallet(n.db, chainID, user.Address, newModelWallet); storeErr != nil {
-				n.logger.Error("Error storing new wallet to DB for GetWallet", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex(), "error", storeErr)
-				return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_WRITE_ERROR), "Error storing new wallet: %v", storeErr)
-			}
-			dbModelWallet = newModelWallet
-		}
+		return n.walletResponse(existing), nil
 	}
-
-	resp := &avsproto.GetWalletResp{
-		Address:        dbModelWallet.Address.Hex(),
-		Salt:           dbModelWallet.Salt.String(),
-		FactoryAddress: dbModelWallet.Factory.Hex(),
-		IsHidden:       dbModelWallet.IsHidden,
+	if !errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, err
 	}
-
-	statSvc := NewStatService(n.db)
-	stat, statErr := statSvc.GetTaskCount(dbModelWallet)
-	if statErr != nil {
-		n.logger.Warn("Failed to get task count for GetWallet response", "walletAddress", dbModelWallet.Address.Hex(), "error", statErr)
+	address, err := n.deriveInventoryAddress(ctx, chainID, user.Address, salt)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "derive smart wallet: %v", err)
 	}
-	resp.TotalTaskCount = stat.Total
-	resp.EnabledTaskCount = stat.Enabled
-	resp.CompletedTaskCount = stat.Completed
-	resp.FailedTaskCount = stat.Failed
-	resp.DisabledTaskCount = stat.Disabled
-
-	return resp, nil
+	if address == (common.Address{}) {
+		return nil, status.Error(codes.Internal, "derived smart wallet is zero")
+	}
+	owner := user.Address
+	stored, err := walletinventory.Register(n.db, chainID, owner, &model.SmartWallet{Owner: &owner, Address: &address, Factory: &factory, Salt: salt}, n.WalletInventoryLimit())
+	if err != nil {
+		return nil, inventoryStatus(err)
+	}
+	return n.walletResponse(stored), nil
 }
 
 // GetWalletFromDB retrieves wallet information from database for validation purposes.
-// Looks up the wallet on the gateway's default chain. Multi-chain wallet
-// validation is a follow-up.
+// Global derived identities resolve on the default runtime network; legacy
+// recovery records retain their existing network-specific lookup.
 func (n *Engine) GetWalletFromDB(owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
 	return GetWallet(n.db, n.defaultChainID(), owner, smartWalletAddress)
 }
@@ -1680,95 +1294,32 @@ func (n *Engine) GetWalletFromDB(owner common.Address, smartWalletAddress string
 // It uses the owner (from auth context), salt, and factory_address from payload to identify/derive the wallet.
 // It then sets the IsHidden status for that wallet.
 func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
-	// Allow empty factory address (uses default), but validate non-empty ones
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid factory address format: %s", payload.GetFactoryAddress())
+		return nil, status.Error(codes.InvalidArgument, InvalidFactoryAddressError)
 	}
-
-	saltBig, ok := math.ParseBig256(payload.GetSalt())
-	if !ok {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid salt format: %s", payload.GetSalt())
+	salt, ok := math.ParseBig256(payload.GetSalt())
+	if !ok || salt.Sign() < 0 {
+		return nil, status.Error(codes.InvalidArgument, InvalidSmartAccountSaltError)
 	}
-
-	factoryAddr := resolveFactoryOverride(payload.GetFactoryAddress())
-
-	if err := n.validateNonZeroAddress(factoryAddr, "SetWallet", owner.Hex(), payload.GetSalt()); err != nil {
+	factory := resolveFactoryOverride(payload.GetFactoryAddress())
+	if err := n.validateNonZeroAddress(factory, "SetWallet", owner.Hex(), salt.String()); err != nil {
 		return nil, err
 	}
-
-	var derivedWalletAddress *common.Address
+	var stored *model.SmartWallet
 	var err error
-	if factoryAddr != aa.MAv2FactoryAddress() {
-		// Same index read as GetWallet. Updating the hidden flag of a
-		// stored legacy wallet must not depend on that factory still
-		// answering getAddress.
-		stored, legacyErr := n.loadStoredLegacyWallet(n.defaultChainID(), owner, factoryAddr, saltBig)
-		if legacyErr == badger.ErrKeyNotFound {
-			return nil, status.Errorf(codes.NotFound, "Wallet not found for the specified salt and factory.")
-		}
-		if legacyErr != nil {
-			n.logger.Error("Error fetching legacy wallet from DB for SetWallet", "owner", owner.Hex(), "factory", factoryAddr.Hex(), "error", legacyErr)
-			return nil, status.Errorf(codes.Internal, "Failed to derive wallet address: %v", legacyErr)
-		}
-		derivedWalletAddress = stored.Address
-	} else if rpcConn == nil {
-		// Same test/CI stand-in as GetWallet. DeriveSenderAddress dials
-		// the factory, so a unit test cannot update a record it just stored
-		// unless both calls agree with rpcConn left unset.
-		n.logger.Debug("SetWallet: test/CI environment (rpcConn nil), using mock derivation",
-			"owner", owner.Hex(), "salt", payload.GetSalt(), "factory", factoryAddr.Hex())
-		addr := mockDerivedSenderAddress(owner, factoryAddr, saltBig)
-		derivedWalletAddress = &addr
+	if factory == aa.MAv2FactoryAddress() {
+		stored, err = walletinventory.BySalt(n.db, owner, salt)
 	} else {
-		derivedWalletAddress, err = aa.DeriveSenderAddress(rpcConn, owner, factoryAddr, saltBig)
-		if err != nil {
-			n.logger.Error("Failed to derive wallet address for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress(), "error", err)
-			return nil, status.Errorf(codes.Internal, "Failed to derive wallet address: %v", err)
-		}
+		stored, err = n.loadStoredLegacyWallet(n.defaultChainID(), owner, factory, salt)
 	}
-	if derivedWalletAddress == nil || *derivedWalletAddress == (common.Address{}) {
-		n.logger.Error("Derived wallet address is nil or zero for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress())
-		return nil, status.Errorf(codes.Internal, "Derived wallet address is nil or zero")
-	}
-
-	err = SetWalletHiddenStatus(n.db, n.defaultChainID(), owner, derivedWalletAddress.Hex(), payload.GetIsHidden())
 	if err != nil {
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			n.logger.Warn("Wallet not found for SetWallet", "owner", owner.Hex(), "derivedAddress", derivedWalletAddress.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress())
-			// If wallet doesn't exist, SetWalletHiddenStatus from schema returns a wrapped ErrKeyNotFound.
-			// The SetWallet RPC is for existing wallets identified by salt/factory.
-			// So, if not found by identifiers, it's a NotFound error.
-			return nil, status.Errorf(codes.NotFound, "Wallet not found for the specified salt and factory.")
-		}
-		n.logger.Error("Failed to set wallet hidden status via schema.SetWalletHiddenStatus", "owner", owner.Hex(), "wallet", derivedWalletAddress.Hex(), "isHidden", payload.GetIsHidden(), "error", err)
-		return nil, status.Errorf(codes.Internal, "Failed to update wallet hidden status: %v", err)
+		return nil, inventoryStatus(err)
 	}
-
-	updatedModelWallet, getErr := GetWallet(n.db, n.defaultChainID(), owner, derivedWalletAddress.Hex())
-	if getErr != nil {
-		n.logger.Error("Failed to fetch wallet after SetWallet operation", "owner", owner.Hex(), "wallet", derivedWalletAddress.Hex(), "error", getErr)
-		return nil, status.Errorf(codes.Internal, "Failed to retrieve wallet details after update: %v", getErr)
+	updated, err := n.SetStoredWalletHidden(n.defaultChainID(), owner, stored.Address.Hex(), payload.GetIsHidden())
+	if err != nil {
+		return nil, inventoryStatus(err)
 	}
-
-	resp := &avsproto.GetWalletResp{
-		Address:        updatedModelWallet.Address.Hex(),
-		Salt:           updatedModelWallet.Salt.String(),
-		FactoryAddress: updatedModelWallet.Factory.Hex(),
-		IsHidden:       updatedModelWallet.IsHidden,
-	}
-
-	statSvc := NewStatService(n.db)
-	stat, statErr := statSvc.GetTaskCount(updatedModelWallet)
-	if statErr != nil {
-		n.logger.Warn("Failed to get task count for SetWallet response", "walletAddress", updatedModelWallet.Address.Hex(), "error", statErr)
-	}
-	resp.TotalTaskCount = stat.Total
-	resp.EnabledTaskCount = stat.Enabled
-	resp.CompletedTaskCount = stat.Completed
-	resp.FailedTaskCount = stat.Failed
-	resp.DisabledTaskCount = stat.Disabled
-
-	return resp, nil
+	return n.walletResponse(updated), nil
 }
 
 // resolveEventTriggerTemplates substitutes {{settings.*}} template literals in
