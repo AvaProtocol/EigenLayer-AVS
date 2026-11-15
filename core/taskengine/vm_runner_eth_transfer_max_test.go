@@ -8,10 +8,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -23,6 +25,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 const (
@@ -34,11 +37,16 @@ const (
 // maxTestBalance is the wallet's balance, 0.01 ETH.
 var maxTestBalance = big.NewInt(10_000_000_000_000_000)
 
-// maxTestChainRPC answers the reads a MAX transfer makes: the balance, and
-// the tip and base fee behind the current max fee (1 + 2 × 2 = 5 gwei).
+// maxTestChainRPC answers the reads a MAX transfer makes: the balance, the
+// tip and base fee behind the current max fee (1 + 2 × 2 = 5 gwei), the
+// EntryPoint deposit and the remaining native limit.
 type maxTestChainRPC struct {
 	balance      *big.Int
+	deposit      *big.Int
+	remaining    *big.Int
+	limitFails   bool
 	balanceReads atomic.Int32
+	limitReads   atomic.Int32
 }
 
 func newMaxTestChain(t *testing.T, balance *big.Int) (*maxTestChainRPC, *ethclient.Client, string) {
@@ -46,12 +54,40 @@ func newMaxTestChain(t *testing.T, balance *big.Int) (*maxTestChainRPC, *ethclie
 	chain := &maxTestChainRPC{balance: balance}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		var call struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
+			ID     json.RawMessage   `json:"id"`
+			Method string            `json:"method"`
+			Params []json.RawMessage `json:"params"`
 		}
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&call))
 		var result interface{}
+		var rpcError string
 		switch call.Method {
+		case "eth_getCode":
+			result = "0x"
+		case "eth_call":
+			var message map[string]string
+			require.NoError(t, json.Unmarshal(call.Params[0], &message))
+			data := message["data"]
+			if data == "" {
+				data = message["input"]
+			}
+			switch data[:10] {
+			case hexutil.Encode(crypto.Keccak256([]byte("balanceOf(address)"))[:4]):
+				deposit := chain.deposit
+				if deposit == nil {
+					deposit = big.NewInt(0)
+				}
+				result = hexutil.Encode(common.LeftPadBytes(deposit.Bytes(), 32))
+			case hexutil.Encode(crypto.Keccak256([]byte("limits(uint256,address)"))[:4]):
+				chain.limitReads.Add(1)
+				if chain.limitFails || chain.remaining == nil {
+					rpcError = "limit read failed"
+					break
+				}
+				result = hexutil.Encode(common.LeftPadBytes(chain.remaining.Bytes(), 32))
+			default:
+				t.Errorf("unexpected eth_call selector %s", data[:10])
+			}
 		case "eth_getBalance":
 			chain.balanceReads.Add(1)
 			result = hexutil.EncodeBig(chain.balance)
@@ -63,7 +99,12 @@ func newMaxTestChain(t *testing.T, balance *big.Int) (*maxTestChainRPC, *ethclie
 			t.Errorf("unexpected RPC method %s", call.Method)
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(writer).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": call.ID, "result": result}))
+		response := map[string]interface{}{"jsonrpc": "2.0", "id": call.ID, "result": result}
+		if rpcError != "" {
+			delete(response, "result")
+			response["error"] = map[string]interface{}{"code": -32000, "message": rpcError}
+		}
+		require.NoError(t, json.NewEncoder(writer).Encode(response))
 	}))
 	t.Cleanup(server.Close)
 	client, err := ethclient.Dial(server.URL)
@@ -328,4 +369,140 @@ func TestGrantedNativeLimit(t *testing.T) {
 	require.Equal(t, "9", limit.String(), "the cap the grant installs")
 	_, err = grantedNativeLimit(&model.SessionPolicy{NativeSpendCap: &model.NativeSpendCap{Amount: "not a number"}})
 	require.Error(t, err)
+}
+
+// A retry that lowered the signed gas can leave ETH behind even when the
+// balance set the value; the output says so.
+func TestETHTransferSelfFundedMaxReportsAResidualAfterARetry(t *testing.T) {
+	_, client, url := newMaxTestChain(t, maxTestBalance)
+	stubSends(t, func(*preset.NativeReserve) (*preset.NativeReserveResult, error) {
+		return &preset.NativeReserveResult{
+			Value: big.NewInt(9_000_000_000_000_000), MaxGasCost: big.NewInt(100_000_000_000_000),
+			GasReserve: big.NewInt(100_000_000_000_000), LimitedBy: preset.NativeReserveLimitedByBalance,
+			Left: big.NewInt(900_000_000_000_000),
+		}, nil
+	}, nil)
+	processor, node := newMaxTestProcessor(t, client, selfFundedMaxConfig(url))
+
+	step, err := processor.Execute("send-eth", node)
+	require.NoError(t, err)
+	_, metadata := stepMaps(t, step)
+	require.Equal(t, "900000000000000", metadata["leftInWallet"])
+	require.NotContains(t, metadata, "limitedBy")
+	require.Contains(t, step.Log, "left 900000000000000 wei in the wallet")
+	require.NotContains(t, step.Log, "the most the permission allowed")
+}
+
+// storeMaxTestGrant stores an applied Skill grant for the test wallet that
+// may send ETH to the destination, with a native limit of granted wei.
+func storeMaxTestGrant(t *testing.T, db storage.Storage, granted string) {
+	t.Helper()
+	owner := testutil.TestUser1().Address
+	runner := common.HexToAddress(maxTestWallet)
+	signer := common.HexToAddress("0x82F2Dd9a552a69f2ceD7Ff2D05c43aB8430158FB")
+	recipient := common.HexToAddress(maxTestDestination)
+	require.NoError(t, StoreSessionPolicy(db, &model.SessionPolicy{
+		ID: "01sweepgrant", Owner: &owner, Runner: &runner, ChainID: maxTestChain, EntityID: 3,
+		SessionSigner: &signer, Status: model.SessionPolicyActive,
+		Grant: &model.SessionGrantAuthorization{
+			InstallCall: []byte{0x1b, 0xbf, 0x56, 0x4c, 0x01}, CarrierNonce: big.NewInt(1),
+			Deadline: uint64(time.Now().Add(time.Hour).Unix()), OwnerSignature: make([]byte, 65),
+			AppliedAt: time.Now().UnixMilli(),
+		},
+		NativeRecipients: []*common.Address{&recipient},
+		NativeSpendCap:   &model.NativeSpendCap{Amount: granted, GrantedCap: granted},
+	}))
+}
+
+// Test, strict or with a grant report, estimates a self-funded MAX the way
+// Run sends it: the deposit pays the fee first, and the remaining limit,
+// not the balance plus the fee, bounds the value.
+func TestETHTransferMaxSimulationWithAStoredGrant(t *testing.T) {
+	// An applied grant prices the steady operation: 900,000 gas × 5 gwei.
+	const fee = 4_500_000_000_000_000
+	type expected struct {
+		value, gasReserve, left string
+		limitedBy               string
+		strictCode              string
+		reportMiss              bool
+	}
+	cases := []struct {
+		name                        string
+		balance, deposit, remaining int64
+		granted                     string
+		limitFails                  bool
+		want                        expected
+	}{
+		{
+			// The balance alone is below the fee, but the deposit covers it.
+			name: "deposit covers the fee", balance: 1_000_000_000_000_000, deposit: 10_000_000_000_000_000,
+			remaining: 100_000_000_000_000_000, granted: "100000000000000000",
+			want: expected{value: "1000000000000000", gasReserve: "0"},
+		},
+		{
+			// B + G exceeds the granted cap, which the full-balance preflight
+			// refused; Run sends what the remaining limit allows.
+			name: "permission sets the value", balance: 10_000_000_000_000_000,
+			remaining: 8_000_000_000_000_000, granted: "10000000000000000",
+			want: expected{value: "3500000000000000", gasReserve: "4500000000000000", left: "2000000000000000", limitedBy: preset.NativeReserveLimitedByPermission},
+		},
+		{
+			name: "permission below the fee", balance: 10_000_000_000_000_000,
+			remaining: 1_000_000_000_000_000, granted: "10000000000000000",
+			want: expected{value: "5500000000000000", gasReserve: "4500000000000000", strictCode: preset.NativeCapBelowFeeCode, reportMiss: true},
+		},
+		{
+			name: "limit read fails", balance: 10_000_000_000_000_000, granted: "10000000000000000", limitFails: true,
+			want: expected{strictCode: "remaining native limit"},
+		},
+	}
+	for _, tc := range cases {
+		for _, report := range []bool{false, true} {
+			t.Run(tc.name+map[bool]string{false: "/strict", true: "/report"}[report], func(t *testing.T) {
+				db := testutil.TestMustDB()
+				defer storage.Destroy(db.(*storage.BadgerStorage))
+				storeMaxTestGrant(t, db, tc.granted)
+				chain, client, url := newMaxTestChain(t, big.NewInt(tc.balance))
+				chain.deposit, chain.remaining, chain.limitFails = big.NewInt(tc.deposit), big.NewInt(tc.remaining), tc.limitFails
+				processor, node := newMaxTestProcessor(t, client, selfFundedMaxConfig(url))
+				processor.vm.WithDb(db).SetSimulation(true)
+				if report {
+					processor.vm.sessionGrantReport = &SessionGrantReport{}
+				}
+
+				step, err := processor.Execute("send-eth", node)
+				refused := tc.want.strictCode != "" && (!report || !tc.want.reportMiss)
+				if refused {
+					require.Error(t, err)
+					require.False(t, step.Success)
+					require.Contains(t, step.Error, tc.want.strictCode)
+					return
+				}
+				require.NoError(t, err)
+				require.True(t, step.Success, step.Error)
+				transfer, metadata := stepMaps(t, step)
+				require.Equal(t, tc.want.value, transfer["value"])
+				require.Equal(t, tc.want.gasReserve, metadata["gasReserve"])
+				if tc.want.left == "" {
+					require.NotContains(t, metadata, "leftInWallet")
+				} else {
+					require.Equal(t, tc.want.left, metadata["leftInWallet"])
+				}
+				if tc.want.limitedBy == "" {
+					require.NotContains(t, metadata, "limitedBy")
+				} else {
+					require.Equal(t, tc.want.limitedBy, metadata["limitedBy"])
+				}
+				require.Equal(t, big.NewInt(fee).String(), step.TotalGasCost)
+				if report {
+					_, _, _, _, nativeMiss, nativeDetail, _, nativeSpend, _ := processor.vm.sessionGrantReport.snapshot()
+					require.Equal(t, big.NewInt(tc.balance).String(), nativeSpend.String(), "Review still sizes from the whole balance")
+					require.Equal(t, tc.want.reportMiss, nativeMiss)
+					if tc.want.reportMiss {
+						require.True(t, isNativeCapMessage(nativeDetail), nativeDetail)
+					}
+				}
+			})
+		}
+	}
 }

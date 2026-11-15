@@ -3,14 +3,19 @@ package preset
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -328,5 +333,101 @@ func TestSendNativeReserveRefusesBeforeAnyRPC(t *testing.T) {
 	} {
 		_, _, _, err = SendNativeReserveMAv2(selfFunded, owner, invalid, nil, nil, nil)
 		require.Error(t, err)
+	}
+}
+
+// efficiencyRetryBundler rejects the first eth_sendUserOperation as an
+// inefficient verificationGasLimit (actual/limit 0.1) and accepts the second,
+// recording the operation it accepted.
+func efficiencyRetryBundler(t *testing.T) (*rpc.Client, *int, *map[string]interface{}) {
+	t.Helper()
+	sends := 0
+	accepted := map[string]interface{}{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var call struct {
+			ID     json.RawMessage   `json:"id"`
+			Method string            `json:"method"`
+			Params []json.RawMessage `json:"params"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&call))
+		require.Equal(t, "eth_sendUserOperation", call.Method)
+		sends++
+		response := map[string]interface{}{"jsonrpc": "2.0", "id": call.ID}
+		if sends == 1 {
+			response["error"] = map[string]interface{}{"code": -32602, "message": "Verification gas limit efficiency too low. Required: 0.4, Actual: 0.1"}
+		} else {
+			require.NoError(t, json.Unmarshal(call.Params[0], &accepted))
+			response["result"] = "0x" + strings.Repeat("ab", 32)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(writer).Encode(response))
+	}))
+	t.Cleanup(server.Close)
+	client, err := rpc.Dial(server.URL)
+	require.NoError(t, err)
+	t.Cleanup(client.Close)
+	return client, &sends, &accepted
+}
+
+// The send's efficiency retry lowers verificationGasLimit and re-signs. The
+// reserve then re-sizes the value from the lower maximum gas cost, unless
+// the new calldata would cost more calldata gas than the bytes the bundler
+// priced; either way the result describes the operation as signed.
+func TestNativeReserveSendAfterAnEfficiencyRetry(t *testing.T) {
+	const maxFee = 1_000_000_000
+	// Priced: 1,000 call + 10,000 verification + 1,000 preVerification gas.
+	// The retry tightens verification to 10,000 × 0.1 / 0.75 = 1,333.
+	maxGasBefore := new(big.Int).Mul(big.NewInt(12_000), big.NewInt(maxFee))
+	maxGasAfter := new(big.Int).Mul(big.NewInt(3_333), big.NewInt(maxFee))
+	freed := new(big.Int).Sub(maxGasBefore, maxGasAfter)
+	resized := new(big.Int).Lsh(big.NewInt(1), 63) // 0x80 then seven zero bytes
+	kept := new(big.Int).Lsh(big.NewInt(0xff), 56) // 0xff then seven zero bytes
+	for _, tc := range []struct {
+		name               string
+		balance, wantValue *big.Int
+		wantLeft           *big.Int
+	}{
+		// The re-sized value 2^63 has fewer nonzero bytes than 2^63 − freed.
+		{"re-sizes the value", new(big.Int).Add(resized, maxGasAfter), resized, big.NewInt(0)},
+		// 0xff << 56 plus the freed gas has more nonzero bytes, so the value
+		// stays and the freed gas stays in the wallet.
+		{"keeps the value and reports what stays", new(big.Int).Add(kept, maxGasBefore), kept, freed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, sends, accepted := efficiencyRetryBundler(t)
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			build := wrappedReserveBuild(t)
+			value := new(big.Int).Sub(tc.balance, maxGasBefore)
+			callData, err := build(value)
+			require.NoError(t, err)
+			op := &userop.UserOperationV07{
+				Sender: common.HexToAddress("0x2222222222222222222222222222222222222222"), Nonce: big.NewInt(1),
+				CallData: callData, CallGasLimit: big.NewInt(1_000), VerificationGasLimit: big.NewInt(10_000),
+				PreVerificationGas: big.NewInt(1_000), MaxFeePerGas: big.NewInt(maxFee), MaxPriorityFeePerGas: big.NewInt(1),
+			}
+			chainID := big.NewInt(11155111)
+			require.NoError(t, SignUserOpV07(op, EntryPointV07(), chainID, key))
+			send := &nativeReserveSend{balance: tc.balance, deposit: big.NewInt(0), build: build, value: value}
+
+			_, err = sendUserOpV07(context.Background(), client, op, EntryPointV07(), chainID, key, send.resize)
+			require.NoError(t, err)
+			require.Equal(t, 2, *sends)
+			require.Equal(t, "1333", op.VerificationGasLimit.String())
+
+			acceptedCallData := common.FromHex((*accepted)["callData"].(string))
+			require.Equal(t, op.CallData, acceptedCallData, "the bundler accepted the re-signed operation")
+			_, values, _, err := aa.UnpackExecuteCalldata(acceptedCallData)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantValue.String(), values[0].String())
+
+			result := send.result(op)
+			require.Equal(t, maxGasAfter.String(), result.MaxGasCost.String(), "the result describes the signed operation")
+			require.Equal(t, maxGasAfter.String(), result.GasReserve.String())
+			require.Equal(t, tc.wantValue.String(), result.Value.String())
+			require.Equal(t, tc.wantLeft.String(), result.Left.String())
+			require.Equal(t, NativeReserveLimitedByBalance, result.LimitedBy)
+			require.NoError(t, checkNativeReserveCovered(op, result, tc.balance, big.NewInt(0), nil))
+		})
 	}
 }

@@ -331,6 +331,7 @@ func sendUserOpMAv2(
 	}
 
 	var reserveResult *NativeReserveResult
+	var reserveSend *nativeReserveSend
 	if reserve != nil {
 		deposit, remaining, readErr := readNativeReserveInputs(ctx, chainRPC, reserve, auth, sender)
 		if readErr != nil {
@@ -346,6 +347,7 @@ func sendUserOpMAv2(
 		reserveResult, err = priceSessionNativeReserve(op, reserve, deposit, remaining, build,
 			priceOnceThenEstimate(ctx, chainRPC, bundlerRPC, op, smartWalletConfig, l))
 		if err == nil {
+			reserveSend = &nativeReserveSend{balance: reserve.Balance, deposit: deposit, remaining: remaining, build: build, value: reserveResult.Value}
 			l.Info("native reserve sized",
 				"sender", sender.Hex(), "recipient", reserve.Recipient.Hex(),
 				"balance", reserve.Balance.String(), "deposit", deposit.String(),
@@ -376,7 +378,12 @@ func sendUserOpMAv2(
 		return op, nil, reserveResult, fmt.Errorf("signing user operation: %w", err)
 	}
 
-	opHash, err := SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID, signingKey)
+	// A reserved transfer re-sizes its value if a retry lowers the signed gas.
+	var adjust func(*userop.UserOperationV07) error
+	if reserveSend != nil {
+		adjust = reserveSend.resize
+	}
+	opHash, err := sendUserOpV07(ctx, bundlerRPC, op, entryPoint, chainID, signingKey, adjust)
 	if err != nil && !auth.Deferred() && isInvalidNonceError(err) {
 		// AA25 covers both directions of cache drift — a duplicate (another
 		// operation took this sequence) and a gap (a cached pending operation
@@ -391,9 +398,14 @@ func sendUserOpMAv2(
 				"sender", sender.Hex(), "stale", op.Nonce.String(), "fresh", freshNonce.String())
 			op.Nonce = freshNonce
 			if signErr := SignUserOpV07(op, entryPoint, chainID, signingKey); signErr == nil {
-				opHash, err = SendUserOpV07WithRetry(ctx, bundlerRPC, op, entryPoint, chainID, signingKey)
+				opHash, err = sendUserOpV07(ctx, bundlerRPC, op, entryPoint, chainID, signingKey, adjust)
 			}
 		}
+	}
+	// Report the operation as signed: a retry may have changed its gas and
+	// value since pricing.
+	if reserveSend != nil {
+		reserveResult = reserveSend.result(op)
 	}
 	if err != nil {
 		InvalidateNonce(sender, nonceEntity, nonceOptions)

@@ -104,15 +104,25 @@ operation's maximum gas cost.
 5. **Output.** The step's `value`, transfer object and log report the amount
    actually sent, not the balance. Metadata adds `gasReserve` in wei, so Studio
    can say "minus the network fee". When the permission term set the value, it
-   also adds `limitedBy: "permission"` and `leftInWallet`, the ETH left in the
-   wallet in wei. `NATIVE_BALANCE_BELOW_FEE` carries `INSUFFICIENT_BALANCE`;
-   `NATIVE_CAP_BELOW_FEE` keeps its code in the message, like the other
-   session-policy refusals. Both carry the amounts as error details.
+   also adds `limitedBy: "permission"`. When any ETH stays in the wallet, it
+   adds `leftInWallet` in wei. The result describes the operation as signed,
+   after any bundler retry (Edge cases). `NATIVE_BALANCE_BELOW_FEE` carries
+   `INSUFFICIENT_BALANCE`; `NATIVE_CAP_BELOW_FEE` keeps its code in the
+   message, like the other session-policy refusals. Both carry the amounts as
+   error details.
 6. **Simulation.** The simulation path showed `MAX` as the full balance, with
-   a stand-in fee. A self-funded `MAX` shows the balance minus
-   `nativePreflightGasUnitsSteady` × the current max fee, so Test shows about
-   what Run sends. The grant report still observes the full balance, so
-   Review's sizing (#909) is unchanged.
+   a stand-in fee. A self-funded `MAX` now applies the same rule as the send,
+   so Test shows about what Run sends:
+   - `G` is the gas the preflight prices for this grant (the steady operation
+     once the grant is applied, the install before) at the current max fee.
+   - `D` is the wallet's EntryPoint deposit; a failed read takes 0.
+   - `C` is the remaining limit, or the granted limit while the install is
+     pending; a failed read refuses.
+   - The permission check uses 0 wei, as Run's does. The grant report still
+     observes the full balance, so Review's sizing (#909) is unchanged.
+   - In a grant report, a permission that doesn't cover the fee is noted as a
+     native cap miss, so Review says the cap is too low, and Test shows what
+     the balance allows. A strict simulation refuses, as Run does.
 7. **Wait for earlier operations.** `MAX` reads the balance only after the
    run's earlier operations from the same wallet are included. A token send
    still pending, after a receipt timeout, hasn't paid its prefund yet, so a
@@ -156,9 +166,13 @@ numbers between Review and the ETH step.
   `NATIVE_CAP_BELOW_FEE` after the token sends (above).
 - **Fee rises after pricing:** no shortfall. The signed `maxFeePerGas` caps
   the prefund, and the reserve was computed from it.
-- **Bundler retry:** `SendUserOpV07WithRetry` re-signs only when it tightens
-  the verification gas limit. A lower limit lowers the max cost, so the value
-  stays covered.
+- **Bundler retry:** the send re-signs only when it tightens the verification
+  gas limit after an efficiency rejection. A lower limit lowers `G`, which
+  frees part of the reserve. Before re-signing, the reserve sizes the value
+  again from the new `G`. It keeps the old value only when the new calldata
+  would cost more calldata gas than the bytes the bundler priced
+  `preVerificationGas` for; then the freed gas stays in the wallet and the
+  output reports it as `leftInWallet`. Either way the value stays covered.
 - **L1 data fee on L2s:** the bundler charges it through `preVerificationGas`,
   so the max cost already includes it.
 - **Another operation from the same wallet** between the balance read and

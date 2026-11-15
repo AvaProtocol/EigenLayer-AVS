@@ -299,6 +299,84 @@ func checkNativeReserveCovered(op *userop.UserOperationV07, sized *NativeReserve
 	return nil
 }
 
+// NativeReserveValue is nativeReserveValue for callers that estimate a
+// reserved transfer without sending it, such as a simulation.
+func NativeReserveValue(balance, maxGasCost, deposit, remaining *big.Int) (*NativeReserveResult, error) {
+	if balance == nil || maxGasCost == nil || deposit == nil {
+		return nil, fmt.Errorf("native reserve needs a balance, a gas cost and a deposit")
+	}
+	return nativeReserveValue(balance, maxGasCost, deposit, remaining)
+}
+
+// EntryPointDepositV07 reads the account's EntryPoint v0.7 deposit.
+func EntryPointDepositV07(ctx context.Context, chain aa.ContractCaller, sender common.Address) (*big.Int, error) {
+	if chain == nil {
+		return nil, fmt.Errorf("no chain reader")
+	}
+	return entryPointDeposit(ctx, chain, EntryPointV07(), sender)
+}
+
+// nativeReserveSend carries a sized transfer through signing and sending.
+type nativeReserveSend struct {
+	balance, deposit, remaining *big.Int
+	build                       func(value *big.Int) ([]byte, error)
+	// value is what op.CallData sends.
+	value *big.Int
+}
+
+// resize runs after a send retry has lowered the signed gas and before it
+// re-signs. A lower maximum gas cost frees part of the reserve, so the value
+// is sized again from the new fields. It keeps the old value when the new
+// calldata would cost more calldata gas than the bytes the bundler priced
+// preVerificationGas for; result then reports what stays in the wallet.
+func (s *nativeReserveSend) resize(op *userop.UserOperationV07) error {
+	sized, err := nativeReserveValue(s.balance, MaxOwnerGasCost(op), s.deposit, s.remaining)
+	if err != nil {
+		return err
+	}
+	packed, err := s.build(sized.Value)
+	if err != nil {
+		return err
+	}
+	if calldataGas(packed) <= calldataGas(op.CallData) {
+		op.CallData, s.value = packed, sized.Value
+	}
+	return checkNativeReserveCovered(op, s.result(op), s.balance, s.deposit, s.remaining)
+}
+
+// result describes the operation as signed: its maximum gas cost, the
+// reserve the balance keeps for it, and what the transfer leaves behind.
+func (s *nativeReserveSend) result(op *userop.UserOperationV07) *NativeReserveResult {
+	maxGasCost := MaxOwnerGasCost(op)
+	gasReserve := new(big.Int).Sub(maxGasCost, s.deposit)
+	if gasReserve.Sign() < 0 {
+		gasReserve.SetInt64(0)
+	}
+	byBalance := new(big.Int).Sub(s.balance, gasReserve)
+	limitedBy := NativeReserveLimitedByBalance
+	if s.remaining != nil && new(big.Int).Sub(s.remaining, maxGasCost).Cmp(byBalance) < 0 {
+		limitedBy = NativeReserveLimitedByPermission
+	}
+	return &NativeReserveResult{
+		Value: new(big.Int).Set(s.value), MaxGasCost: maxGasCost, GasReserve: gasReserve,
+		LimitedBy: limitedBy, Left: new(big.Int).Sub(byBalance, s.value),
+	}
+}
+
+// calldataGas is the EIP-2028 calldata cost of data: 4 gas per zero byte,
+// 16 per other byte.
+func calldataGas(data []byte) int {
+	total := 0
+	for _, value := range data {
+		if value == 0 {
+			total += 4
+		} else {
+			total += 16
+		}
+	}
+	return total
+}
+
 func copyBig(value *big.Int) *big.Int {
 	if value == nil {
 		return nil

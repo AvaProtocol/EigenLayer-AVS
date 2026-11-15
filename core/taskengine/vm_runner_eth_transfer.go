@@ -194,7 +194,13 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 
 	if p.vm != nil && p.vm.IsSimulation && p.vm.db != nil {
-		if refusal := p.preflightSessionGrantError(common.HexToAddress(destination), amountWei); refusal != nil {
+		checked := amountWei
+		if isMaxTransfer && !sponsoredFromConfig(p.smartWalletConfig) {
+			// Check what Run checks: the reserve sizes the value. The grant
+			// report still observes the whole balance for Review's sizing.
+			checked = big.NewInt(0)
+		}
+		if refusal := p.preflightNativeSend(common.HexToAddress(destination), amountWei, checked); refusal != nil {
 			err = refusal
 			return executionLog, err
 		}
@@ -242,14 +248,14 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 	gasUsedBig := new(big.Int).SetUint64(nativePreflightGasUnitsSteady)
 	gasPriceBig := new(big.Int).SetUint64(GetDefaultGasPrice(simChainID))
-	reservesGas := isMaxTransfer && !sponsoredFromConfig(p.smartWalletConfig)
-	if reservesGas {
-		// Test shows about what Run sends: the balance minus the steady
-		// operation's gas at the current max fee. Run prices the actual
-		// operation, which can differ.
-		if fee := p.currentMaxFee(); fee != nil {
-			gasPriceBig = fee
+	var estimate *simulatedNativeReserve
+	if isMaxTransfer && !sponsoredFromConfig(p.smartWalletConfig) {
+		// Test shows about what Run sends. Run prices the actual operation,
+		// which can differ.
+		if estimate, err = p.simulateNativeReserve(amountWei, gasPriceBig); err != nil {
+			return executionLog, err
 		}
+		gasUsedBig, gasPriceBig = estimate.units, estimate.fee
 	}
 	totalGasCost := new(big.Int).Mul(gasUsedBig, gasPriceBig)
 	executionLog.GasUsed = gasUsedBig.String()
@@ -263,16 +269,9 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		"gasPrice":        executionLog.GasPrice,
 		"totalGasCost":    executionLog.TotalGasCost,
 	}
-	if reservesGas {
-		value := new(big.Int).Sub(amountWei, totalGasCost)
-		if value.Sign() <= 0 {
-			err = NewStructuredError(avsproto.ErrorCode_INSUFFICIENT_BALANCE, fmt.Sprintf(
-				"%s: the native balance (%s wei) does not cover the estimated network fee (%s wei)",
-				preset.NativeBalanceBelowFeeCode, amountWei, totalGasCost))
-			return executionLog, err
-		}
-		amountStr = value.String()
-		resultObj["gasReserve"] = totalGasCost.String()
+	if estimate != nil {
+		amountStr = estimate.sized.Value.String()
+		addNativeReserveMetadata(resultObj, estimate.sized)
 	}
 
 	// Create output data: only transfer object in data field (matches ERC20 format)
@@ -330,8 +329,8 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 
 	// Create log message
 	logMessage := fmt.Sprintf("Simulated ETH transfer of %s wei to %s (tx: %s)", amountStr, destination, txHash)
-	if reservesGas {
-		logMessage += fmt.Sprintf("; MAX keeps an estimated %s wei for the network fee", totalGasCost)
+	if estimate != nil {
+		logMessage += fmt.Sprintf("; MAX keeps an estimated %s wei for the network fee", estimate.sized.GasReserve)
 	}
 
 	// Use shared function to finalize execution step
@@ -354,6 +353,101 @@ func (p *ETHTransferProcessor) currentMaxFee() *big.Int {
 		return nil
 	}
 	return fee
+}
+
+// simulatedNativeReserve is a simulation's estimate of a self-funded MAX.
+type simulatedNativeReserve struct {
+	units, fee *big.Int
+	sized      *preset.NativeReserveResult
+}
+
+// simulateNativeReserve estimates what Run's reserve send transfers, with the
+// same rule (preset.NativeReserveValue): the gas the preflight prices for this
+// grant at the current max fee (fallbackFee when it cannot be read), the
+// wallet's EntryPoint deposit, and the grant's remaining native limit.
+//
+// In a grant report, a permission that does not cover the step's own fee is
+// noted as a native cap miss, so Review says the cap is too low, and the
+// estimate shows what the balance allows. A strict simulation refuses, as Run
+// does.
+func (p *ETHTransferProcessor) simulateNativeReserve(balance, fallbackFee *big.Int) (*simulatedNativeReserve, error) {
+	policy, _, err := p.sessionPolicy()
+	if err != nil {
+		return nil, err
+	}
+	units := int64(nativePreflightGasUnitsSteady)
+	if policy != nil {
+		units = nativePreflightGasUnitsFor(NativeSend, policy)
+	}
+	fee := p.currentMaxFee()
+	if fee == nil {
+		fee = fallbackFee
+	}
+	maxGasCost := new(big.Int).Mul(big.NewInt(units), fee)
+	ctx, cancel := context.WithTimeout(context.Background(), nativePreflightRPCTimeout)
+	defer cancel()
+	sender := getAASenderAddress(p.vm)
+	// A failed deposit read takes 0, as Run does: it reserves more, never less.
+	deposit := big.NewInt(0)
+	if p.ethClient != nil && sender != nil {
+		if read, readErr := preset.EntryPointDepositV07(ctx, p.ethClient, *sender); readErr == nil {
+			deposit = read
+		}
+	}
+	remaining, err := p.remainingNativeLimit(ctx, policy, sender)
+	if err != nil {
+		return nil, err
+	}
+	sized, err := preset.NativeReserveValue(balance, maxGasCost, deposit, remaining)
+	var refusal *preset.NativeReserveError
+	if errors.As(err, &refusal) && refusal.Code == preset.NativeCapBelowFeeCode && p.vm.sessionGrantReport != nil {
+		p.vm.sessionGrantReport.noteGrantMiss(formatNativeCapBelowFee(maxGasCost, remaining, policy.ID), nil)
+		sized, err = preset.NativeReserveValue(balance, maxGasCost, deposit, nil)
+	}
+	if err != nil {
+		return nil, nativeReserveRefusal(err)
+	}
+	return &simulatedNativeReserve{units: big.NewInt(units), fee: fee, sized: sized}, nil
+}
+
+// remainingNativeLimit is C for a simulation: nil when the grant meters no
+// native value, the granted limit while its install is still pending, and
+// otherwise what is left on chain. A failed read refuses, as Run does.
+func (p *ETHTransferProcessor) remainingNativeLimit(ctx context.Context, policy *model.SessionPolicy, sender *common.Address) (*big.Int, error) {
+	if policy == nil || policy.NativeSpendCap == nil {
+		return nil, nil
+	}
+	if policy.Grant == nil || !policy.Grant.Applied() {
+		return nativeGrantedCap(policy)
+	}
+	if p.ethClient == nil || sender == nil {
+		return nil, fmt.Errorf("reading the remaining native limit: no chain reader")
+	}
+	left, err := aa.ReadNativeSpendLimit(ctx, p.ethClient, policy.EntityID, *sender)
+	if err != nil {
+		return nil, fmt.Errorf("reading the remaining native limit: %w", err)
+	}
+	return left, nil
+}
+
+// formatNativeCapBelowFee is the report's miss for a permission that does not
+// cover a self-funded MAX's own fee. It carries the native cap code, so Review
+// reports the cap as too low.
+func formatNativeCapBelowFee(fee, remaining *big.Int, policyID string) string {
+	return fmt.Sprintf("%s: the permission's remaining ETH limit (%s wei) does not cover this send's network fee (%s wei) — re-grant with a higher cap (policy %s)",
+		SessionPolicyNativeCapExceededCode, remaining, fee, policyID)
+}
+
+// addNativeReserveMetadata reports what a reserved transfer kept for the fee
+// and, when anything stays in the wallet, how much and why.
+func addNativeReserveMetadata(metadata map[string]interface{}, sized *preset.NativeReserveResult) {
+	metadata["gasReserve"] = sized.GasReserve.String()
+	if sized.LimitedBy == preset.NativeReserveLimitedByPermission {
+		metadata["limitedBy"] = sized.LimitedBy
+	}
+	if sized.Left.Sign() > 0 {
+		metadata["leftInWallet"] = sized.Left.String()
+	}
 }
 
 // sessionPolicy returns the active grant for the runner wallet, and whether
@@ -420,11 +514,18 @@ func (p *ETHTransferProcessor) preflightSessionGrant(destination common.Address,
 }
 
 func (p *ETHTransferProcessor) preflightSessionGrantError(destination common.Address, amount *big.Int) error {
+	return p.preflightNativeSend(destination, amount, amount)
+}
+
+// preflightNativeSend checks checked against the grant. A grant report
+// records observed, which can differ: a self-funded MAX checks 0 wei, since
+// the send sizes its value, while Review sizes the cap from the whole balance.
+func (p *ETHTransferProcessor) preflightNativeSend(destination common.Address, observed, amount *big.Int) error {
 	if p == nil || p.smartWalletConfig == nil {
 		return nil
 	}
 	if p.vm != nil && p.vm.db != nil && p.taskOwner != nil && p.vm.sessionGrantReport != nil && getAASenderAddress(p.vm) != nil {
-		p.vm.sessionGrantReport.observeNative(destination, amount)
+		p.vm.sessionGrantReport.observeNative(destination, observed)
 	}
 	policy, lookedUp, err := p.sessionPolicy()
 	if err != nil {
@@ -639,11 +740,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// What the reserve kept for the fee, so Studio can say "minus the network
 	// fee", and, when the permission set the value, the ETH it left behind.
 	if sized != nil {
-		resultObj["gasReserve"] = sized.GasReserve.String()
-		if sized.LimitedBy == preset.NativeReserveLimitedByPermission {
-			resultObj["limitedBy"] = sized.LimitedBy
-			resultObj["leftInWallet"] = sized.Left.String()
-		}
+		addNativeReserveMetadata(resultObj, sized)
 	}
 
 	// If SendUserOp returned without a receipt (timed out), mark as pending
@@ -744,8 +841,11 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	logMessage := fmt.Sprintf("Real ETH transfer of %s wei to %s (tx: %s)", amountStr, destination, txHash)
 	if sized != nil {
 		logMessage += fmt.Sprintf("; MAX kept %s wei for the network fee", sized.GasReserve)
-		if sized.LimitedBy == preset.NativeReserveLimitedByPermission {
-			logMessage += fmt.Sprintf(" and left %s wei in the wallet, the most the permission allowed", sized.Left)
+		if sized.Left.Sign() > 0 {
+			logMessage += fmt.Sprintf(" and left %s wei in the wallet", sized.Left)
+			if sized.LimitedBy == preset.NativeReserveLimitedByPermission {
+				logMessage += ", the most the permission allowed"
+			}
 		}
 	}
 
