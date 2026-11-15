@@ -84,6 +84,31 @@ func SendUserOpAuto(
 	return sent, receipt, nil
 }
 
+// SendNativeReserveAuto is SendUserOpAuto for a self-funded native transfer
+// whose value the send sizes while pricing (SendNativeReserveMAv2). The result
+// reports what was sent; it is nil when the send refused before sizing.
+func SendNativeReserveAuto(
+	smartWalletConfig *config.SmartWalletConfig,
+	owner common.Address,
+	reserve *NativeReserve,
+	senderOverride *common.Address,
+	saltOverride *big.Int,
+	lgr logger.Logger,
+) (*SentUserOp, *types.Receipt, *NativeReserveResult, error) {
+	if smartWalletConfig == nil {
+		return nil, nil, nil, fmt.Errorf("nil smart wallet config")
+	}
+	op, receipt, result, err := SendNativeReserveMAv2(smartWalletConfig, owner, reserve, senderOverride, saltOverride, lgr)
+	sent, convErr := sentFromV07(op, big.NewInt(smartWalletConfig.ChainID))
+	if err != nil {
+		return sent, receipt, result, err
+	}
+	if convErr != nil {
+		return nil, receipt, result, convErr
+	}
+	return sent, receipt, result, nil
+}
+
 // sentFromV07 converts a v0.7 operation. It returns (nil, nil) for a nil
 // operation so a failed send that never built one is not an error here.
 func sentFromV07(op *userop.UserOperationV07, chainID *big.Int) (*SentUserOp, error) {

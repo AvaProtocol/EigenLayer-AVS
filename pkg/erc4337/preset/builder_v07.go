@@ -422,16 +422,20 @@ func decodeHexBytes(s string) ([]byte, error) {
 // caller's key is needed for the retry; without it the error is returned
 // unchanged.
 func SendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address) (common.Hash, error) {
-	return sendUserOpV07(ctx, client, op, entryPoint, nil, nil)
+	return sendUserOpV07(ctx, client, op, entryPoint, nil, nil, nil)
 }
 
 // SendUserOpV07WithRetry is SendUserOpV07 with the material needed to re-sign
 // after tightening the verification gas limit.
 func SendUserOpV07WithRetry(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address, chainID *big.Int, key *ecdsa.PrivateKey) (common.Hash, error) {
-	return sendUserOpV07(ctx, client, op, entryPoint, chainID, key)
+	return sendUserOpV07(ctx, client, op, entryPoint, chainID, key, nil)
 }
 
-func sendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address, chainID *big.Int, key *ecdsa.PrivateKey) (common.Hash, error) {
+// sendUserOpV07 is SendUserOpV07WithRetry with an optional adjust, called
+// after the retry has changed the gas fields and before it re-signs, for an
+// operation whose calldata depends on them (a native reserve sizes its value
+// from the maximum gas cost).
+func sendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address, chainID *big.Int, key *ecdsa.PrivateKey, adjust func(*userop.UserOperationV07) error) (common.Hash, error) {
 	if client == nil {
 		return common.Hash{}, fmt.Errorf("nil bundler client")
 	}
@@ -460,6 +464,11 @@ func sendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOpera
 		return common.Hash{}, err
 	}
 	op.VerificationGasLimit = tightened
+	if adjust != nil {
+		if adjustErr := adjust(op); adjustErr != nil {
+			return common.Hash{}, fmt.Errorf("adjusting the operation after tightening verificationGasLimit to %s: %w", tightened, adjustErr)
+		}
+	}
 	if signErr := SignUserOpV07(op, entryPoint, chainID, key); signErr != nil {
 		return common.Hash{}, fmt.Errorf("re-signing after tightening verificationGasLimit to %s: %w", tightened, signErr)
 	}
