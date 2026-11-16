@@ -25,6 +25,13 @@ func Migrate(db storage.Storage) (int, error) {
 	highest := map[common.Address]*big.Int{}
 	for _, row := range rows {
 		parts := strings.Split(string(row.Key), ":")
+		// Pre-chain wallet records share the prefix but are no longer read by
+		// the runtime. Preserve them for recovery without importing their
+		// identities or salt history. Check the key before decoding its value.
+		if len(parts) == 3 && common.IsHexAddress(parts[1]) && common.IsHexAddress(parts[2]) {
+			log.Printf("global-wallet-inventory: skipped legacy unscoped wallet key=%s", row.Key)
+			continue
+		}
 		if len(parts) != 4 || !common.IsHexAddress(parts[2]) || !common.IsHexAddress(parts[3]) {
 			return 0, fmt.Errorf("invalid wallet runtime key %q", row.Key)
 		}
