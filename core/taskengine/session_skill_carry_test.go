@@ -128,7 +128,11 @@ func TestCarryDropsAZeroRemainderAndGivesTheScheduleBack(t *testing.T) {
 }
 
 func TestCarryKeepsARouterWhenTheTokenIsSpent(t *testing.T) {
-	now := skillNow()
+	// Anchored to the wall clock rather than the fixed skillNow() fixture:
+	// Validate and HooksFor below compare validUntil against time.Now(), and
+	// skillNow()+40d expired on 2026-11-10, which turned this test into a time
+	// bomb. Nothing here depends on the absolute date.
+	now := time.Now()
 	usdc := common.HexToAddress(skillUSDC)
 	dest := common.HexToAddress("0x00000000000000000000000000000000000000b1")
 	current := usableGrant("01SWAP", now.Add(30*24*time.Hour).UnixMilli(),

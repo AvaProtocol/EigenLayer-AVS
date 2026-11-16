@@ -74,10 +74,10 @@ func newWalletRig(t *testing.T) *walletTestRig {
 	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
 	onDefault := common.HexToAddress("0x00000000000000000000000000000000000000d1")
 	onOther := common.HexToAddress("0x00000000000000000000000000000000000000e1")
-	require.NoError(t, taskengine.StoreWallet(db, walletTestChain, owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, walletTestChain, owner, &model.SmartWallet{
 		Owner: &owner, Address: &onDefault, Factory: &factory, Salt: big.NewInt(100),
 	}))
-	require.NoError(t, taskengine.StoreWallet(db, walletOtherChain, owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, walletOtherChain, owner, &model.SmartWallet{
 		Owner: &owner, Address: &onOther, Factory: &factory, Salt: big.NewInt(200),
 	}))
 
@@ -124,28 +124,28 @@ func TestListWalletsUsesQueryChainIdOverJwtAud(t *testing.T) {
 	// No query: the JWT aud decides, so this is the aud chain's listing.
 	byAud := rig.list(t, walletTestChain, nil)
 	require.True(t, byAud[onDefault], "the aud chain's wallet must be listed")
-	require.False(t, byAud[onOther], "another chain's wallet must not leak in")
+	require.True(t, byAud[onOther], "global identities are visible across network contexts")
 
 	// The query overrides the aud — the Studio exit case: one token, both
 	// chains, no second signature.
 	other := walletOtherChain
 	byQuery := rig.list(t, walletTestChain, &other)
 	require.True(t, byQuery[onOther], "?chainId must reach the named chain's wallets")
-	require.False(t, byQuery[onDefault], "?chainId must not also return the aud chain's wallets")
+	require.True(t, byQuery[onDefault], "network hints do not filter global identity membership")
 
 	// And it works in the other direction, so the query is genuinely
 	// deciding rather than the aud happening to agree.
 	def := walletTestChain
 	backAgain := rig.list(t, walletOtherChain, &def)
 	require.True(t, backAgain[onDefault])
-	require.False(t, backAgain[onOther])
+	require.True(t, backAgain[onOther])
 }
 
 func TestUpdateWalletHidesEOA7702NotSaltZeroDerived(t *testing.T) {
 	rig := newWalletRig(t)
 	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
 	saltZero := common.HexToAddress("0x00000000000000000000000000000000000000aa")
-	require.NoError(t, taskengine.StoreWallet(rig.db, walletTestChain, rig.owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(rig.db, walletTestChain, rig.owner, &model.SmartWallet{
 		Owner: &rig.owner, Address: &saltZero, Factory: &factory, Salt: big.NewInt(0),
 	}))
 	require.NoError(t, taskengine.StoreEOA7702Wallet(rig.db, walletTestChain, rig.owner, config.SMA7702Delegate()))
@@ -272,12 +272,14 @@ func TestGetWalletNonceChecksOwnershipOnTheReadChain(t *testing.T) {
 	_, err = rig.getNonce(t, rig.onOther, walletOtherChain, nil)
 	require.NoError(t, err)
 
-	// A default-chain record does not open another chain's nonce.
+	// Global ownership opens either identity on the explicitly selected
+	// operation network; the nonce still comes from that network's reader.
 	_, err = rig.getNonce(t, rig.onDefault, walletTestChain, &other)
-	requireWalletNotFound(t, err)
-
-	// Nor the reverse.
+	require.NoError(t, err)
 	_, err = rig.getNonce(t, rig.onOther, walletOtherChain, &def)
+	require.NoError(t, err)
+	unknown := common.HexToAddress("0x9999999999999999999999999999999999999999")
+	_, err = rig.getNonce(t, unknown, walletTestChain, &other)
 	requireWalletNotFound(t, err)
 }
 
@@ -298,9 +300,9 @@ func TestGetWalletNonceUnconfiguredChainUsesDefault(t *testing.T) {
 	_, err = rig.getNonce(t, rig.onDefault, unconfigured, nil)
 	require.NoError(t, err)
 
-	// The default chain holds no record of the other chain's wallet.
+	// The global identity can be materialized on the resolved default network.
 	_, err = rig.getNonce(t, rig.onOther, walletTestChain, &unconfigured)
-	requireWalletNotFound(t, err)
+	require.NoError(t, err)
 }
 
 // A delegated recipient's refusal keeps its own code on withdraw, and a code

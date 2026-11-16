@@ -376,6 +376,11 @@ const (
 	WalletBudgetStatusPending WalletBudgetStatus = "pending"
 )
 
+// Defines values for WalletUsageScope.
+const (
+	Owner WalletUsageScope = "owner"
+)
+
 // Defines values for WithdrawResponseStatus.
 const (
 	Confirmed WithdrawResponseStatus = "confirmed"
@@ -398,6 +403,17 @@ const (
 	WorkflowStatusFailed    WorkflowStatus = "failed"
 	WorkflowStatusRunning   WorkflowStatus = "running"
 )
+
+// AllocateWalletRequest defines model for AllocateWalletRequest.
+type AllocateWalletRequest struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId *ChainId `json:"chainId,omitempty"`
+
+	// DeploymentProfile Optional derivation profile. Defaults to the pinned semi-modular MA v2 profile.
+	DeploymentProfile *string `json:"deploymentProfile,omitempty"`
+}
 
 // AllowedAction One contract the agent may call, scoped to selectors.
 type AllowedAction struct {
@@ -2792,9 +2808,12 @@ type Wallet struct {
 	CompletedWorkflowCount *int64          `json:"completedWorkflowCount,omitempty"`
 
 	// Delegate Lowercase or checksummed hex EOA / contract address.
-	Delegate              *EthereumAddress `json:"delegate,omitempty"`
-	DisabledWorkflowCount *int64           `json:"disabledWorkflowCount,omitempty"`
-	EnabledWorkflowCount  *int64           `json:"enabledWorkflowCount,omitempty"`
+	Delegate *EthereumAddress `json:"delegate,omitempty"`
+
+	// DeploymentProfile Pinned MA v2 derivation profile, independent of network runtime state.
+	DeploymentProfile     *string `json:"deploymentProfile,omitempty"`
+	DisabledWorkflowCount *int64  `json:"disabledWorkflowCount,omitempty"`
+	EnabledWorkflowCount  *int64  `json:"enabledWorkflowCount,omitempty"`
 
 	// FactoryAddress Lowercase or checksummed hex EOA / contract address.
 	FactoryAddress      *EthereumAddress `json:"factoryAddress,omitempty"`
@@ -2809,6 +2828,9 @@ type Wallet struct {
 	// `kind: eoa_7702` (no factory, no salt).
 	Salt               string `json:"salt"`
 	TotalWorkflowCount *int64 `json:"totalWorkflowCount,omitempty"`
+
+	// WalletId Stable global derived-wallet identity, shared across supported networks.
+	WalletId *string `json:"walletId,omitempty"`
 }
 
 // WalletKind Empty/omitted for derived CREATE2 wallets. `eoa_7702` is the owner's
@@ -2875,8 +2897,22 @@ type WalletBudgetInput struct {
 
 // WalletList defines model for WalletList.
 type WalletList struct {
-	Data []Wallet `json:"data"`
+	Data  []Wallet     `json:"data"`
+	Usage *WalletUsage `json:"usage,omitempty"`
 }
+
+// WalletUsage defines model for WalletUsage.
+type WalletUsage struct {
+	ActiveCount int `json:"activeCount"`
+	ActiveLimit int `json:"activeLimit"`
+
+	// Revision Monotonic owner inventory revision as a decimal integer string.
+	Revision string           `json:"revision"`
+	Scope    WalletUsageScope `json:"scope"`
+}
+
+// WalletUsageScope defines model for WalletUsage.Scope.
+type WalletUsageScope string
 
 // WithdrawRequest defines model for WithdrawRequest.
 type WithdrawRequest struct {
@@ -3212,6 +3248,12 @@ type GetWalletNonceParams struct {
 	ChainId *ChainIdQuery `form:"chainId,omitempty" json:"chainId,omitempty"`
 }
 
+// AllocateWalletParams defines parameters for AllocateWallet.
+type AllocateWalletParams struct {
+	// IdempotencyKey A stable creation key of 1 to 256 printable ASCII characters without spaces. Reuse the exact key on retries.
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListWorkflowsParams defines parameters for ListWorkflows.
 type ListWorkflowsParams struct {
 	// SmartWalletAddress Filter by smart wallet address. Repeat to OR multiple addresses.
@@ -3289,6 +3331,9 @@ type SubmitWalletPolicyJSONRequestBody = SubmitPolicyRequest
 
 // WithdrawWalletJSONRequestBody defines body for WithdrawWallet for application/json ContentType.
 type WithdrawWalletJSONRequestBody = WithdrawRequest
+
+// AllocateWalletJSONRequestBody defines body for AllocateWallet for application/json ContentType.
+type AllocateWalletJSONRequestBody = AllocateWalletRequest
 
 // CreateWorkflowJSONRequestBody defines body for CreateWorkflow for application/json ContentType.
 type CreateWorkflowJSONRequestBody = CreateWorkflowRequest

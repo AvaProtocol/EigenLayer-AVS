@@ -65,6 +65,48 @@ func (v *VM) failedWritePrerequisite(nodeID string) *avsproto.Execution_Step {
 	return nil
 }
 
+// unresolvedEarlierWrite returns a logged write on chain whose operation may
+// still be pending, after reconciling each such write once. A MAX transfer
+// reads the wallet's balance, and a pending operation has not paid its
+// prefund or moved its value yet, so a balance read before it is included
+// would overstate what the wallet can send. reconciledWritePrerequisite
+// already holds a write behind its graph ancestors; this also covers earlier
+// writes on other paths. A chain of 0 on either side matches every chain.
+func (v *VM) unresolvedEarlierWrite(chain int64) *avsproto.Execution_Step {
+	checked := map[string]bool{}
+	for {
+		pending := v.firstUnresolvedWrite(chain)
+		if pending == nil || checked[pending.Id] || v.IsSimulation {
+			return pending
+		}
+		checked[pending.Id] = true
+		v.reconcileLoggedWriteOnce(pending.Id)
+		// Scan the canonical logs again: the lookup may have resolved it.
+	}
+}
+
+func (v *VM) firstUnresolvedWrite(chain int64) *avsproto.Execution_Step {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for _, step := range v.ExecutionLogs {
+		if step == nil {
+			continue
+		}
+		node := v.TaskNodes[step.Id]
+		if !isWorkflowWrite(node) {
+			continue
+		}
+		if stepChain := workflowWriteChainID(node); chain > 0 && stepChain > 0 && stepChain != chain {
+			continue
+		}
+		if shouldWaitForContractWriteConfirmation(step, false) || pendingETHTransfer(step) ||
+			step.ErrorCode == avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED {
+			return proto.Clone(step).(*avsproto.Execution_Step)
+		}
+	}
+	return nil
+}
+
 func pendingETHTransfer(step *avsproto.Execution_Step) bool {
 	if step.GetEthTransfer() == nil || step.Metadata == nil {
 		return false

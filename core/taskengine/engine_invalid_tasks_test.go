@@ -143,7 +143,7 @@ func TestCreateWorkflowRejectsRetiredWallet(t *testing.T) {
 	user := testutil.TestUser1()
 	addr := *user.SmartAccountAddress
 	factory := common.HexToAddress("0xB99BC2E399e06CddCF5E725c0ea341E8f0322834")
-	require.NoError(t, StoreWallet(db, n.defaultChainID(), user.Address, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, n.defaultChainID(), user.Address, &model.SmartWallet{
 		Owner: &user.Address, Address: &addr, Factory: &factory, Salt: big.NewInt(0),
 		IsHidden: true, Retired: true,
 	}))
@@ -155,7 +155,7 @@ func TestCreateWorkflowRejectsRetiredWallet(t *testing.T) {
 	live, err := GetWallet(db, n.defaultChainID(), user.Address, addr.Hex())
 	require.NoError(t, err)
 	live.Retired = false
-	require.NoError(t, StoreWallet(db, n.defaultChainID(), user.Address, live))
+	require.NoError(t, storeWalletFixture(db, n.defaultChainID(), user.Address, live))
 	_, err = n.CreateWorkflow(user, testutil.RestTask())
 	require.NoError(t, err, "a wallet that is not retired can still run a new workflow")
 }

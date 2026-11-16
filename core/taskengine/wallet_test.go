@@ -167,7 +167,7 @@ func TestGetWalletRefusesNewLegacyFactoryWallets(t *testing.T) {
 	salt, ok := new(big.Int).SetString(saltValue, 10)
 	require.True(t, ok)
 	derived := mockDerivedSenderAddress(u.Address, factory, salt)
-	require.NoError(t, StoreWallet(db, chainID, u.Address, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, chainID, u.Address, &model.SmartWallet{
 		Owner: &u.Address, Address: &derived, Factory: &factory, Salt: salt, IsHidden: true, Retired: true,
 	}))
 
@@ -231,7 +231,7 @@ func TestLegacyFactoryRejectsBeforeDerivation(t *testing.T) {
 
 	salt := big.NewInt(4)
 	addr := common.HexToAddress("0x0000000000000000000000000000000000000A11")
-	require.NoError(t, StoreWallet(db, chainID, u.Address, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, chainID, u.Address, &model.SmartWallet{
 		Owner: &u.Address, Address: &addr, Factory: &legacyFactory, Salt: salt, IsHidden: true, Retired: true,
 	}))
 
@@ -277,7 +277,7 @@ func TestRetiredLegacyWalletDoesNotBlockMAv2OnItsChain(t *testing.T) {
 	legacyFactory := common.HexToAddress("0x9406Cc6185a346906296840746125a0E44976454")
 	legacySalt := big.NewInt(7)
 	legacyAddr := mockDerivedSenderAddress(owner, legacyFactory, legacySalt)
-	require.NoError(t, StoreWallet(db, chainA, owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, chainA, owner, &model.SmartWallet{
 		Owner: &owner, Address: &legacyAddr, Factory: &legacyFactory, Salt: legacySalt,
 		IsHidden: true, Retired: true,
 	}))
@@ -289,8 +289,9 @@ func TestRetiredLegacyWalletDoesNotBlockMAv2OnItsChain(t *testing.T) {
 	storedNew, err := GetWallet(db, chainA, owner, resp.Address)
 	require.NoError(t, err)
 	assert.False(t, storedNew.Retired)
-	_, err = GetWallet(db, chainB, owner, resp.Address)
-	require.ErrorIs(t, err, badger.ErrKeyNotFound)
+	otherStored, err := GetWallet(db, chainB, owner, resp.Address)
+	require.NoError(t, err)
+	require.Equal(t, storedNew.WalletID, otherStored.WalletID)
 
 	userB := &model.User{Address: owner, ChainID: chainB}
 	_, err = n.GetWallet(userB, &avsproto.GetWalletReq{Salt: "1", FactoryAddress: legacyFactory.Hex()})
@@ -300,7 +301,7 @@ func TestRetiredLegacyWalletDoesNotBlockMAv2OnItsChain(t *testing.T) {
 	if err != nil {
 		require.ErrorIs(t, err, badger.ErrKeyNotFound)
 	}
-	assert.Empty(t, items)
+	require.Len(t, items, 1, "materializing a global identity creates its local runtime projection")
 
 	storedLegacy, err := GetWallet(db, chainA, owner, legacyAddr.Hex())
 	require.NoError(t, err)

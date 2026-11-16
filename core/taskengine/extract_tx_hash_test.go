@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"reflect"
 	"testing"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -63,56 +64,59 @@ func TestExtractTxHashFromMetadata(t *testing.T) {
 	}
 }
 
-func TestExtractTxHashFromFlatMetadata(t *testing.T) {
+func TestEthIterationMetadata(t *testing.T) {
+	const hash = "0xabc123def4560000000000000000000000000000000000000000000000000001"
 	tests := []struct {
 		name     string
 		metadata *structpb.Value
-		want     string
+		want     map[string]interface{}
 	}{
+		{name: "nil metadata", metadata: nil, want: map[string]interface{}{}},
+		{name: "null value", metadata: structpb.NewNullValue(), want: map[string]interface{}{}},
+		{name: "empty object", metadata: mustNewValue(t, map[string]any{}), want: map[string]interface{}{}},
 		{
-			name:     "nil metadata",
-			metadata: nil,
-			want:     "",
+			name:     "transactionHash only",
+			metadata: mustNewValue(t, map[string]any{"transactionHash": hash}),
+			want:     map[string]interface{}{"transactionHash": hash},
 		},
 		{
-			name: "valid transactionHash",
+			name: "gas figures stay on the step",
 			metadata: mustNewValue(t, map[string]any{
-				"transactionHash": "0xabc123def4560000000000000000000000000000000000000000000000000001",
+				"transactionHash": hash,
+				"gasUsed":         "21000",
+				"gasPrice":        "1000000000",
+				"totalGasCost":    "21000000000000",
 			}),
-			want: "0xabc123def4560000000000000000000000000000000000000000000000000001",
+			want: map[string]interface{}{"transactionHash": hash},
 		},
 		{
-			name: "with extra fields like gasUsed",
+			name: "a self-funded MAX's reserve fields",
 			metadata: mustNewValue(t, map[string]any{
-				"transactionHash": "0xdef456abc1230000000000000000000000000000000000000000000000000002",
-				"gasUsed":         "0x5208",
-				"gasPrice":        "0x3b9aca00",
+				"transactionHash": hash,
+				"gasUsed":         "100000",
+				"gasReserve":      "400000000000000",
+				"limitedBy":       "permission",
+				"leftInWallet":    "600000000000000",
 			}),
-			want: "0xdef456abc1230000000000000000000000000000000000000000000000000002",
-		},
-		{
-			name:     "empty object",
-			metadata: mustNewValue(t, map[string]any{}),
-			want:     "",
-		},
-		{
-			name:     "null value",
-			metadata: structpb.NewNullValue(),
-			want:     "",
+			want: map[string]interface{}{
+				"transactionHash": hash,
+				"gasReserve":      "400000000000000",
+				"limitedBy":       "permission",
+				"leftInWallet":    "600000000000000",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractTxHashFromFlatMetadata(tt.metadata)
-			if got != tt.want {
-				t.Errorf("extractTxHashFromFlatMetadata() = %q, want %q", got, tt.want)
+			if got := ethIterationMetadata(tt.metadata); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ethIterationMetadata() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestWrapResultWithTxHash(t *testing.T) {
+func TestWrapResultWithMetadataTxHash(t *testing.T) {
 	tests := []struct {
 		name       string
 		resultData interface{}
@@ -155,7 +159,7 @@ func TestWrapResultWithTxHash(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := wrapResultWithTxHash(tt.resultData, tt.txHash)
+			got := wrapResultWithMetadata(tt.resultData, tt.txHash, "")
 			if tt.wantNil {
 				if got != nil {
 					t.Errorf("expected nil, got %v", got)

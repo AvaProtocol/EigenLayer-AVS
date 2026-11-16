@@ -161,7 +161,7 @@ func TestUserOpAtomicBatch_Sepolia(t *testing.T) {
 
 	user := &model.User{Address: ownerAddress, SmartAccountAddress: smartWalletAddress}
 	// Chain-scoped wallet key must match the grant's chain (Sepolia).
-	require.NoError(t, StoreWallet(db, sepoliaChainID, ownerAddress, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, sepoliaChainID, ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
 		Salt:    big.NewInt(fixtureSaltBatchSwap),

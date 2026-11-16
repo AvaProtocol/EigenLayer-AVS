@@ -1,7 +1,6 @@
 package preset
 
 import (
-	"bytes"
 	"fmt"
 	"math/big"
 
@@ -77,10 +76,10 @@ func (b OwnerBatch) Resolve(op *userop.UserOperationV07) ([]aa.Call, error) {
 	return calls, nil
 }
 
-// All rounds finish BEFORE a signature is requested. Self-funded ceilings only
-// increase, so calldata-byte changes cannot make the reserve oscillate. A
-// changing estimate that fails to converge is refused, never guessed. Sponsored
-// calls use the full captured cap and are priced once, with final calldata.
+// Sponsored calls use the full captured cap and are priced once, with final
+// calldata. Self-funded calls size the terminal transfer through the shared
+// reserve loop (convergeNativeReserve), from Resolve's rule: the cap minus the
+// whole maximum gas cost.
 func priceOwnerBatch(b OwnerBatch, op *userop.UserOperationV07, sponsored bool, price func() error) error {
 	if !b.ReserveNativeGas || sponsored {
 		packed, err := aa.PackExecuteBatchMAv2(b.Calls)
@@ -90,47 +89,11 @@ func priceOwnerBatch(b OwnerBatch, op *userop.UserOperationV07, sponsored bool, 
 		op.CallData = packed
 		return price()
 	}
-	if err := price(); err != nil {
-		return err
-	}
-	for round := 0; round < 8; round++ {
-		calls, err := b.Resolve(op)
+	return convergeNativeReserve(op, func(priced *userop.UserOperationV07) ([]byte, error) {
+		calls, err := b.Resolve(priced)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		packed, err := aa.PackExecuteBatchMAv2(calls)
-		if err != nil {
-			return err
-		}
-		if bytes.Equal(packed, op.CallData) {
-			return nil
-		}
-		previous := ownerPricingCeilings(op)
-		op.CallData = packed
-		op.CallGasLimit, op.VerificationGasLimit, op.PreVerificationGas = new(big.Int), new(big.Int), new(big.Int)
-		if err := price(); err != nil {
-			return err
-		}
-		if op.Paymaster != nil {
-			return fmt.Errorf("owner gas funding changed while pricing")
-		}
-		current := ownerPricingCeilings(op)
-		for i := range current {
-			if current[i].Cmp(previous[i]) < 0 {
-				current[i] = previous[i]
-			}
-		}
-		op.CallGasLimit, op.VerificationGasLimit, op.PreVerificationGas = current[0], current[1], current[2]
-		op.MaxFeePerGas, op.MaxPriorityFeePerGas = current[3], current[4]
-	}
-	return fmt.Errorf("native fee reserve did not converge; prepare again")
-}
-
-// Own both snapshots: an estimator may reuse or mutate its big.Int pointers.
-func ownerPricingCeilings(op *userop.UserOperationV07) [5]*big.Int {
-	return [5]*big.Int{
-		new(big.Int).Set(op.CallGasLimit), new(big.Int).Set(op.VerificationGasLimit),
-		new(big.Int).Set(op.PreVerificationGas), new(big.Int).Set(op.MaxFeePerGas),
-		new(big.Int).Set(op.MaxPriorityFeePerGas),
-	}
+		return aa.PackExecuteBatchMAv2(calls)
+	}, price)
 }

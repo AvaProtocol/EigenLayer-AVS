@@ -171,7 +171,7 @@ func TestExecutor_FailClosed_OffchainTaskDoesNotFailClosed(t *testing.T) {
 	owner := common.HexToAddress("0xd7050816337a3f8f690f8083b5ff8019d50c0e50")
 	smartWalletAddr := "0x415f09526f25d6520d471890abf0953b0505313d"
 	walletAddr := common.HexToAddress(smartWalletAddr)
-	StoreWallet(executor.db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
+	storeWalletFixture(executor.db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
 
 	task := manualCustomCodeTask(owner.Hex(), smartWalletAddr, "offchain-ok")
 	execution, err := executor.RunTask(task, &QueueExecutionData{
@@ -189,7 +189,7 @@ func TestExecutor_CreditCheck_HyperliquidOutstandingFailClosed(t *testing.T) {
 	owner := common.HexToAddress("0xd7050816337a3f8f690f8083b5ff8019d50c0e50")
 	smartWalletAddr := "0x415f09526f25d6520d471890abf0953b0505313d"
 	walletAddr := common.HexToAddress(smartWalletAddr)
-	StoreWallet(executor.db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
+	storeWalletFixture(executor.db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
 
 	require.NoError(t, executor.feeLedger.RecordValueFee(&FeeRecord{
 		ExecutionID:  "prior-hype",
@@ -216,7 +216,7 @@ func TestExecutor_CreditCheck_HyperliquidZeroOutstandingDoesNotBlockEth(t *testi
 	owner := common.HexToAddress("0xd7050816337a3f8f690f8083b5ff8019d50c0e50")
 	smartWalletAddr := "0x415f09526f25d6520d471890abf0953b0505313d"
 	walletAddr := common.HexToAddress(smartWalletAddr)
-	StoreWallet(executor.db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
+	storeWalletFixture(executor.db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
 
 	task := manualCustomCodeTask(owner.Hex(), smartWalletAddr, "eth-task-no-hype-debt")
 	execution, err := executor.RunTask(task, &QueueExecutionData{

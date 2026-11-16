@@ -5,6 +5,8 @@ import (
 	"math/big"
 	"strings"
 
+	"errors"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/walletinventory"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -107,21 +109,42 @@ func LookupCanonicalWalletAddress(db storage.Storage, chainID int64, owner commo
 	return common.HexToAddress(string(raw)), nil
 }
 
-func GetWallet(db storage.Storage, chainID int64, owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
-	walletKey := WalletStorageKey(chainID, owner, smartWalletAddress)
-	walletData, err := db.GetKey([]byte(walletKey))
+// storedWallet reads a legacy/runtime row without materializing another network.
+func storedWallet(db storage.Storage, chainID int64, owner common.Address, address string) (*model.SmartWallet, error) {
+	raw, err := db.GetKey([]byte(WalletStorageKey(chainID, owner, address)))
 	if err != nil {
-		return nil, err // Includes badger.ErrKeyNotFound
+		return nil, err
 	}
-
-	var walletModel model.SmartWallet
-	if unmarshalErr := walletModel.FromStorageData(walletData); unmarshalErr != nil {
-		return nil, fmt.Errorf("failed to unmarshal wallet data for key %s: %w", walletKey, unmarshalErr)
+	var wallet model.SmartWallet
+	if err = wallet.FromStorageData(raw); err != nil {
+		return nil, err
 	}
-	return &walletModel, nil
+	return &wallet, nil
 }
 
-// StoreWallet persists the wallet record under its primary key
+// GetWallet resolves a global derived identity on the operation's network.
+// Historical recovery records and designated EOAs retain their local shape.
+func GetWallet(db storage.Storage, chainID int64, owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
+	wallet, err := storedWallet(db, chainID, owner, smartWalletAddress)
+	if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, err
+	}
+	if err == nil {
+		if !walletinventory.IsDerived(wallet) || wallet.Retired || wallet.StaleDerivation {
+			return wallet, nil
+		}
+		if _, globalErr := walletinventory.Get(db, owner, smartWalletAddress); errors.Is(globalErr, badger.ErrKeyNotFound) {
+			return wallet, nil
+		} else if globalErr != nil {
+			return nil, globalErr
+		}
+	}
+	return walletinventory.Materialize(db, chainID, owner, smartWalletAddress)
+}
+
+// StoreWallet updates already admitted MA v2 identities and persists legacy
+// runtime/history records. New derived identities must pass inventory.Register.
+// It persists the wallet record under its primary key
 // (`w:<chainID>:<owner>:<address>`) and, when the wallet has a non-nil
 // factory and salt and is not flagged stale, also writes the
 // `(chainID, owner, factory, salt)` secondary index entry pointing at
@@ -132,6 +155,9 @@ func GetWallet(db storage.Storage, chainID int64, owner common.Address, smartWal
 // the secondary index intentionally continues to point at the new
 // canonical wallet for that tuple, not the stale one.
 func StoreWallet(db storage.Storage, chainID int64, owner common.Address, wallet *model.SmartWallet) error {
+	if walletinventory.IsDerived(wallet) {
+		return walletinventory.StoreCompatibility(db, chainID, owner, wallet)
+	}
 	if wallet.Address == nil {
 		return fmt.Errorf("cannot store wallet with nil address")
 	}
@@ -374,7 +400,18 @@ func IsWalletHidden(db storage.Storage, chainID int64, owner common.Address, sma
 }
 
 // SetWalletHiddenStatus sets the hidden status of a specified wallet.
-func SetWalletHiddenStatus(db storage.Storage, chainID int64, owner common.Address, smartWalletAddress string, hidden bool) error {
+func SetWalletHiddenStatus(db storage.Storage, chainID int64, owner common.Address, smartWalletAddress string, hidden bool, limits ...int) error {
+	limit := walletinventory.DefaultLimit
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
+	if _, err := walletinventory.Get(db, owner, smartWalletAddress); err == nil {
+		_, err = walletinventory.SetHidden(db, owner, smartWalletAddress, hidden, limit)
+		return err
+	} else if !errors.Is(err, badger.ErrKeyNotFound) {
+		return err
+	}
+
 	wallet, err := GetWallet(db, chainID, owner, smartWalletAddress)
 	if err != nil {
 		// If wallet not found, and we intend to "unhide" (which is a no-op) or "hide" (which means creating it as hidden).
@@ -384,6 +421,18 @@ func SetWalletHiddenStatus(db storage.Storage, chainID int64, owner common.Addre
 	}
 	if wallet == nil {
 		return fmt.Errorf("wallet not found for %s but no error on GetWallet", smartWalletAddress)
+	}
+	if walletinventory.IsDerived(wallet) && !wallet.Retired && !wallet.StaleDerivation {
+		// A missing global row must not let a leftover chain-only record use
+		// the trusted compatibility writer to bypass restore admission. Hiding
+		// can adopt it as hidden even at capacity. Recheck visibility afterwards
+		// in case a concurrent registration won before this adoption.
+		wallet.IsHidden = hidden
+		if _, err = walletinventory.Register(db, chainID, owner, wallet, limit); err != nil {
+			return err
+		}
+		_, err = walletinventory.SetHidden(db, owner, smartWalletAddress, hidden, limit)
+		return err
 	}
 
 	if wallet.IsHidden == hidden {

@@ -50,4 +50,5 @@ var Migrations = []migrator.Migration{
 		Name:     "20261020-retire-legacy-factory-wallets",
 		Function: RetireLegacyFactoryWallets,
 	},
+	{Name: "20261115-global-smart-wallet-inventory", Function: GlobalSmartWalletInventory},
 }

@@ -1781,6 +1781,11 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
 	}
+	if err := v.materializeInventoryRunner(node.Config.GetChainId()); err != nil {
+		failed := v.createExecutionStep(stepID, false, "could not materialize wallet runtime: "+err.Error(), "", time.Now().UnixMilli())
+		failed.EndAt = time.Now().UnixMilli()
+		return failed, err
+	}
 	if swConfig == nil || swConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
@@ -1829,7 +1834,7 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		_, hasSalt := v.vars["aa_salt"]
 		v.mu.Unlock()
 		if !hasSalt && v.db != nil {
-			if wallet, err := GetWallet(v.db, v.vmDefaultChainID(), v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
+			if wallet, err := GetWallet(v.db, node.Config.GetChainId(), v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
 				v.AddVar("aa_salt", wallet.Salt)
 			}
 		}
@@ -2010,6 +2015,11 @@ func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_St
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
+	}
+	if err := v.materializeInventoryRunner(node.Config.GetChainId()); err != nil {
+		failed := v.createExecutionStep(stepID, false, "could not materialize wallet runtime: "+err.Error(), "", time.Now().UnixMilli())
+		failed.EndAt = time.Now().UnixMilli()
+		return failed, err
 	}
 	if swConfig == nil || swConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for ETH transfer (chain_id=%d)", node.Config.GetChainId())
@@ -4762,9 +4772,7 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 	}
 	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
 		resultData := ethTransferOutput.Data.AsInterface()
-		// ETH transfer metadata is a flat object: {transactionHash: "0x..."}
-		txHash := extractTxHashFromFlatMetadata(step.Metadata)
-		return wrapResultWithTxHash(resultData, txHash)
+		return wrapResultWithFields(resultData, ethIterationMetadata(step.Metadata))
 	}
 	if graphqlOutput := step.GetGraphql(); graphqlOutput != nil && graphqlOutput.Data != nil {
 		return graphqlOutput.Data.AsInterface()
@@ -4772,16 +4780,23 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 	return nil
 }
 
-// wrapResultWithTxHash attaches a transactionHash to the result data under a metadata key.
-// If txHash is empty, the original resultData is returned unchanged.
-func wrapResultWithTxHash(resultData interface{}, txHash string) interface{} {
-	return wrapResultWithMetadata(resultData, txHash, "")
-}
-
 // wrapResultWithMetadata attaches transactionHash and contractAddress to the result data
 // under a metadata key. If both are empty, the original resultData is returned unchanged.
 func wrapResultWithMetadata(resultData interface{}, txHash string, contractAddress string) interface{} {
-	if txHash == "" && contractAddress == "" {
+	meta := map[string]interface{}{}
+	if txHash != "" {
+		meta["transactionHash"] = txHash
+	}
+	if contractAddress != "" {
+		meta["contractAddress"] = contractAddress
+	}
+	return wrapResultWithFields(resultData, meta)
+}
+
+// wrapResultWithFields attaches meta to the result data under a metadata key.
+// If meta is empty, the original resultData is returned unchanged.
+func wrapResultWithFields(resultData interface{}, meta map[string]interface{}) interface{} {
+	if len(meta) == 0 {
 		return resultData
 	}
 	resultMap := make(map[string]interface{})
@@ -4791,13 +4806,6 @@ func wrapResultWithMetadata(resultData interface{}, txHash string, contractAddre
 		}
 	} else if resultData != nil {
 		resultMap["data"] = resultData
-	}
-	meta := map[string]interface{}{}
-	if txHash != "" {
-		meta["transactionHash"] = txHash
-	}
-	if contractAddress != "" {
-		meta["contractAddress"] = contractAddress
 	}
 	resultMap["metadata"] = meta
 	return resultMap
@@ -4850,18 +4858,30 @@ func extractContractAddressFromMetadata(metadata *structpb.Value) string {
 	return ""
 }
 
-// extractTxHashFromFlatMetadata extracts transactionHash from a flat metadata object
-// (used by ethTransfer steps where metadata is {transactionHash: "0x...", ...}).
-func extractTxHashFromFlatMetadata(metadata *structpb.Value) string {
-	if metadata == nil {
-		return ""
-	}
-	if m := metadata.GetStructValue(); m != nil {
-		if hashVal := m.Fields["transactionHash"]; hashVal != nil {
-			return hashVal.GetStringValue()
+// ethIterationMetadataKeys are the fields of an ethTransfer step's flat
+// metadata that a loop iteration's output carries: the transaction hash, and
+// for a self-funded MAX what it kept for the network fee and left in the
+// wallet, so a loop's report reads like a standalone send's. Gas figures stay
+// on the step.
+var ethIterationMetadataKeys = []string{
+	"transactionHash",
+	nativeReserveGasReserveKey,
+	nativeReserveLimitedByKey,
+	nativeReserveLeftInWalletKey,
+}
+
+// ethIterationMetadata picks ethIterationMetadataKeys out of an ethTransfer
+// step's flat metadata ({transactionHash: "0x...", gasReserve: "...", ...}),
+// skipping any that are absent or empty. Run and simulation both fill them.
+func ethIterationMetadata(metadata *structpb.Value) map[string]interface{} {
+	fields := metadata.GetStructValue().GetFields()
+	meta := map[string]interface{}{}
+	for _, key := range ethIterationMetadataKeys {
+		if value := fields[key].GetStringValue(); value != "" {
+			meta[key] = value
 		}
 	}
-	return ""
+	return meta
 }
 
 // executeNodeDirectWithVars executes a node directly with isolated variables without modifying shared VM state

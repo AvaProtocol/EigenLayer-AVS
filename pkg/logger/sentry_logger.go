@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -68,6 +69,27 @@ func (l *SentryLogger) With(tags ...any) sdklogging.Logger {
 	}
 }
 
+// SentryFingerprinter lets an error choose its own Sentry grouping. Sentry
+// groups exceptions by stack trace, and every error this logger captures
+// shares the same capture frames, so errors that belong in separate issues
+// have to say so themselves (see aggregator/rest/middleware.HTTPError).
+type SentryFingerprinter interface {
+	SentryFingerprint() []string
+}
+
+// applyFingerprint sets the scope fingerprint when err, or any error it
+// wraps, implements SentryFingerprinter. Other errors keep Sentry's default
+// grouping.
+func applyFingerprint(scope *sentry.Scope, err error) {
+	var fingerprinter SentryFingerprinter
+	if !errors.As(err, &fingerprinter) {
+		return
+	}
+	if fingerprint := fingerprinter.SentryFingerprint(); len(fingerprint) > 0 {
+		scope.SetFingerprint(fingerprint)
+	}
+}
+
 // captureToSentry sends a structured error event to Sentry.
 // It extracts key-value pairs from tags as Sentry extras, and uses the first
 // error value found in tags as the Sentry exception. If no error is found,
@@ -95,11 +117,17 @@ func (l *SentryLogger) captureToSentry(msg string, tags []any) {
 		sentryErr = fmt.Errorf("%s", msg)
 	}
 
-	sentry.WithScope(func(scope *sentry.Scope) {
+	// Capture on a clone of the current hub. sentry.WithScope and
+	// sentry.CaptureException share the global hub's scope stack, so
+	// overlapping captures from different goroutines would read each
+	// other's tags and fingerprints (found by Copilot on PR #906).
+	hub := sentry.CurrentHub().Clone()
+	hub.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("service", l.serviceName)
 		scope.SetExtra("log_message", msg)
 		scope.SetExtras(extras)
-		sentry.CaptureException(sentryErr)
+		applyFingerprint(scope, sentryErr)
+		hub.CaptureException(sentryErr)
 	})
 }
 
@@ -120,9 +148,15 @@ func (l *SentryLogger) captureFormattedToSentry(template string, args []any) {
 		sentryErr = fmt.Errorf("%s", formatted)
 	}
 
-	sentry.WithScope(func(scope *sentry.Scope) {
+	// Capture on a clone of the current hub. sentry.WithScope and
+	// sentry.CaptureException share the global hub's scope stack, so
+	// overlapping captures from different goroutines would read each
+	// other's tags and fingerprints (found by Copilot on PR #906).
+	hub := sentry.CurrentHub().Clone()
+	hub.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("service", l.serviceName)
 		scope.SetExtra("formatted_message", formatted)
-		sentry.CaptureException(sentryErr)
+		applyFingerprint(scope, sentryErr)
+		hub.CaptureException(sentryErr)
 	})
 }

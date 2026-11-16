@@ -36,6 +36,9 @@ func SetRpc(rpcURL string) {
 // A generic function to query any contract. The method andcontractABI is
 // necessary so we can unpack the result
 func readContractData(contractAddress string, data string, method string, contractABI string) []any {
+	if rpcConn == nil {
+		return nil
+	}
 	parsedABI, err := abi.JSON(strings.NewReader(contractABI))
 	if err != nil {
 		return nil
@@ -121,11 +124,15 @@ func bigFromABI(v any) *big.Int {
 }
 
 // chainlinkLatestRoundData reads a Chainlink feed's latest round and returns its
-// price, panicking if the feed is unreachable or the round is stale or invalid.
-// The expr VM recovers the panic, so a bad feed fails the task loudly instead of
-// silently evaluating a condition against outdated or zero data. An optional
-// second argument overrides the staleness window (in seconds).
-func chainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...int) *big.Int {
+// price, or an error if the feed is unreachable or the round is stale or invalid,
+// so a bad feed fails the caller loudly instead of silently evaluating against
+// outdated or zero data. See the note on exprEnv for why macros return errors
+// rather than panicking. An optional second argument overrides the staleness
+// window (in seconds).
+func chainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...int) (*big.Int, error) {
+	if rpcConn == nil {
+		return nil, fmt.Errorf("chainlink feed %s: rpc client is not configured", tokenPair)
+	}
 	output, err := QueryContract(
 		rpcConn,
 		common.HexToAddress(tokenPair),
@@ -133,10 +140,10 @@ func chainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...int) *big.Int {
 		"latestRoundData",
 	)
 	if err != nil {
-		panic(fmt.Errorf("Error when querying contract through rpc. contract: %s. error: %w", tokenPair, err))
+		return nil, fmt.Errorf("Error when querying contract through rpc. contract: %s. error: %w", tokenPair, err)
 	}
 	if len(output) < 5 {
-		panic(fmt.Errorf("chainlink feed %s: unexpected latestRoundData output (%d fields)", tokenPair, len(output)))
+		return nil, fmt.Errorf("chainlink feed %s: unexpected latestRoundData output (%d fields)", tokenPair, len(output))
 	}
 
 	answer, err := validateChainlinkRound(chainlinkRound{
@@ -146,21 +153,40 @@ func chainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...int) *big.Int {
 		answeredInRound: bigFromABI(output[4]),
 	}, chainlinkMaxAge(maxAgeSeconds), time.Now())
 	if err != nil {
-		panic(fmt.Errorf("chainlink feed %s: %w", tokenPair, err))
+		return nil, fmt.Errorf("chainlink feed %s: %w", tokenPair, err)
 	}
-	return answer
+	return answer, nil
 }
 
-func BigCmp(a *big.Int, b *big.Int) (r int) {
-	return a.Cmp(b)
+// bigOperands rejects a nil operand up front: goja passes a JS null or undefined
+// as a nil *big.Int, and (*big.Int).Cmp dereferences both sides, so without this
+// check bigCmp(null, x) would panic instead of failing.
+func bigOperands(a *big.Int, b *big.Int) error {
+	if a == nil || b == nil {
+		return fmt.Errorf("big.Int comparison: nil operand (got null or undefined)")
+	}
+	return nil
 }
 
-func BigGt(a *big.Int, b *big.Int) bool {
-	return a.Cmp(b) > 0
+func BigCmp(a *big.Int, b *big.Int) (int, error) {
+	if err := bigOperands(a, b); err != nil {
+		return 0, err
+	}
+	return a.Cmp(b), nil
 }
 
-func BigLt(a *big.Int, b *big.Int) bool {
-	return a.Cmp(b) < 0
+func BigGt(a *big.Int, b *big.Int) (bool, error) {
+	if err := bigOperands(a, b); err != nil {
+		return false, err
+	}
+	return a.Cmp(b) > 0, nil
+}
+
+func BigLt(a *big.Int, b *big.Int) (bool, error) {
+	if err := bigOperands(a, b); err != nil {
+		return false, err
+	}
+	return a.Cmp(b) < 0, nil
 }
 
 // parseUnitRe matches a non-negative decimal number with an optional fractional
@@ -181,13 +207,14 @@ const parseUnitMaxDecimals = 78
 // 262199000000), which is what task-condition expressions need to build a price
 // threshold to compare against chainlinkPrice(). Input that is not a non-negative
 // decimal, a fraction with more digits than `decimals` (over-precision), or
-// `decimals` beyond the on-chain range is rejected.
-func ParseUnit(val string, decimal uint) *big.Int {
+// `decimals` beyond the on-chain range is rejected with an error (see the note on
+// exprEnv for why macros return errors rather than panicking).
+func ParseUnit(val string, decimal uint) (*big.Int, error) {
 	if !parseUnitRe.MatchString(val) {
-		panic(fmt.Errorf("Parse error: %q is not a non-negative decimal number", val))
+		return nil, fmt.Errorf("Parse error: %q is not a non-negative decimal number", val)
 	}
 	if decimal > parseUnitMaxDecimals {
-		panic(fmt.Errorf("Parse error: decimals %d out of range (max %d)", decimal, parseUnitMaxDecimals))
+		return nil, fmt.Errorf("Parse error: decimals %d out of range (max %d)", decimal, parseUnitMaxDecimals)
 	}
 
 	parts := strings.SplitN(val, ".", 2)
@@ -200,50 +227,61 @@ func ParseUnit(val string, decimal uint) *big.Int {
 	if len(parts) == 2 && parts[1] != "" {
 		frac := parts[1]
 		if uint(len(frac)) > decimal {
-			panic(fmt.Errorf("Parse error: fractional part %q exceeds %d decimals in %q", frac, decimal, val))
+			return nil, fmt.Errorf("Parse error: fractional part %q exceeds %d decimals in %q", frac, decimal, val)
 		}
 		fracVal, _ := new(big.Int).SetString(frac+strings.Repeat("0", int(decimal)-len(frac)), 10)
 		result.Add(result, fracVal)
 	}
 
-	return result
+	return result, nil
 }
 
-func ToBigInt(val string) *big.Int {
-	// parse either string or hex
+// ToBigInt parses a decimal or 0x-prefixed hex integer (up to 256 bits). It
+// returns an error rather than a nil *big.Int for input it cannot parse: goja
+// maps *big.Int to a JS BigInt by copying it (new(big.Int).Set), so a nil result
+// panics inside the runtime instead of reaching the script as null.
+func ToBigInt(val string) (*big.Int, error) {
 	b, ok := ethmath.ParseBig256(val)
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("toBigInt: %q is not a decimal or 0x-prefixed hex integer of at most 256 bits", val)
 	}
-
-	return b
+	return b, nil
 }
 
-func (bi *Builtin) ToBigInt(val string) *big.Int {
+func (bi *Builtin) ToBigInt(val string) (*big.Int, error) {
 	return ToBigInt(val)
 }
 
-func (bi *Builtin) ChainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...int) *big.Int {
+func (bi *Builtin) ChainlinkLatestRoundData(tokenPair string, maxAgeSeconds ...int) (*big.Int, error) {
 	return chainlinkLatestRoundData(tokenPair, maxAgeSeconds...)
 }
 
-func (bi *Builtin) BigCmp(a *big.Int, b *big.Int) (r int) {
+func (bi *Builtin) BigCmp(a *big.Int, b *big.Int) (int, error) {
 	return BigCmp(a, b)
 }
 
-func (bi *Builtin) BigGt(a *big.Int, b *big.Int) bool {
+func (bi *Builtin) BigGt(a *big.Int, b *big.Int) (bool, error) {
 	return BigGt(a, b)
 }
 
-func (bi *Builtin) BigLt(a *big.Int, b *big.Int) bool {
+func (bi *Builtin) BigLt(a *big.Int, b *big.Int) (bool, error) {
 	return BigLt(a, b)
 }
 
-func (bi *Builtin) ParseUnit(val string, decimal uint) *big.Int {
+func (bi *Builtin) ParseUnit(val string, decimal uint) (*big.Int, error) {
 	return ParseUnit(val, decimal)
 }
 
 var (
+	// exprEnv is the macro table registered into the goja VM for CustomCode
+	// nodes, and into the expr VM through CompileExpression/RunExpressionQuery
+	// (no production callers in this repo today; kept for expression tests). A
+	// macro that can fail must return a trailing error, never panic: expr
+	// reports a returned error as an evaluation failure and goja throws it as a
+	// JS GoError that the script's try/catch can handle (uncaught, it fails the
+	// node). A Go panic, by contrast, is not a JS exception — goja re-panics it
+	// out of RunString past the script's try/catch, and the whole request dies
+	// in the HTTP recover middleware with a 500.
 	exprEnv = map[string]any{
 		// bind and simular JS fetch api
 		"fetch": Fetch,

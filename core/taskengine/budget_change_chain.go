@@ -216,8 +216,15 @@ func refuseUnsupportedBudgetRoutes(chain int64, p SessionPermissions) error {
 		}
 	}
 	add(budgetContracts["swapRouter"][chain], "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))", "exactInput((bytes,address,uint256,uint256))", "exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))", "exactOutput((bytes,address,uint256,uint256))", "multicall(bytes[])", "multicall(uint256,bytes[])", "wrapETH(uint256)", "unwrapWETH9(uint256,address)", "refundETH()")
-	add(budgetContracts["aavePool"][chain], "supply(address,uint256,address,uint16)", "repay(address,uint256,uint256,address)", "withdraw(address,uint256,address)", "borrow(address,uint256,uint256,uint16,address)")
+	// Legacy standard permissions include collateral configuration. It remains
+	// an explicitly disclosed unmetered call, like the carried withdraw/borrow rights.
+	add(budgetContracts["aavePool"][chain], "supply(address,uint256,address,uint16)", "repay(address,uint256,uint256,address)", "withdraw(address,uint256,address)", "borrow(address,uint256,uint256,uint16,address)", "setUserUseReserveAsCollateral(address,bool)")
 	add(budgetContracts["wrappedNative"][chain], "deposit()", "withdraw(uint256)")
+	// Studio's first-budget catalog includes Lido staking. Its ETH input must
+	// be metered by the native limit, matching unmeteredKind's classification.
+	if p.NativeSpendCap != nil {
+		add(budgetContracts["lidoStake"][chain], "submit(address)")
+	}
 	for _, a := range p.AllowedActions {
 		if a.Target == nil {
 			return budgetInputError("budget action target is missing")
@@ -238,13 +245,25 @@ func refuseUnsupportedBudgetRoutes(chain int64, p SessionPermissions) error {
 			return refuse(target, s)
 		}
 	}
-	// Unknown callable fallback code is not established safe by an EOA label.
+	// Native recipient rows allow every selector on the target. Keep their
+	// eligibility separate from a catalog's approval of one specific call.
 	if p.AllowContractRecipient {
 		for _, target := range p.NativeRecipients {
-			if target != nil && permitted[*target] == nil {
+			if target != nil && !budgetNativeFallbackAllowed(chain, *target) {
 				return refuse(*target, "native fallback")
 			}
 		}
 	}
 	return nil
+}
+
+// Preserve the previously admitted native targets. Adding a selector-scoped
+// route (such as Lido submit) must never grant unrestricted calls on that target.
+func budgetNativeFallbackAllowed(chain int64, target common.Address) bool {
+	if target == (common.Address{}) {
+		return false
+	}
+	return target == budgetContracts["swapRouter"][chain] ||
+		target == budgetContracts["aavePool"][chain] ||
+		target == budgetContracts["wrappedNative"][chain]
 }

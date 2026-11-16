@@ -12,9 +12,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo/v4"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/walletinventory"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
 const (
@@ -398,4 +401,28 @@ func TestOwnerOfSmartWallet(t *testing.T) {
 			t.Error("found = false; sender casing should not matter")
 		}
 	})
+}
+
+func TestOwnerOfGlobalSmartWalletBeforeNetworkMaterialization(t *testing.T) {
+	agg, cleanup := newWebhookAggregator(t)
+	defer cleanup()
+	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	wallet := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	factory := aa.MAv2FactoryAddress()
+	_, err := walletinventory.Register(agg.db, 11155111, owner, &model.SmartWallet{
+		Owner: &owner, Address: &wallet, Factory: &factory, Salt: big.NewInt(4),
+	}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = walletinventory.SetHidden(agg.db, owner, wallet.Hex(), true, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := ownerOfSmartWallet(agg.db, 8453, wallet)
+	if err != nil || !found || got != owner {
+		t.Fatalf("global archived runner ownership: owner=%s found=%t err=%v", got.Hex(), found, err)
+	}
+	// Archiving changes inventory visibility only. Sponsorship still applies
+	// the requested network's existing credit and policy checks afterwards.
 }

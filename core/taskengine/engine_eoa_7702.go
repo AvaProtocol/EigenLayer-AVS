@@ -114,7 +114,7 @@ func (n *Engine) SetStoredWalletHidden(chainID int64, owner common.Address, addr
 	if n == nil || n.db == nil {
 		return nil, fmt.Errorf("storage unavailable")
 	}
-	if err := SetWalletHiddenStatus(n.db, chainID, owner, addr, hidden); err != nil {
+	if err := SetWalletHiddenStatus(n.db, chainID, owner, addr, hidden, n.WalletInventoryLimit()); err != nil {
 		return nil, err
 	}
 	return GetWallet(n.db, chainID, owner, addr)

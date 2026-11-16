@@ -19,10 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Wallets are stored per chain, so the listing follows the caller's chain
-// rather than the gateway's. user.ChainID is what REST sets from ?chainId,
-// on the same precedence as CreateWallet — so a token minted for one chain
-// reaches another's wallets without a second signature.
+// Derived identities are shared; chain context selects runtime data only.
 func TestListWalletsFollowsTheResolvedChain(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -45,8 +42,8 @@ func TestListWalletsFollowsTheResolvedChain(t *testing.T) {
 	factory := aa.MAv2FactoryAddress()
 	onDefault := common.HexToAddress("0xDDDDddddDDDDddddDDDDddddDDDDddddDDDDdddd")
 	onOther := common.HexToAddress("0xEEEEeeeeEEEEeeeeEEEEeeeeEEEEeeeeEEEEeeee")
-	require.NoError(t, StoreWallet(db, defaultChain, owner, mkWallet(owner, factory, onDefault, 100)))
-	require.NoError(t, StoreWallet(db, otherChain, owner, mkWallet(owner, factory, onOther, 200)))
+	require.NoError(t, storeWalletFixture(db, defaultChain, owner, mkWallet(owner, factory, onDefault, 100)))
+	require.NoError(t, storeWalletFixture(db, otherChain, owner, mkWallet(owner, factory, onOther, 200)))
 
 	listed := func(chainID int64) map[string]bool {
 		t.Helper()
@@ -61,11 +58,11 @@ func TestListWalletsFollowsTheResolvedChain(t *testing.T) {
 
 	fromDefault := listed(defaultChain)
 	require.True(t, fromDefault[strings.ToLower(onDefault.Hex())], "the default chain's wallet must be listed on that chain")
-	require.False(t, fromDefault[strings.ToLower(onOther.Hex())], "another chain's wallet must not leak into this one")
+	require.True(t, fromDefault[strings.ToLower(onOther.Hex())], "derived inventory is shared across networks")
 
 	fromOther := listed(otherChain)
 	require.True(t, fromOther[strings.ToLower(onOther.Hex())], "naming the other chain must reach its wallets")
-	require.False(t, fromOther[strings.ToLower(onDefault.Hex())], "the default chain's wallet must not leak into the other")
+	require.True(t, fromOther[strings.ToLower(onDefault.Hex())], "derived inventory is shared across networks")
 
 	// ChainID 0 is the no-context case (gRPC, or a JWT with no aud): it
 	// resolves to the gateway default rather than erroring or listing nothing.
@@ -455,7 +452,7 @@ func TestListWalletsOmitsRetiredDefaultWallet(t *testing.T) {
 	stored, err := GetWallet(db, chainID, user.Address, defaultAddr)
 	require.NoError(t, err)
 	stored.Retired = true
-	require.NoError(t, StoreWallet(db, chainID, user.Address, stored))
+	require.NoError(t, storeWalletFixture(db, chainID, user.Address, stored))
 
 	listed, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err)
@@ -488,7 +485,7 @@ func TestListWalletsSkipsRetiredWalletsAndCapIgnoresThem(t *testing.T) {
 	}
 	for i, address := range retired {
 		addr := address
-		require.NoError(t, StoreWallet(db, chainID, user.Address, &model.SmartWallet{
+		require.NoError(t, storeWalletFixture(db, chainID, user.Address, &model.SmartWallet{
 			Owner:    &user.Address,
 			Address:  &addr,
 			Factory:  &legacyFactory,

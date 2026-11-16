@@ -61,7 +61,7 @@ func TestBudgetOwnerHandoff_Sepolia(t *testing.T) {
 			n := New(db, cfg, nil, testutil.GetLogger())
 			n.spendLimitCallerOverride = func(int64) (aa.ContractCaller, error) { return f.chain, nil }
 			factory := aa.MAv2FactoryAddress()
-			require.NoError(t, StoreWallet(db, testPolicyChain, f.owner, &model.SmartWallet{Owner: &f.owner, Address: &f.wallet, Factory: &factory, Salt: f.salt}))
+			require.NoError(t, storeWalletFixture(db, testPolicyChain, f.owner, &model.SmartWallet{Owner: &f.owner, Address: &f.wallet, Factory: &factory, Salt: f.salt}))
 			user := &model.User{Address: f.owner}
 			until := time.Now().Add(time.Hour).UnixMilli()
 			pool := budgetContracts["aavePool"][testPolicyChain]

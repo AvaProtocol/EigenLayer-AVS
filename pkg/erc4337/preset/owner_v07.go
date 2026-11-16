@@ -321,24 +321,7 @@ func newOwnerOperation(ctx context.Context, chain *ethclient.Client, sw *config.
 }
 
 func pricePreparedOwnerBatch(ctx context.Context, chain *ethclient.Client, bundler *rpc.Client, op *userop.UserOperationV07, sw *config.SmartWalletConfig, batch OwnerBatch, l logger.Logger) error {
-	priced := false
-	return priceOwnerBatch(batch, op, sw.SponsorshipPolicyID() != "", func() error {
-		if !priced {
-			if err := priceOperationV07(ctx, chain, bundler, op, EntryPointV07(), sw, logger.EnsureLogger(l)); err != nil {
-				return err
-			}
-			priced = true
-			return nil
-		}
-		// Native reserve rounds re-estimate final calldata with the original
-		// padded fee quote, instead of chasing a new base fee on every round.
-		estimate, err := EstimateUserOpGasV07(ctx, bundler, op, EntryPointV07())
-		if err != nil {
-			return fmt.Errorf("estimating gas: %w", err)
-		}
-		op.CallGasLimit, op.VerificationGasLimit, op.PreVerificationGas = estimate.CallGasLimit, estimate.VerificationGasLimit, estimate.PreVerificationGas
-		return nil
-	})
+	return priceOwnerBatch(batch, op, sw.SponsorshipPolicyID() != "", priceOnceThenEstimate(ctx, chain, bundler, op, sw, l))
 }
 
 // MaxOwnerGasCost is the signed maximum gas exposure, not an estimated fee.

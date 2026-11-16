@@ -83,7 +83,7 @@ func TestGrantReplaceClearsSeveralPriorEntities_Sepolia(t *testing.T) {
 	t.Cleanup(func() { preset.SetSessionResolver(nil) })
 
 	factoryAddr := aa.MAv2FactoryAddress()
-	require.NoError(t, StoreWallet(db, chainID.Int64(), owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, chainID.Int64(), owner, &model.SmartWallet{
 		Owner: &owner, Address: runner, Factory: &factoryAddr,
 		Salt: big.NewInt(fixtureSaltGrantReplace),
 	}))
