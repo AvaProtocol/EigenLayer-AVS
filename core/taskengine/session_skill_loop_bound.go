@@ -103,12 +103,39 @@ const (
 // the wallet holds to settings.destination: ERC-20 rows to
 // {{sweepPlan.data.tokenSends}}, and ETH, when selected, as one row to
 // {{sweepPlan.data.ethSends}}, whose loop sends amount MAX.
-const sweepPlanSource = `// Sends each selected token's whole balance to the destination, and leaves
+const sweepPlanSource = sweepPlanComment + sweepPlanCode
+
+// sweepPlanSponsoredMaxSource is sweepPlan as Studio shipped it before #910,
+// when its comment said the ETH MAX needed gas sponsorship. Only the comment
+// differs from sweepPlanSource.
+const sweepPlanSponsoredMaxSource = sweepPlanSponsoredMaxComment + sweepPlanCode
+
+// knownSweepPlanSources are the sweepPlan versions the recognizer accepts,
+// normalized. A saved workflow keeps its own copy of the node's source, and
+// data-sync updates only the catalog, so a Sweep saved from an earlier
+// template still carries that version. Each is matched exactly, so an edit to
+// the code still leaves the need unresolved. Drop a version only once no saved
+// Sweep can hold it.
+var knownSweepPlanSources = map[string]bool{
+	normalizeJS(sweepPlanSource):             true,
+	normalizeJS(sweepPlanSponsoredMaxSource): true,
+}
+
+const sweepPlanComment = `// Sends each selected token's whole balance to the destination, and leaves
 // out a token the wallet doesn't hold. ETH goes in its own loop, after the
 // tokens, with amount MAX: the whole ETH balance at that point, minus the
 // network fee when the wallet pays its own gas. A loop sends every row with
 // one runner, so ETH and ERC-20 rows can't share one.
-const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+`
+
+const sweepPlanSponsoredMaxComment = `// Sends each selected token's whole balance to the destination, and leaves
+// out a token the wallet doesn't hold. ETH goes in its own loop, after the
+// tokens, with amount MAX: the whole ETH balance at that point, which needs
+// the network's gas sponsorship. A loop sends every row with one runner, so
+// ETH and ERC-20 rows can't share one.
+`
+
+const sweepPlanCode = `const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const held = {};
 for (const b of balances.data) {
   if (!b) continue;
@@ -489,7 +516,7 @@ func boundSweepLoop(nodes []*avsproto.TaskNode, settings map[string]any, loop *a
 	if codeNode == nil || codeNode.GetCustomCode() == nil || codeNode.GetCustomCode().GetConfig() == nil {
 		return nil, false
 	}
-	if normalizeJS(codeNode.GetCustomCode().GetConfig().GetSource()) != normalizeJS(sweepPlanSource) {
+	if !knownSweepPlanSources[normalizeJS(codeNode.GetCustomCode().GetConfig().GetSource())] {
 		return nil, false
 	}
 	iter, ok := loopIter(cfg.GetIterVal())

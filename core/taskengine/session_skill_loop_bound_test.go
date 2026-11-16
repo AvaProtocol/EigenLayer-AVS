@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -864,6 +865,35 @@ func TestSweepSizesSelectedTokensAndEth(t *testing.T) {
 
 	if got := deriveSepolia(sweepTask(t, sweepPlanSource, map[string]any{"tokenSelections": []any{}}), now); got != nil {
 		t.Fatalf("nothing selected must not move funds, got %#v", got)
+	}
+}
+
+// A Sweep saved from the template before #910 keeps that sweepPlan, whose
+// comment said the ETH MAX needed sponsorship: data-sync updates only the
+// catalog. It sizes as the current version does, and an edit to its code
+// still stays unresolved.
+func TestSweepSavedBeforeSelfFundedMaxStillSizes(t *testing.T) {
+	now := skillNow()
+	settings := sweepSettings(skillUSDC, skillETH)
+	if sweepPlanSponsoredMaxSource == sweepPlanSource {
+		t.Fatal("the earlier sweepPlan must differ from the current one")
+	}
+
+	current := deriveSepolia(sweepTask(t, sweepPlanSource, settings), now)
+	saved := deriveSepolia(sweepTask(t, sweepPlanSponsoredMaxSource, settings), now)
+	if saved == nil || saved.Unresolved {
+		t.Fatalf("saved Sweep = %#v", saved)
+	}
+	if !reflect.DeepEqual(saved, current) {
+		t.Fatalf("saved Sweep = %#v, want %#v", saved, current)
+	}
+
+	edited := strings.Replace(sweepPlanSponsoredMaxSource, "have <= BigInt(0)", "have < BigInt(0)", 1)
+	if edited == sweepPlanSponsoredMaxSource {
+		t.Fatal("the edit must change the earlier sweepPlan")
+	}
+	if got := deriveSepolia(sweepTask(t, edited, settings), now); got == nil || !got.Unresolved {
+		t.Fatalf("edited saved Sweep = %#v", got)
 	}
 }
 
