@@ -78,6 +78,29 @@ func (s *SessionAuthorization) Deferred() bool {
 	return s != nil && len(s.DeferredData) > 0 && len(s.OwnerSignature) > 0
 }
 
+// userOpSigner signs an operation under this authorization: with the deferred
+// action and the owner's signature when it carries the grant's install, and
+// as the entity alone otherwise. The send signs and every retry re-signs
+// through it. A plain re-sign of an install operation would drop the install,
+// and the account would then validate it against an entity that isn't
+// installed yet (AA23).
+func (s *SessionAuthorization) userOpSigner(entryPoint common.Address, chainID *big.Int) userOpSignerV07 {
+	if s.Deferred() {
+		return func(op *userop.UserOperationV07) error {
+			if err := SignUserOpV07Deferred(op, entryPoint, chainID, s.SignerKey, s.DeferredData, s.OwnerSignature); err != nil {
+				return fmt.Errorf("signing user operation with deferred action: %w", err)
+			}
+			return nil
+		}
+	}
+	return func(op *userop.UserOperationV07) error {
+		if err := SignUserOpV07(op, entryPoint, chainID, s.SignerKey); err != nil {
+			return fmt.Errorf("signing user operation: %w", err)
+		}
+		return nil
+	}
+}
+
 // Validate rejects an authorization that cannot produce a valid operation.
 func (s *SessionAuthorization) Validate() error {
 	if s == nil {

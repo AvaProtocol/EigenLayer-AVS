@@ -410,7 +410,7 @@ func TestNativeReserveSendAfterAnEfficiencyRetry(t *testing.T) {
 			require.NoError(t, SignUserOpV07(op, EntryPointV07(), chainID, key))
 			send := &nativeReserveSend{balance: tc.balance, deposit: big.NewInt(0), build: build, value: value}
 
-			_, err = sendUserOpV07(context.Background(), client, op, EntryPointV07(), chainID, key, send.resize)
+			_, err = sendUserOpV07(context.Background(), client, op, EntryPointV07(), plainUserOpSignerV07(EntryPointV07(), chainID, key), send.resize)
 			require.NoError(t, err)
 			require.Equal(t, 2, *sends)
 			require.Equal(t, "1333", op.VerificationGasLimit.String())

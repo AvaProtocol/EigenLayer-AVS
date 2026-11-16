@@ -365,17 +365,13 @@ func sendUserOpMAv2(
 	}
 
 	// Sign last: the signature covers every gas and paymaster field, so it has
-	// to come after pricing. SendUserOpV07WithRetry only RE-signs, and only
-	// when it tightens the verification gas limit — it will not sign an
-	// unsigned operation, it rejects one.
-	signingKey := auth.SignerKey
-	if auth.Deferred() {
-		if err := SignUserOpV07Deferred(op, entryPoint, chainID, signingKey,
-			auth.DeferredData, auth.OwnerSignature); err != nil {
-			return op, nil, reserveResult, fmt.Errorf("signing user operation with deferred action: %w", err)
-		}
-	} else if err := SignUserOpV07(op, entryPoint, chainID, signingKey); err != nil {
-		return op, nil, reserveResult, fmt.Errorf("signing user operation: %w", err)
+	// to come after pricing. The send only RE-signs, and only when it tightens
+	// the verification gas limit — it will not sign an unsigned operation, it
+	// rejects one. Every signature, first and retried, goes through sign, so
+	// an install operation keeps its deferred action.
+	sign := auth.userOpSigner(entryPoint, chainID)
+	if err := sign(op); err != nil {
+		return op, nil, reserveResult, err
 	}
 
 	// A reserved transfer re-sizes its value if a retry lowers the signed gas.
@@ -383,7 +379,7 @@ func sendUserOpMAv2(
 	if reserveSend != nil {
 		adjust = reserveSend.resize
 	}
-	opHash, err := sendUserOpV07(ctx, bundlerRPC, op, entryPoint, chainID, signingKey, adjust)
+	opHash, err := sendUserOpV07(ctx, bundlerRPC, op, entryPoint, sign, adjust)
 	if err != nil && !auth.Deferred() && isInvalidNonceError(err) {
 		// AA25 covers both directions of cache drift — a duplicate (another
 		// operation took this sequence) and a gap (a cached pending operation
@@ -397,8 +393,8 @@ func sendUserOpMAv2(
 			l.Info("retrying after AA25 with the chain's nonce",
 				"sender", sender.Hex(), "stale", op.Nonce.String(), "fresh", freshNonce.String())
 			op.Nonce = freshNonce
-			if signErr := SignUserOpV07(op, entryPoint, chainID, signingKey); signErr == nil {
-				opHash, err = sendUserOpV07(ctx, bundlerRPC, op, entryPoint, chainID, signingKey, adjust)
+			if signErr := sign(op); signErr == nil {
+				opHash, err = sendUserOpV07(ctx, bundlerRPC, op, entryPoint, sign, adjust)
 			}
 		}
 	}
