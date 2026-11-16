@@ -175,6 +175,9 @@ numbers between Review and the ETH step.
   would cost more calldata gas than the bytes the bundler priced
   `preVerificationGas` for; then the freed gas stays in the wallet and the
   output reports it as `leftInWallet`. Either way the value stays covered.
+  The retry re-signs through the same signer as the first send, so an
+  operation that installs the grant keeps its deferred action and the
+  owner's signature (#912).
 - **L1 data fee on L2s:** the bundler charges it through `preVerificationGas`,
   so the max cost already includes it.
 - **Another operation from the same wallet** between the balance read and

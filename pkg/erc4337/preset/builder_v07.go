@@ -422,20 +422,38 @@ func decodeHexBytes(s string) ([]byte, error) {
 // caller's key is needed for the retry; without it the error is returned
 // unchanged.
 func SendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address) (common.Hash, error) {
-	return sendUserOpV07(ctx, client, op, entryPoint, nil, nil, nil)
+	return sendUserOpV07(ctx, client, op, entryPoint, nil, nil)
 }
 
 // SendUserOpV07WithRetry is SendUserOpV07 with the material needed to re-sign
-// after tightening the verification gas limit.
+// after tightening the verification gas limit. It re-signs with
+// SignUserOpV07, so it is for an operation signed that way.
 func SendUserOpV07WithRetry(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address, chainID *big.Int, key *ecdsa.PrivateKey) (common.Hash, error) {
-	return sendUserOpV07(ctx, client, op, entryPoint, chainID, key, nil)
+	return sendUserOpV07(ctx, client, op, entryPoint, plainUserOpSignerV07(entryPoint, chainID, key), nil)
 }
 
-// sendUserOpV07 is SendUserOpV07WithRetry with an optional adjust, called
-// after the retry has changed the gas fields and before it re-signs, for an
-// operation whose calldata depends on them (a native reserve sizes its value
-// from the maximum gas cost).
-func sendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address, chainID *big.Int, key *ecdsa.PrivateKey, adjust func(*userop.UserOperationV07) error) (common.Hash, error) {
+// userOpSignerV07 signs an operation in place, replacing its signature. A
+// retry that changes a signed field re-signs through the same signer the
+// operation was first signed with, so the signature keeps its shape.
+type userOpSignerV07 func(*userop.UserOperationV07) error
+
+// plainUserOpSignerV07 signs with SignUserOpV07, or is nil without a key or
+// chain id, so a send can't re-sign.
+func plainUserOpSignerV07(entryPoint common.Address, chainID *big.Int, key *ecdsa.PrivateKey) userOpSignerV07 {
+	if key == nil || chainID == nil {
+		return nil
+	}
+	return func(op *userop.UserOperationV07) error {
+		return SignUserOpV07(op, entryPoint, chainID, key)
+	}
+}
+
+// sendUserOpV07 is SendUserOpV07 with the signer the operation was signed
+// with, which the efficiency retry re-signs through (nil: no retry), and an
+// optional adjust, called after the retry has changed the gas fields and
+// before it re-signs, for an operation whose calldata depends on them (a
+// native reserve sizes its value from the maximum gas cost).
+func sendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOperationV07, entryPoint common.Address, sign userOpSignerV07, adjust func(*userop.UserOperationV07) error) (common.Hash, error) {
 	if client == nil {
 		return common.Hash{}, fmt.Errorf("nil bundler client")
 	}
@@ -451,7 +469,7 @@ func sendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOpera
 		return hash, nil
 	}
 	ratio, ok := parseVerificationEfficiency(err.Error())
-	if !ok || key == nil || chainID == nil {
+	if !ok || sign == nil {
 		return common.Hash{}, err
 	}
 
@@ -469,7 +487,7 @@ func sendUserOpV07(ctx context.Context, client *rpc.Client, op *userop.UserOpera
 			return common.Hash{}, fmt.Errorf("adjusting the operation after tightening verificationGasLimit to %s: %w", tightened, adjustErr)
 		}
 	}
-	if signErr := SignUserOpV07(op, entryPoint, chainID, key); signErr != nil {
+	if signErr := sign(op); signErr != nil {
 		return common.Hash{}, fmt.Errorf("re-signing after tightening verificationGasLimit to %s: %w", tightened, signErr)
 	}
 	return rawSendUserOpV07(ctx, client, op, entryPoint)
