@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"testing"
 
@@ -219,6 +220,73 @@ func TestMigrationConflictingAddressesBlockActivation(t *testing.T) {
 	require.Len(t, rows, 2)
 	require.NotEqual(t, rows[0].WalletID, rows[1].WalletID,
 		"mirrors must preserve both recovery addresses rather than upserting the same ID")
+}
+
+func TestMigrationPreservesAnIdentityCreatedAfterTheRuntimeScan(t *testing.T) {
+	db := testDB(t)
+	legacy := testWallet(testOwner, 0)
+	current := testWallet(testOwner, 0)
+	address := common.HexToAddress("0x3333333333333333333333333333333333333333")
+	current.Address = &address
+	_, err := Register(db, 8453, testOwner, current, 3)
+	require.NoError(t, err)
+	_, err = SetHidden(db, testOwner, address.Hex(), true, 3)
+	require.NoError(t, err)
+	// The scan happened before Register, so only the old address is in it.
+	legacyScan := map[string]*model.SmartWallet{
+		strings.ToLower(legacy.Address.Hex()): legacy,
+	}
+	failing := &failingStore{Storage: db, failWrite: true}
+	_, err = migrateOwner(failing, testOwner, legacyScan, legacy.Salt)
+	require.ErrorContains(t, err, "commit failed")
+	original, err := BySalt(db, testOwner, big.NewInt(0))
+	require.NoError(t, err)
+	require.Equal(t, address, *original.Address, "a failed conflict import must not delete the previous index")
+	_, err = migrateOwner(db, testOwner, legacyScan, legacy.Salt)
+	require.NoError(t, err)
+	rows, usage, err := Snapshot(db, testOwner, 3)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, 1, usage.ActiveCount)
+	stored, err := Get(db, testOwner, address.Hex())
+	require.NoError(t, err)
+	require.True(t, stored.IsHidden)
+	_, err = BySalt(db, testOwner, big.NewInt(0))
+	require.ErrorIs(t, err, badger.ErrKeyNotFound, "a conflicting canonical index must be removed atomically")
+	_, err = Register(db, 1, testOwner, testWallet(testOwner, 1), 3)
+	require.ErrorIs(t, err, ErrConflict)
+	_, err = SetHidden(db, testOwner, address.Hex(), false, 3)
+	require.ErrorIs(t, err, ErrConflict)
+}
+
+func TestCompatibilityWriterCannotAdmitOrRestoreIdentities(t *testing.T) {
+	db := testDB(t)
+	zero := testWallet(testOwner, 0)
+	require.ErrorIs(t, StoreCompatibility(db, 1, testOwner, zero), ErrUnregistered)
+	_, err := Register(db, 1, testOwner, zero, 0)
+	require.ErrorContains(t, err, "limit must be positive")
+	_, err = Register(db, 1, testOwner, zero, 1)
+	require.NoError(t, err)
+	_, err = SetHidden(db, testOwner, zero.Address.Hex(), true, 1)
+	require.NoError(t, err)
+	require.NoError(t, StoreCompatibility(db, 8453, testOwner, zero))
+	stored, err := Get(db, testOwner, zero.Address.Hex())
+	require.NoError(t, err)
+	require.True(t, stored.IsHidden)
+	require.ErrorIs(t, StoreCompatibility(db, 1, testOwner, testWallet(testOwner, 4)), ErrUnregistered)
+}
+
+func TestAllocationRejectsHeaderNormalizationAndEncodingAmbiguity(t *testing.T) {
+	db := testDB(t)
+	for _, key := range []string{"", " key", "key ", "two keys", "添加-1", "key\nnext", strings.Repeat("x", 257)} {
+		_, err := Allocate(context.Background(), db, 1, testOwner, key, Profile, 3, func(*big.Int) (*model.SmartWallet, error) {
+			t.Fatal("invalid header keys must fail before derivation")
+			return nil, nil
+		})
+		require.ErrorIs(t, err, ErrBadAllocation)
+	}
+	require.True(t, ValidAllocationKey(strings.Repeat("x", 256)))
+	require.True(t, ValidAllocationKey("wallet-4_retry:1"))
 }
 
 func TestRetainedHistoryAndSaltExhaustion(t *testing.T) {

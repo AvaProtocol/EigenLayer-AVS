@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/walletinventory"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -101,4 +102,31 @@ func TestChainOnlyVisibilityUpdateCannotBypassGlobalAdmission(t *testing.T) {
 	_, usage, err := walletinventory.Snapshot(db, owner, 3)
 	require.NoError(t, err)
 	require.Equal(t, 3, usage.ActiveCount)
+}
+
+func TestOwnershipOnlyProbesDoNotMaterializeGlobalRuntime(t *testing.T) {
+	db, err := storage.NewWithPath(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	factory := aa.MAv2FactoryAddress()
+	address := mockDerivedSenderAddress(owner, factory, big.NewInt(4))
+	_, err = walletinventory.Register(db, 11155111, owner, &model.SmartWallet{
+		Owner: &owner, Address: &address, Factory: &factory, Salt: big.NewInt(4),
+	}, 3)
+	require.NoError(t, err)
+	engine := &Engine{db: db, smartWalletConfig: &config.SmartWalletConfig{ChainID: 84532}}
+	user := &model.User{Address: owner}
+	owned, err := engine.userOwnsWalletOnAnyChain(user, address)
+	require.NoError(t, err)
+	require.True(t, owned)
+	retired, err := engine.runnerWalletIsRetired(user, address)
+	require.NoError(t, err)
+	require.False(t, retired)
+	exists, err := db.Exist([]byte(WalletStorageKey(84532, owner, address.Hex())))
+	require.NoError(t, err)
+	require.False(t, exists, "ownership-only reads must not materialize an unused network")
+	require.ErrorIs(t, StoreWallet(db, 84532, owner, &model.SmartWallet{
+		Owner: &owner, Address: &owner, Factory: &factory, Salt: big.NewInt(9),
+	}), walletinventory.ErrUnregistered)
 }

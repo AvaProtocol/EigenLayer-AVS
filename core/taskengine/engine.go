@@ -514,9 +514,14 @@ func (n *Engine) defaultChainID() int64 {
 // have passed on the default derived address alone, and that wallet can
 // still be created. One live record on any chain is false.
 func (n *Engine) runnerWalletIsRetired(user *model.User, walletAddr common.Address) (bool, error) {
+	if wallet, err := walletinventory.Get(n.db, user.Address, walletAddr.Hex()); err == nil {
+		return wallet.Retired, nil
+	} else if !errors.Is(err, badger.ErrKeyNotFound) {
+		return false, err
+	}
 	saw := false
 	for _, chainID := range n.knownChainIDs() {
-		wallet, err := GetWallet(n.db, chainID, user.Address, walletAddr.Hex())
+		wallet, err := storedWallet(n.db, chainID, user.Address, walletAddr.Hex())
 		if err == badger.ErrKeyNotFound {
 			continue
 		}
@@ -535,8 +540,13 @@ func (n *Engine) userOwnsWalletOnAnyChain(user *model.User, walletAddr common.Ad
 	if user.SmartAccountAddress != nil && user.SmartAccountAddress.Hex() == walletAddr.Hex() {
 		return true, nil
 	}
+	if _, err := walletinventory.Get(n.db, user.Address, walletAddr.Hex()); err == nil {
+		return true, nil
+	} else if !errors.Is(err, badger.ErrKeyNotFound) {
+		return false, err
+	}
 	for _, chainID := range n.knownChainIDs() {
-		ok, err := ValidWalletOwner(n.db, chainID, user, walletAddr)
+		ok, err := n.db.Exist([]byte(WalletStorageKey(chainID, user.Address, walletAddr.Hex())))
 		if err != nil {
 			return false, err
 		}

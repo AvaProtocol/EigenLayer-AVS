@@ -2195,6 +2195,15 @@ func (response CreateWallet401ApplicationProblemPlusJSONResponse) VisitCreateWal
 	return json.NewEncoder(w).Encode(response)
 }
 
+type CreateWallet429ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateWallet429ApplicationProblemPlusJSONResponse) VisitCreateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(429)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type UpdateWalletRequestObject struct {
 	Address EthereumAddress `json:"address"`
 	Body    *UpdateWalletJSONRequestBody
@@ -2231,6 +2240,15 @@ type UpdateWallet404ApplicationProblemPlusJSONResponse struct {
 func (response UpdateWallet404ApplicationProblemPlusJSONResponse) VisitUpdateWalletResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateWallet429ApplicationProblemPlusJSONResponse Problem
+
+func (response UpdateWallet429ApplicationProblemPlusJSONResponse) VisitUpdateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(429)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -3177,6 +3195,24 @@ type AllocateWallet429ApplicationProblemPlusJSONResponse Problem
 func (response AllocateWallet429ApplicationProblemPlusJSONResponse) VisitAllocateWalletResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(429)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AllocateWallet500ApplicationProblemPlusJSONResponse Problem
+
+func (response AllocateWallet500ApplicationProblemPlusJSONResponse) VisitAllocateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AllocateWallet503ApplicationProblemPlusJSONResponse Problem
+
+func (response AllocateWallet503ApplicationProblemPlusJSONResponse) VisitAllocateWalletResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
 
 	return json.NewEncoder(w).Encode(response)
 }

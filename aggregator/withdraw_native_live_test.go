@@ -83,7 +83,7 @@ func TestExecuteWithdraw_NativeGrant_Sepolia(t *testing.T) {
 	t.Cleanup(taskengine.ClearChainStateReaderRegistry)
 
 	factory := aa.MAv2FactoryAddress()
-	require.NoError(t, taskengine.StoreWallet(db, chainID.Int64(), owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, chainID.Int64(), owner, &model.SmartWallet{
 		Owner: &owner, Address: runner, Factory: &factory, Salt: big.NewInt(salt),
 	}))
 	user := &model.User{Address: owner, SmartAccountAddress: runner}

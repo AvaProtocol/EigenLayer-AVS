@@ -31,6 +31,7 @@ var (
 	ErrKeyReused     = errors.New("allocation idempotency key reused with different inputs")
 	ErrSaltExhausted = errors.New("smart wallet salt space exhausted")
 	ErrBadAllocation = errors.New("invalid wallet allocation request")
+	ErrUnregistered  = errors.New("new derived identities require explicit inventory admission")
 	// These shards are deliberately independent of execution and session locks.
 	// Inventory is a leaf: no network calls, simulation or other locks while held.
 	inventoryLocks [256]sync.Mutex
@@ -91,14 +92,14 @@ func lock(db storage.Storage, owner common.Address) *sync.Mutex {
 	_, _ = fmt.Fprintf(h, "%s:%s", db.DbPath(), ownerString(owner))
 	return &inventoryLocks[h.Sum32()%uint32(len(inventoryLocks))]
 }
-func commit(db storage.Storage, writes map[string][]byte) error {
+func commit(db storage.Storage, writes map[string][]byte, deletes ...[]byte) error {
 	writer, ok := db.(interface {
 		AtomicWrite(map[string][]byte, [][]byte) error
 	})
 	if !ok {
 		return fmt.Errorf("wallet inventory requires atomic storage")
 	}
-	return writer.AtomicWrite(writes, nil)
+	return writer.AtomicWrite(writes, deletes)
 }
 func encode(v interface{}) ([]byte, error) { return json.Marshal(v) }
 func IsDerived(w *model.SmartWallet) bool {
@@ -243,6 +244,9 @@ func registerLocked(db storage.Storage, chainID int64, owner common.Address, inc
 	if !IsDerived(incoming) || *incoming.Owner != owner {
 		return nil, fmt.Errorf("invalid derived wallet")
 	}
+	if limit < 1 {
+		return nil, fmt.Errorf("wallet inventory active limit must be positive")
+	}
 	existing, err := BySalt(db, owner, incoming.Salt)
 	if err == nil {
 		if *existing.Address != *incoming.Address {
@@ -329,14 +333,31 @@ func Register(db storage.Storage, chainID int64, owner common.Address, wallet *m
 }
 
 // StoreCompatibility is the low-level stored-record writer. It never restores an
-// existing global identity from a stale network projection. Admission belongs to Register.
+// existing global identity from a stale network projection. New identities must
+// pass Register first; this writer has no admission bypass.
 func StoreCompatibility(db storage.Storage, chainID int64, owner common.Address, wallet *model.SmartWallet) error {
+	if !IsDerived(wallet) || *wallet.Owner != owner {
+		return fmt.Errorf("invalid derived wallet")
+	}
 	mu := lock(db, owner)
 	mu.Lock()
 	defer mu.Unlock()
 	if !wallet.Retired && !wallet.StaleDerivation {
-		_, err := registerLocked(db, chainID, owner, wallet, 0, nil)
-		return err
+		existing, err := Get(db, owner, wallet.Address.Hex())
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return ErrUnregistered
+		}
+		if err != nil {
+			return err
+		}
+		if existing.Salt.Cmp(wallet.Salt) != 0 {
+			return ErrConflict
+		}
+		writes, err := runtimeWrites(chainID, owner, existing)
+		if err != nil {
+			return err
+		}
+		return commit(db, writes)
 	}
 	writes, err := runtimeWrites(chainID, owner, wallet)
 	if err != nil {
@@ -416,11 +437,24 @@ func SetHidden(db storage.Storage, owner common.Address, address string, hidden 
 	return w, nil
 }
 
+// ValidAllocationKey accepts only unambiguous, portable HTTP header values.
+func ValidAllocationKey(key string) bool {
+	if len(key) == 0 || len(key) > 256 {
+		return false
+	}
+	for _, c := range key {
+		if c < '!' || c > '~' {
+			return false
+		}
+	}
+	return true
+}
+
 // Allocate durably maps (owner, operation, client key) to one identity. The
 // network hint is intentionally excluded. Derivation happens outside the lock.
 func Allocate(ctx context.Context, db storage.Storage, chainID int64, owner common.Address, key, profile string, limit int, derive func(*big.Int) (*model.SmartWallet, error)) (*model.SmartWallet, error) {
-	if strings.TrimSpace(key) == "" || len(key) > 256 {
-		return nil, fmt.Errorf("%w: idempotency key must be 1 to 256 bytes", ErrBadAllocation)
+	if !ValidAllocationKey(key) {
+		return nil, fmt.Errorf("%w: idempotency key must be 1 to 256 printable ASCII characters without spaces", ErrBadAllocation)
 	}
 	if profile == "" {
 		profile = Profile

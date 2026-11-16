@@ -90,12 +90,31 @@ func migrateOwner(db storage.Storage, owner common.Address, wallets map[string]*
 		return 0, nil
 	}
 	writes := map[string][]byte{}
+	var deletes [][]byte
 	salts := map[string][]*model.SmartWallet{}
+	// Include already registered identities even if the migration's runtime
+	// scan predates their creation. A retry must not replace their salt index.
+	current, err := listLocked(db, owner)
+	if err != nil {
+		return 0, err
+	}
+	merged := make(map[string]*model.SmartWallet, len(wallets)+len(current))
+	for address, wallet := range wallets {
+		merged[address] = wallet
+	}
+	for _, wallet := range current {
+		address := strings.ToLower(wallet.Address.Hex())
+		if incoming := merged[address]; incoming != nil && incoming.Salt.Cmp(wallet.Salt) != 0 {
+			meta.Conflict = true
+			log.Printf("global-wallet-inventory: conflicting salts owner=%s wallet=%s; preserving registered identity", owner.Hex(), address)
+		}
+		merged[address] = wallet // Current global visibility always wins.
+	}
 	next, _ := new(big.Int).SetString(meta.NextSalt, 10)
 	if highest != nil && highest.Cmp(next) >= 0 {
 		next = new(big.Int).Add(highest, big.NewInt(1))
 	}
-	for _, incoming := range wallets {
+	for _, incoming := range merged {
 		w := *incoming
 		existing, err := Get(db, owner, w.Address.Hex())
 		if err == nil {
@@ -119,8 +138,16 @@ func migrateOwner(db storage.Storage, owner common.Address, wallets map[string]*
 	for _, rows := range salts {
 		if len(rows) > 1 {
 			meta.Conflict = true
+			deletes = append(deletes, saltKey(owner, rows[0].Salt))
 			log.Printf("global-wallet-inventory: conflicting addresses owner=%s salt=%s; new activations blocked", owner.Hex(), rows[0].Salt)
 		} else {
+			indexed, err := db.GetKey(saltKey(owner, rows[0].Salt))
+			if err == nil && !strings.EqualFold(string(indexed), rows[0].Address.Hex()) {
+				return 0, fmt.Errorf("%w: invalid preexisting salt index for %s", ErrConflict, rows[0].Salt)
+			}
+			if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+				return 0, err
+			}
 			writes[string(saltKey(owner, rows[0].Salt))] = []byte(strings.ToLower(rows[0].Address.Hex()))
 		}
 	}
@@ -131,7 +158,7 @@ func migrateOwner(db storage.Storage, owner common.Address, wallets map[string]*
 	if err != nil {
 		return 0, err
 	}
-	if err = commit(db, writes); err != nil {
+	if err = commit(db, writes, deletes...); err != nil {
 		return 0, err
 	}
 	log.Printf("global-wallet-inventory: imported owner=%s identities=%d conflict=%t", owner.Hex(), len(wallets), meta.Conflict)

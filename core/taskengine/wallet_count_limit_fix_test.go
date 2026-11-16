@@ -43,7 +43,7 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 		Factory: &factoryAddr,
 		Salt:    big.NewInt(0),
 	}
-	err := StoreWallet(db, int64(1), user.Address, wallet1)
+	err := storeWalletFixture(db, int64(1), user.Address, wallet1)
 	require.NoError(t, err)
 
 	addr2 := common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -53,7 +53,7 @@ func TestWalletCountLimitDoesNotBlockExistingWalletAccess(t *testing.T) {
 		Factory: &factoryAddr,
 		Salt:    big.NewInt(1),
 	}
-	err = StoreWallet(db, int64(1), user.Address, wallet2)
+	err = storeWalletFixture(db, int64(1), user.Address, wallet2)
 	require.NoError(t, err)
 
 	t.Run("Direct database access to existing wallets should work at limit", func(t *testing.T) {
@@ -146,7 +146,7 @@ func TestWalletCountLimitReproducesOriginalWithdrawFundsBug(t *testing.T) {
 			Factory: &factoryAddr,
 			Salt:    big.NewInt(int64(i)),
 		}
-		err := StoreWallet(db, int64(1), user.Address, wallet)
+		err := storeWalletFixture(db, int64(1), user.Address, wallet)
 		require.NoError(t, err)
 		wallets[i] = wallet
 	}
@@ -270,7 +270,7 @@ func TestEOA7702DoesNotConsumeWalletCap(t *testing.T) {
 	user := testutil.TestUser1()
 	owner := user.Address
 	delegate := common.HexToAddress("0x69007702764179f14F51cdce752f4f775d74E139")
-	require.NoError(t, StoreWallet(db, int64(1), owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, int64(1), owner, &model.SmartWallet{
 		Kind:     model.WalletKindEOA7702,
 		Owner:    &owner,
 		Address:  &owner,

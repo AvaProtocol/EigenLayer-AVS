@@ -123,7 +123,7 @@ func TestSimulateResolvesRunnerOnTheSimulatedChain(t *testing.T) {
 	runner := common.HexToAddress("0x00000000000000000000000000000000000000f1")
 	// Initially materialized only on the non-audience network. Its global
 	// identity must resolve unchanged on either runtime network.
-	require.NoError(t, StoreWallet(db, runnerOtherChain, owner, mkWallet(owner, factory, runner, 3)))
+	require.NoError(t, storeWalletFixture(db, runnerOtherChain, owner, mkWallet(owner, factory, runner, 3)))
 
 	// The JWT audience has no local runtime row yet.
 	user := &model.User{Address: owner, ChainID: runnerAudChain}
@@ -150,7 +150,7 @@ func TestRunNodeResolvesRunnerOnTheSettingsChain(t *testing.T) {
 	owner := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
 	factory := aa.MAv2FactoryAddress()
 	runner := common.HexToAddress("0x00000000000000000000000000000000000000f2")
-	require.NoError(t, StoreWallet(db, runnerOtherChain, owner, mkWallet(owner, factory, runner, 2)))
+	require.NoError(t, storeWalletFixture(db, runnerOtherChain, owner, mkWallet(owner, factory, runner, 2)))
 
 	user := &model.User{Address: owner, ChainID: runnerAudChain}
 	nodeConfig := map[string]interface{}{

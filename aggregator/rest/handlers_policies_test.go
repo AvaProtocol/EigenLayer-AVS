@@ -82,7 +82,7 @@ func newPolicyRig(t *testing.T) *policyTestRig {
 	owner := crypto.PubkeyToAddress(ownerKey.PublicKey)
 	wallet := common.HexToAddress("0x00000000000000000000000000000000000000b2")
 	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
-	require.NoError(t, taskengine.StoreWallet(db, policyTestChain, owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, policyTestChain, owner, &model.SmartWallet{
 		Owner: &owner, Address: &wallet, Factory: &factory, Salt: big.NewInt(0),
 	}))
 

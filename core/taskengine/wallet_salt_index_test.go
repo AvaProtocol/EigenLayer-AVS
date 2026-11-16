@@ -252,8 +252,8 @@ func TestListWallets_HardFiltersStaleRows(t *testing.T) {
 	// it disappears from the list response entirely.
 	a := common.HexToAddress("0xAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaaAAAAaaaa")
 	b := common.HexToAddress("0xBBBBbbbbBBBBbbbbBBBBbbbbBBBBbbbbBBBBbbbb")
-	require.NoError(t, StoreWallet(db, int64(1), owner, mkWallet(owner, factory, a, 100)))
-	require.NoError(t, StoreWallet(db, int64(1), owner, mkWallet(owner, factory, b, 101)))
+	require.NoError(t, storeWalletFixture(db, int64(1), owner, mkWallet(owner, factory, a, 100)))
+	require.NoError(t, storeWalletFixture(db, int64(1), owner, mkWallet(owner, factory, b, 101)))
 
 	// Flag b as stale.
 	require.NoError(t, MarkWalletStale(db, int64(1), owner, b.Hex()))

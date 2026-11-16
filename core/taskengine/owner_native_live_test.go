@@ -172,7 +172,7 @@ func runOwnerNativeSweepSepolia(t *testing.T, salt *big.Int, depositCoversGas bo
 	backend := &ownerNativeLiveBackend{}
 	engine.ownerExecutionBackend = backend
 	factory := aa.MAv2FactoryAddress()
-	require.NoError(t, StoreWallet(db, chainID.Int64(), owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, chainID.Int64(), owner, &model.SmartWallet{
 		Owner: &owner, Address: runner, Factory: &factory, Salt: salt,
 	}))
 	user := &model.User{Address: owner, SmartAccountAddress: runner, ChainID: chainID.Int64()}

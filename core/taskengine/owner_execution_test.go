@@ -106,7 +106,7 @@ func ownerEngineFixture(t *testing.T) (*Engine, *model.User, *ecdsa.PrivateKey, 
 	owner := crypto.PubkeyToAddress(key.PublicKey)
 	sender := common.HexToAddress("0x2222222222222222222222222222222222222222")
 	factory := aa.MAv2FactoryAddress()
-	require.NoError(t, StoreWallet(db, 11155111, owner, &model.SmartWallet{Owner: &owner, Address: &sender, Factory: &factory, Salt: big.NewInt(0)}))
+	require.NoError(t, storeWalletFixture(db, 11155111, owner, &model.SmartWallet{Owner: &owner, Address: &sender, Factory: &factory, Salt: big.NewInt(0)}))
 	backend := &ownerBackendFixture{}
 	// No live configuration, controller, session key, worker or chain is used.
 	n := New(db, &config.Config{OwnerExecutionEnabled: true, SmartWallet: &config.SmartWalletConfig{ChainID: 11155111, EthRpcUrl: "http://127.0.0.1:1", DisableGasSponsorship: true}}, nil, testutil.GetLogger())
@@ -270,7 +270,7 @@ func TestOwnerEOAWorkflowHonorsFlagAndStoredAssociation(t *testing.T) {
 				} else {
 					wallet.Retired = true
 				}
-				require.NoError(t, StoreWallet(n.db, 11155111, user.Address, wallet))
+				require.NoError(t, storeWalletFixture(n.db, 11155111, user.Address, wallet))
 			case "salt changed in record":
 				stored, err := n.db.GetKey(ownerExecutionKey(user.Address, p.Execution.Id))
 				require.NoError(t, err)

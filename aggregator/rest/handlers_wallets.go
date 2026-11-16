@@ -493,8 +493,8 @@ func (s *Server) AllocateWallet(ctx echo.Context, params generated.AllocateWalle
 			return badRequest("WALLETS_BAD_REQUEST", "Invalid allocation request", err.Error())
 		}
 	}
-	if strings.TrimSpace(params.IdempotencyKey) == "" || len(params.IdempotencyKey) > 256 {
-		return badRequest("WALLETS_BAD_KEY", "Allocation key required", "Supply an Idempotency-Key of 1 to 256 bytes.")
+	if !walletinventory.ValidAllocationKey(params.IdempotencyKey) {
+		return badRequest("WALLETS_BAD_KEY", "Invalid allocation key", "Use 1 to 256 printable ASCII characters without spaces for Idempotency-Key.")
 	}
 	profile := ""
 	if body.DeploymentProfile != nil {

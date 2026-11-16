@@ -49,7 +49,7 @@ func newPolicyTestEngine(t *testing.T) (*Engine, storage.Storage, *ecdsa.Private
 	owner := crypto.PubkeyToAddress(ownerKey.PublicKey)
 	wallet := common.HexToAddress("0x00000000000000000000000000000000000000a1")
 	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
-	require.NoError(t, StoreWallet(db, testPolicyChain, owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, testPolicyChain, owner, &model.SmartWallet{
 		Owner: &owner, Address: &wallet, Factory: &factory, Salt: big.NewInt(0),
 	}))
 	return engine, db, ownerKey, owner, wallet
@@ -81,7 +81,7 @@ func TestSessionPolicyPrepareRejectsSimpleAccountRunner(t *testing.T) {
 	// Legacy v0.6 SimpleAccount factory (not MA v2).
 	v06Factory := common.HexToAddress("0xB99BC2E399e06CddCF5E725c0ea341E8f0322834")
 	v06Wallet := common.HexToAddress("0x00000000000000000000000000000000000000b6")
-	require.NoError(t, StoreWallet(db, testPolicyChain, owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, testPolicyChain, owner, &model.SmartWallet{
 		Owner: &owner, Address: &v06Wallet, Factory: &v06Factory, Salt: big.NewInt(0),
 	}))
 

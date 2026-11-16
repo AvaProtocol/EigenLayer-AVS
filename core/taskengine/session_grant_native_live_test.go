@@ -249,7 +249,7 @@ func setupNativeLive(t *testing.T) *nativeLiveEnv {
 	t.Cleanup(ClearChainStateReaderRegistry)
 
 	factoryAddr := aa.MAv2FactoryAddress()
-	require.NoError(t, StoreWallet(db, chainID.Int64(), owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, chainID.Int64(), owner, &model.SmartWallet{
 		Owner: &owner, Address: runner, Factory: &factoryAddr,
 		Salt: big.NewInt(fixtureSaltNativeETH),
 	}))

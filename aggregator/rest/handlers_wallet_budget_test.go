@@ -62,7 +62,7 @@ func TestWalletBudgetMissingPermissionAndOwnership(t *testing.T) {
 	policy := &model.SessionPolicy{ID: "01foreignbudget", Owner: &foreignOwner, Runner: &foreignWallet, ChainID: policyTestChain, EntityID: 7,
 		Status: model.SessionPolicyPending, ValidUntil: 123456, NativeSpendCap: &model.NativeSpendCap{Amount: "987654321"}, SessionSigner: &foreignOwner,
 		Grant: &model.SessionGrantAuthorization{InstallCall: []byte{1}, OwnerSignature: []byte{1}, CarrierNonce: big.NewInt(1)}}
-	require.NoError(t, taskengine.StoreWallet(r.db, policyTestChain, foreignOwner, &model.SmartWallet{Owner: &foreignOwner, Address: &foreignWallet}))
+	require.NoError(t, storeWalletFixture(r.db, policyTestChain, foreignOwner, &model.SmartWallet{Owner: &foreignOwner, Address: &foreignWallet}))
 	require.NoError(t, taskengine.StoreSessionPolicy(r.db, policy))
 	rec = r.call(t, nil, func(c echo.Context) error {
 		return r.server.GetWalletBudget(c, generated.EthereumAddress(foreignWallet.Hex()), generated.GetWalletBudgetParams{})

@@ -51,7 +51,7 @@ func TestMAv2RecordIsDiscoverableBySenderScan(t *testing.T) {
 	factory := MAv2WalletFactory()
 	wallet := &model.SmartWallet{Owner: &owner, Address: &addr, Factory: &factory, Salt: big.NewInt(0)}
 
-	if err := StoreWallet(db, mav2TestChain, owner, wallet); err != nil {
+	if err := storeWalletFixture(db, mav2TestChain, owner, wallet); err != nil {
 		t.Fatalf("StoreWallet: %v", err)
 	}
 

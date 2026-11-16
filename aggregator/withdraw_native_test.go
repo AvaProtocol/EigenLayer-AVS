@@ -299,7 +299,7 @@ func TestDerivationSaltForWallet(t *testing.T) {
 	wallet := common.HexToAddress("0x16b4b3624CC88AAafE3Df54955d19AEB2840670C")
 	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
 	const chainID int64 = 11155111
-	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+	if err := storeWalletFixture(db, chainID, owner, &model.SmartWallet{
 		Owner: &owner, Address: &wallet, Factory: &factory, Salt: big.NewInt(25),
 	}); err != nil {
 		t.Fatal(err)
@@ -323,7 +323,7 @@ func TestDerivationSaltForWallet(t *testing.T) {
 	}
 
 	nilSaltWallet := common.HexToAddress("0x00000000000000000000000000000000000000a1")
-	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+	if err := storeWalletFixture(db, chainID, owner, &model.SmartWallet{
 		Owner: &owner, Address: &nilSaltWallet, Factory: &factory, Salt: nil,
 	}); err != nil {
 		t.Fatal(err)
@@ -362,7 +362,7 @@ func TestDerivationSaltForWallet(t *testing.T) {
 	if !strings.Contains(err.Error(), "not the salt-0 address") {
 		t.Fatalf("non-salt-0 miss: %v", err)
 	}
-	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+	if err := storeWalletFixture(db, chainID, owner, &model.SmartWallet{
 		Owner: &owner, Address: &salt0, Factory: &factory, Salt: nil,
 	}); err != nil {
 		t.Fatal(err)
@@ -380,7 +380,7 @@ func TestDerivationSaltForWallet(t *testing.T) {
 	}
 
 	negWallet := common.HexToAddress("0x00000000000000000000000000000000000000b1")
-	if err := taskengine.StoreWallet(db, chainID, owner, &model.SmartWallet{
+	if err := storeWalletFixture(db, chainID, owner, &model.SmartWallet{
 		Owner: &owner, Address: &negWallet, Factory: &factory, Salt: big.NewInt(-12),
 	}); err != nil {
 		t.Fatal(err)

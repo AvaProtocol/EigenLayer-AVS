@@ -42,8 +42,8 @@ func TestListWalletsFollowsTheResolvedChain(t *testing.T) {
 	factory := aa.MAv2FactoryAddress()
 	onDefault := common.HexToAddress("0xDDDDddddDDDDddddDDDDddddDDDDddddDDDDdddd")
 	onOther := common.HexToAddress("0xEEEEeeeeEEEEeeeeEEEEeeeeEEEEeeeeEEEEeeee")
-	require.NoError(t, StoreWallet(db, defaultChain, owner, mkWallet(owner, factory, onDefault, 100)))
-	require.NoError(t, StoreWallet(db, otherChain, owner, mkWallet(owner, factory, onOther, 200)))
+	require.NoError(t, storeWalletFixture(db, defaultChain, owner, mkWallet(owner, factory, onDefault, 100)))
+	require.NoError(t, storeWalletFixture(db, otherChain, owner, mkWallet(owner, factory, onOther, 200)))
 
 	listed := func(chainID int64) map[string]bool {
 		t.Helper()
@@ -452,7 +452,7 @@ func TestListWalletsOmitsRetiredDefaultWallet(t *testing.T) {
 	stored, err := GetWallet(db, chainID, user.Address, defaultAddr)
 	require.NoError(t, err)
 	stored.Retired = true
-	require.NoError(t, StoreWallet(db, chainID, user.Address, stored))
+	require.NoError(t, storeWalletFixture(db, chainID, user.Address, stored))
 
 	listed, err := engine.ListWallets(user, &avsproto.ListWalletReq{})
 	require.NoError(t, err)
@@ -485,7 +485,7 @@ func TestListWalletsSkipsRetiredWalletsAndCapIgnoresThem(t *testing.T) {
 	}
 	for i, address := range retired {
 		addr := address
-		require.NoError(t, StoreWallet(db, chainID, user.Address, &model.SmartWallet{
+		require.NoError(t, storeWalletFixture(db, chainID, user.Address, &model.SmartWallet{
 			Owner:    &user.Address,
 			Address:  &addr,
 			Factory:  &legacyFactory,

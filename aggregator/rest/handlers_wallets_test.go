@@ -74,10 +74,10 @@ func newWalletRig(t *testing.T) *walletTestRig {
 	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
 	onDefault := common.HexToAddress("0x00000000000000000000000000000000000000d1")
 	onOther := common.HexToAddress("0x00000000000000000000000000000000000000e1")
-	require.NoError(t, taskengine.StoreWallet(db, walletTestChain, owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, walletTestChain, owner, &model.SmartWallet{
 		Owner: &owner, Address: &onDefault, Factory: &factory, Salt: big.NewInt(100),
 	}))
-	require.NoError(t, taskengine.StoreWallet(db, walletOtherChain, owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(db, walletOtherChain, owner, &model.SmartWallet{
 		Owner: &owner, Address: &onOther, Factory: &factory, Salt: big.NewInt(200),
 	}))
 
@@ -145,7 +145,7 @@ func TestUpdateWalletHidesEOA7702NotSaltZeroDerived(t *testing.T) {
 	rig := newWalletRig(t)
 	factory := common.HexToAddress("0x00000000000017c61b5bEe81050EC8eFc9c6fecd")
 	saltZero := common.HexToAddress("0x00000000000000000000000000000000000000aa")
-	require.NoError(t, taskengine.StoreWallet(rig.db, walletTestChain, rig.owner, &model.SmartWallet{
+	require.NoError(t, storeWalletFixture(rig.db, walletTestChain, rig.owner, &model.SmartWallet{
 		Owner: &rig.owner, Address: &saltZero, Factory: &factory, Salt: big.NewInt(0),
 	}))
 	require.NoError(t, taskengine.StoreEOA7702Wallet(rig.db, walletTestChain, rig.owner, config.SMA7702Delegate()))

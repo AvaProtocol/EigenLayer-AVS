@@ -3250,6 +3250,7 @@ type GetWalletNonceParams struct {
 
 // AllocateWalletParams defines parameters for AllocateWallet.
 type AllocateWalletParams struct {
+	// IdempotencyKey A stable creation key of 1 to 256 printable ASCII characters without spaces. Reuse the exact key on retries.
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 

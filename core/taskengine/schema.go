@@ -109,23 +109,32 @@ func LookupCanonicalWalletAddress(db storage.Storage, chainID int64, owner commo
 	return common.HexToAddress(string(raw)), nil
 }
 
+// storedWallet reads a legacy/runtime row without materializing another network.
+func storedWallet(db storage.Storage, chainID int64, owner common.Address, address string) (*model.SmartWallet, error) {
+	raw, err := db.GetKey([]byte(WalletStorageKey(chainID, owner, address)))
+	if err != nil {
+		return nil, err
+	}
+	var wallet model.SmartWallet
+	if err = wallet.FromStorageData(raw); err != nil {
+		return nil, err
+	}
+	return &wallet, nil
+}
+
 // GetWallet resolves a global derived identity on the operation's network.
 // Historical recovery records and designated EOAs retain their local shape.
 func GetWallet(db storage.Storage, chainID int64, owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
-	walletData, err := db.GetKey([]byte(WalletStorageKey(chainID, owner, smartWalletAddress)))
+	wallet, err := storedWallet(db, chainID, owner, smartWalletAddress)
 	if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 		return nil, err
 	}
 	if err == nil {
-		var wallet model.SmartWallet
-		if err := wallet.FromStorageData(walletData); err != nil {
-			return nil, err
-		}
-		if !walletinventory.IsDerived(&wallet) || wallet.Retired || wallet.StaleDerivation {
-			return &wallet, nil
+		if !walletinventory.IsDerived(wallet) || wallet.Retired || wallet.StaleDerivation {
+			return wallet, nil
 		}
 		if _, globalErr := walletinventory.Get(db, owner, smartWalletAddress); errors.Is(globalErr, badger.ErrKeyNotFound) {
-			return &wallet, nil
+			return wallet, nil
 		} else if globalErr != nil {
 			return nil, globalErr
 		}
@@ -133,7 +142,9 @@ func GetWallet(db storage.Storage, chainID int64, owner common.Address, smartWal
 	return walletinventory.Materialize(db, chainID, owner, smartWalletAddress)
 }
 
-// StoreWallet persists the wallet record under its primary key
+// StoreWallet updates already admitted MA v2 identities and persists legacy
+// runtime/history records. New derived identities must pass inventory.Register.
+// It persists the wallet record under its primary key
 // (`w:<chainID>:<owner>:<address>`) and, when the wallet has a non-nil
 // factory and salt and is not flagged stale, also writes the
 // `(chainID, owner, factory, salt)` secondary index entry pointing at
