@@ -438,15 +438,24 @@ func formatNativeCapBelowFee(fee, remaining *big.Int, policyID string) string {
 		SessionPolicyNativeCapExceededCode, remaining, fee, policyID)
 }
 
+// The step metadata keys a reserved transfer adds: decimal wei strings, and
+// limitedBy only when the permission set the value. A loop iteration carries
+// them as well (ethIterationMetadata).
+const (
+	nativeReserveGasReserveKey   = "gasReserve"
+	nativeReserveLimitedByKey    = "limitedBy"
+	nativeReserveLeftInWalletKey = "leftInWallet"
+)
+
 // addNativeReserveMetadata reports what a reserved transfer kept for the fee
 // and, when anything stays in the wallet, how much and why.
 func addNativeReserveMetadata(metadata map[string]interface{}, sized *preset.NativeReserveResult) {
-	metadata["gasReserve"] = sized.GasReserve.String()
+	metadata[nativeReserveGasReserveKey] = sized.GasReserve.String()
 	if sized.LimitedBy == preset.NativeReserveLimitedByPermission {
-		metadata["limitedBy"] = sized.LimitedBy
+		metadata[nativeReserveLimitedByKey] = sized.LimitedBy
 	}
 	if sized.Left.Sign() > 0 {
-		metadata["leftInWallet"] = sized.Left.String()
+		metadata[nativeReserveLeftInWalletKey] = sized.Left.String()
 	}
 }
 

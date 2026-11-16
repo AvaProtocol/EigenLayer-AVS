@@ -105,8 +105,10 @@ operation's maximum gas cost.
    actually sent, not the balance. Metadata adds `gasReserve` in wei, so Studio
    can say "minus the network fee". When the permission term set the value, it
    also adds `limitedBy: "permission"`. When any ETH stays in the wallet, it
-   adds `leftInWallet` in wei. The result describes the operation as signed,
-   after any bundler retry (Edge cases). `NATIVE_BALANCE_BELOW_FEE` carries
+   adds `leftInWallet` in wei. A loop iteration's output carries the same
+   fields in its `metadata`, next to `transactionHash` (#915), so Sweep's ETH
+   loop reads like a standalone send. The result describes the operation as
+   signed, after any bundler retry (Edge cases). `NATIVE_BALANCE_BELOW_FEE` carries
    `INSUFFICIENT_BALANCE`; `NATIVE_CAP_BELOW_FEE` keeps its code in the
    message, like the other session-policy refusals. Both carry the amounts as
    error details.
