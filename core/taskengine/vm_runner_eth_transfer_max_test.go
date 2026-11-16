@@ -506,3 +506,84 @@ func TestETHTransferMaxSimulationWithAStoredGrant(t *testing.T) {
 		}
 	}
 }
+
+// A loop builds each iteration's output from the step (extractResultData), so
+// an ETH loop, such as Sweep's, reports the reserve the way a standalone send
+// does (#915).
+func TestLoopIterationCarriesTheNativeReserve(t *testing.T) {
+	iterationMetadata := func(t *testing.T, step *avsproto.Execution_Step) map[string]interface{} {
+		t.Helper()
+		output, ok := (&ExecutionQueue{}).extractResultData(step).(map[string]interface{})
+		require.True(t, ok)
+		require.Contains(t, output, "transfer", "the iteration keeps the transfer object")
+		metadata, ok := output["metadata"].(map[string]interface{})
+		require.True(t, ok)
+		require.NotEmpty(t, metadata["transactionHash"])
+		require.NotContains(t, metadata, "gasUsed", "gas figures stay on the step")
+		return metadata
+	}
+	sendWith := func(t *testing.T, sized *preset.NativeReserveResult) *avsproto.Execution_Step {
+		t.Helper()
+		_, client, url := newMaxTestChain(t, maxTestBalance)
+		stubSends(t, func(*preset.NativeReserve) (*preset.NativeReserveResult, error) { return sized, nil }, nil)
+		processor, node := newMaxTestProcessor(t, client, selfFundedMaxConfig(url))
+		step, err := processor.Execute("send-eth", node)
+		require.NoError(t, err)
+		return step
+	}
+	gasReserve := big.NewInt(400_000_000_000_000)
+
+	t.Run("run, the permission set the value", func(t *testing.T) {
+		metadata := iterationMetadata(t, sendWith(t, &preset.NativeReserveResult{
+			Value: big.NewInt(9_000_000_000_000_000), MaxGasCost: gasReserve, GasReserve: gasReserve,
+			LimitedBy: preset.NativeReserveLimitedByPermission, Left: big.NewInt(600_000_000_000_000),
+		}))
+		require.Equal(t, gasReserve.String(), metadata[nativeReserveGasReserveKey])
+		require.Equal(t, preset.NativeReserveLimitedByPermission, metadata[nativeReserveLimitedByKey])
+		require.Equal(t, "600000000000000", metadata[nativeReserveLeftInWalletKey])
+	})
+
+	t.Run("run, the balance set the value", func(t *testing.T) {
+		metadata := iterationMetadata(t, sendWith(t, &preset.NativeReserveResult{
+			Value: new(big.Int).Sub(maxTestBalance, gasReserve), MaxGasCost: gasReserve, GasReserve: gasReserve,
+			LimitedBy: preset.NativeReserveLimitedByBalance, Left: big.NewInt(0),
+		}))
+		require.Equal(t, gasReserve.String(), metadata[nativeReserveGasReserveKey])
+		require.NotContains(t, metadata, nativeReserveLimitedByKey)
+		require.NotContains(t, metadata, nativeReserveLeftInWalletKey)
+	})
+
+	t.Run("simulation", func(t *testing.T) {
+		_, client, url := newMaxTestChain(t, maxTestBalance)
+		processor, node := newMaxTestProcessor(t, client, selfFundedMaxConfig(url))
+		processor.vm.SetSimulation(true)
+		step, err := processor.Execute("send-eth", node)
+		require.NoError(t, err)
+		fee := new(big.Int).Mul(big.NewInt(nativePreflightGasUnitsSteady), big.NewInt(5_000_000_000))
+		require.Equal(t, fee.String(), iterationMetadata(t, step)[nativeReserveGasReserveKey])
+	})
+
+	t.Run("a sponsored MAX or a fixed amount carries only the hash", func(t *testing.T) {
+		for name, setup := range map[string]func(url string) (*config.SmartWalletConfig, string){
+			"sponsored MAX": func(url string) (*config.SmartWalletConfig, string) {
+				return &config.SmartWalletConfig{ChainID: maxTestChain, EthRpcUrl: url, AlchemyPaymasterPolicyID: "test-policy", BundlerProvider: config.BundlerProviderAlchemy}, "MAX"
+			},
+			"self-funded fixed amount": func(url string) (*config.SmartWalletConfig, string) {
+				return selfFundedMaxConfig(url), "1000000000000000"
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				_, client, url := newMaxTestChain(t, maxTestBalance)
+				stubSends(t, nil, func([]byte) {})
+				cfg, amount := setup(url)
+				processor, node := newMaxTestProcessor(t, client, cfg)
+				node.Config.Amount = amount
+				step, err := processor.Execute("send-eth", node)
+				require.NoError(t, err)
+				require.True(t, step.Success, step.Error)
+				metadata := iterationMetadata(t, step)
+				require.Len(t, metadata, 1, "only transactionHash: %v", metadata)
+			})
+		}
+	})
+}
