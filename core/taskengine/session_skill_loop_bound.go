@@ -105,9 +105,9 @@ const (
 // {{sweepPlan.data.ethSends}}, whose loop sends amount MAX.
 const sweepPlanSource = `// Sends each selected token's whole balance to the destination, and leaves
 // out a token the wallet doesn't hold. ETH goes in its own loop, after the
-// tokens, with amount MAX: the whole ETH balance at that point, which needs
-// the network's gas sponsorship. A loop sends every row with one runner, so
-// ETH and ERC-20 rows can't share one.
+// tokens, with amount MAX: the whole ETH balance at that point, minus the
+// network fee when the wallet pays its own gas. A loop sends every row with
+// one runner, so ETH and ERC-20 rows can't share one.
 const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const held = {};
 for (const b of balances.data) {
