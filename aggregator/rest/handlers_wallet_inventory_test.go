@@ -7,9 +7,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/generated"
 	restmw "github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/middleware"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
@@ -17,6 +19,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 )
@@ -28,6 +31,45 @@ func inventoryContext(owner common.Address, chainID int64, body string) (echo.Co
 	ctx := echo.New().NewContext(req, rec)
 	ctx.Set("auth.user", &restmw.AuthenticatedUser{Subject: owner.Hex(), ChainID: chainID})
 	return ctx, rec
+}
+
+func TestAllocateWalletThroughMountedHTTPRouter(t *testing.T) {
+	rig := newWalletRig(t)
+	rig.owner = common.HexToAddress("0x7777777777777777777777777777777777777777")
+	rig.server.config.JwtSecret = []byte("wallet-routing-test-secret")
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, &jwt.RegisteredClaims{
+		Issuer: auth.Issuer, Subject: rig.owner.Hex(),
+		Audience: jwt.ClaimStrings{"11155111"}, ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+	}).SignedString(rig.server.config.JwtSecret)
+	require.NoError(t, err)
+	e := echo.New()
+	rig.server.Mount(e)
+	call := func(authenticated, key bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets:allocate", strings.NewReader(`{}`))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		if authenticated {
+			req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+		}
+		if key {
+			req.Header.Set("Idempotency-Key", "mounted-allocation")
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+	require.Equal(t, http.StatusUnauthorized, call(false, true).Code)
+	require.Equal(t, http.StatusBadRequest, call(true, false).Code)
+	first := call(true, true)
+	require.Equal(t, http.StatusCreated, first.Code, first.Body.String())
+	var wallet generated.Wallet
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &wallet))
+	require.NotNil(t, wallet.WalletId)
+	require.Equal(t, "0", wallet.Salt)
+	replay := call(true, true)
+	require.Equal(t, http.StatusCreated, replay.Code)
+	var replayed generated.Wallet
+	require.NoError(t, json.Unmarshal(replay.Body.Bytes(), &replayed))
+	require.Equal(t, wallet.WalletId, replayed.WalletId)
 }
 func TestGlobalWalletInventoryHideCreateRestoreHTTP(t *testing.T) {
 	rig := newWalletRig(t)

@@ -413,6 +413,7 @@ func registerColonActionShimRoutes(api *echo.Group, s *Server) {
 	// oapi-codegen runtime handles query-param binding the same way the
 	// non-shim routes would.
 	api.POST("/auth"+colonActionShim+"exchange", wrapper.AuthExchange)
+	api.POST("/wallets"+colonActionShim+"allocate", wrapper.AllocateWallet)
 	api.POST("/workflows"+colonActionShim+"simulate", wrapper.SimulateWorkflow)
 	api.POST("/workflows"+colonActionShim+"prepare", wrapper.PrepareWorkflow)
 	api.POST("/workflows"+colonActionShim+"estimateFees", wrapper.EstimateWorkflowFees)
