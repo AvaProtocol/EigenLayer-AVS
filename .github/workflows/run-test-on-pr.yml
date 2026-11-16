@@ -242,6 +242,7 @@ jobs:
           - worker
           - core/backup
           - core/migrator
+          - core/walletinventory
           - migrations
           - operator
 
