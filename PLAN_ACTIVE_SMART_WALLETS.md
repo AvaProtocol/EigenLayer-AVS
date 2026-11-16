@@ -61,6 +61,8 @@ The production infrastructure configuration in `../avs-infra/railway/configs/gat
 
 Introduce an AVS identity record keyed by `(owner, deploymentProfile, salt)`, with an immutable `walletId`, predicted address, factory, global hidden flag, lifecycle flags, and creation order. The deployment profile pins the current semi-modular derivation inputs. Neither identity keys nor address and salt indexes contain `chainId`. Count all active derived profiles together for the owner, so selecting another factory or profile cannot create another quota bucket.
 
+The canonical salt index enforces that tuple. Recovery records for conflicting historical addresses must have distinct immutable IDs (including their pinned address), so a downstream mirror cannot overwrite one address with another. Leave the canonical index unresolved and block new activation until the conflict is reconciled.
+
 Maintain one owner metadata record containing the inventory revision, next automatic salt, and any allocation idempotency references. The active count can be computed from the canonical owner inventory; if cached, update and verify it atomically. Keep the limit in gateway configuration rather than copying it into each chain row.
 
 Retain the existing `w:<chainID>:<owner>:<address>` records as network runtime or compatibility records linked to `walletId`. They no longer own derived-wallet visibility or quota. Resolve all inventory responses and compatibility hidden fields from the global record. Do not fan out archive mutations to every chain row and hope the writes stay synchronized.
@@ -168,9 +170,13 @@ Implement and release in this order:
 
 Backend registry enforcement must precede the Studio controls. Rolling back to chain-only inventory writers after global mutations requires an explicit data reconciliation, not merely a binary rollback. Keep implementation and validation checklists open until completed.
 
+## Implementation status (2026-11-15)
+
+The registry, migration, APIs, runtime consumers, companion SDK, Studio mirror/UI, and infra source configuration are implemented locally. See [implementation and rollout notes](docs/changes/20261115-global-smart-wallet-inventory.md). The deployment profile has been verified with read-only calls for salts `0` and `4` on all 11 supported networks. Local test coverage does not close the signed cross-network execution, live migration audit, or rollout checks below.
+
 ## Acceptance checks
 
-- [ ] Verify factory/implementation profile and matching predicted addresses for representative owner/salt vectors, including `0` and `4`, on every supported network using read-only calls. An unavailable or mismatched network cannot change a global address.
+- [x] Verify factory/implementation profile and matching predicted addresses for representative owner/salt vectors, including `0` and `4`, on every supported network using read-only calls. An unavailable or mismatched network cannot change a global address.
 - [ ] With global active salts `0,1,2`, creating `3` or `4` from any network fails without registering another identity.
 - [ ] Hide `0` from Base; ensure unused `4` from Ethereum; verify active `1,2,4` and hidden `0` in AVS and Studio on every network. No on-chain deployment is needed for the inventory change.
 - [ ] Restore `0` from a third network at capacity fails; hide `2`, then restore `0`; all networks show the same result.

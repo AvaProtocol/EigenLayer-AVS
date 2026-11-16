@@ -1781,6 +1781,11 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
 	}
+	if err := v.materializeInventoryRunner(node.Config.GetChainId()); err != nil {
+		failed := v.createExecutionStep(stepID, false, "could not materialize wallet runtime: "+err.Error(), "", time.Now().UnixMilli())
+		failed.EndAt = time.Now().UnixMilli()
+		return failed, err
+	}
 	if swConfig == nil || swConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write (chain_id=%d)", node.Config.GetChainId())
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
@@ -1829,7 +1834,7 @@ func (v *VM) runContractWrite(taskNode *avsproto.TaskNode) (*avsproto.Execution_
 		_, hasSalt := v.vars["aa_salt"]
 		v.mu.Unlock()
 		if !hasSalt && v.db != nil {
-			if wallet, err := GetWallet(v.db, v.vmDefaultChainID(), v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
+			if wallet, err := GetWallet(v.db, node.Config.GetChainId(), v.TaskOwner, v.task.SmartWalletAddress); err == nil && wallet != nil && wallet.Salt != nil {
 				v.AddVar("aa_salt", wallet.Salt)
 			}
 		}
@@ -2010,6 +2015,11 @@ func (v *VM) runEthTransfer(taskNode *avsproto.TaskNode) (*avsproto.Execution_St
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
+	}
+	if err := v.materializeInventoryRunner(node.Config.GetChainId()); err != nil {
+		failed := v.createExecutionStep(stepID, false, "could not materialize wallet runtime: "+err.Error(), "", time.Now().UnixMilli())
+		failed.EndAt = time.Now().UnixMilli()
+		return failed, err
 	}
 	if swConfig == nil || swConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for ETH transfer (chain_id=%d)", node.Config.GetChainId())

@@ -48,7 +48,7 @@ func TestFeeBilling_CreditGating_BlocksOnOutstandingBalance(t *testing.T) {
 
 	// Register the smart wallet for this owner so executor wallet validation passes
 	walletAddr := common.HexToAddress(smartWalletAddr)
-	StoreWallet(db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
+	storeWalletFixture(db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
 
 	// Create a simple task with manual trigger and custom code node (no on-chain ops)
 	task := &model.Workflow{
@@ -160,7 +160,7 @@ func TestFeeBilling_CreditGating_AllowsWithHighCreditLimit(t *testing.T) {
 
 	// Register the smart wallet for this owner
 	walletAddr := common.HexToAddress(smartWalletAddr)
-	StoreWallet(db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
+	storeWalletFixture(db, int64(1), owner, &model.SmartWallet{Address: &walletAddr})
 
 	task := &model.Workflow{
 		Task: &avsproto.Task{

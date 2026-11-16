@@ -34,6 +34,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/walletinventory"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/avsclient"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -92,12 +93,13 @@ func newHarness(t *testing.T) *testHarness {
 	// the workflow's smartWalletAddress. Production callers reach this
 	// state via POST /wallets; tests skip the RPC-driven derivation
 	// and stuff the record straight into BadgerDB.
-	require.NoError(t, taskengine.StoreWallet(db, cfg.SmartWallet.ChainID, user.Address, &model.SmartWallet{
+	_, err := walletinventory.Register(db, cfg.SmartWallet.ChainID, user.Address, &model.SmartWallet{
 		Owner:   &user.Address,
 		Address: user.SmartAccountAddress,
 		Factory: walletFactoryPointer(cfg),
 		Salt:    big.NewInt(0),
-	}))
+	}, 3)
+	require.NoError(t, err)
 
 	return &testHarness{
 		t:      t,

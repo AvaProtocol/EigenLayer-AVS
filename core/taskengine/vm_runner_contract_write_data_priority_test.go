@@ -46,7 +46,7 @@ func TestContractWriteDataPriority(t *testing.T) {
 		runnerAddr, err := aa.GetSenderAddressMAv2(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
-		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
+		_ = storeWalletFixture(db, int64(1), ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
 			Address: runnerAddr,
 			Factory: &factory,

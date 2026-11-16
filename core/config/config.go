@@ -47,9 +47,15 @@ const DefaultBudgetLogBlockRange uint64 = 10_000
 // YAML override could only ever be wrong.
 const EntryPointV07AddressHex = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
 
-// Config contains all of the configuration information for a credible squaring aggregators and challengers.
-// Operators use a separate config. (see config-files/operator.anvil.yaml)
+// WalletInventoryConfig controls owner-wide derived-identity admission.
+type WalletInventoryConfig struct {
+	MaxActiveWalletsPerOwner int `yaml:"max_active_wallets_per_owner"`
+}
+
+// Config contains aggregator configuration. Operators use a separate config.
 type Config struct {
+	WalletInventory *WalletInventoryConfig
+
 	EcdsaPrivateKey           *ecdsa.PrivateKey
 	BlsPrivateKey             *bls.PrivateKey
 	Logger                    sdklogging.Logger
@@ -573,13 +579,14 @@ type PartnerConfig struct {
 
 // These are read from configPath
 type ConfigRaw struct {
-	EcdsaPrivateKey   string              `yaml:"ecdsa_private_key"`
-	Environment       sdklogging.LogLevel `yaml:"environment"`
-	EthRpcUrl         string              `yaml:"eth_rpc_url"`
-	EthWsUrl          string              `yaml:"eth_ws_url"`
-	SentryDsn         string              `yaml:"sentry_dsn,omitempty"`
-	SentryEnvironment string              `yaml:"sentry_environment,omitempty"`
-	ServerName        string              `yaml:"server_name,omitempty"`
+	WalletInventory   *WalletInventoryConfig `yaml:"smart_wallet_inventory"`
+	EcdsaPrivateKey   string                 `yaml:"ecdsa_private_key"`
+	Environment       sdklogging.LogLevel    `yaml:"environment"`
+	EthRpcUrl         string                 `yaml:"eth_rpc_url"`
+	EthWsUrl          string                 `yaml:"eth_ws_url"`
+	SentryDsn         string                 `yaml:"sentry_dsn,omitempty"`
+	SentryEnvironment string                 `yaml:"sentry_environment,omitempty"`
+	ServerName        string                 `yaml:"server_name,omitempty"`
 
 	RpcBindAddress  string `yaml:"rpc_bind_address"`
 	HttpBindAddress string `yaml:"http_bind_address"`
@@ -696,6 +703,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 		if err := ReadYamlConfig(configFilePath, &configRaw); err != nil {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
+	}
+
+	if err := resolveWalletInventoryConfig(&configRaw); err != nil {
+		return nil, err
 	}
 
 	logger, err := newLogger(configRaw.Environment, "aggregator")
@@ -870,6 +881,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		EthWsClient:       ethWsClient,
 
 		Environment:                       configRaw.Environment,
+		WalletInventory:                   configRaw.WalletInventory,
 		OperatorStateRetrieverAddr:        common.HexToAddress(configRaw.OperatorStateRetrieverAddr),
 		AutomationRegistryCoordinatorAddr: common.HexToAddress(configRaw.AVSRegistryCoordinatorAddr),
 		RpcBindAddress:                    configRaw.RpcBindAddress,

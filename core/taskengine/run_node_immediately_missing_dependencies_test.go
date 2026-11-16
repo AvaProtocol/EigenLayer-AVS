@@ -46,7 +46,7 @@ func TestRunNodeImmediately_ContractWrite_MissingNodeDependency(t *testing.T) {
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	// Seed wallet in DB for validation
-	_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
+	_ = storeWalletFixture(db, int64(1), ownerEOA, &model.SmartWallet{
 		Owner:   &ownerEOA,
 		Address: runnerAddr,
 		Factory: &factory,

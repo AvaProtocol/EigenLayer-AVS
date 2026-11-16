@@ -87,7 +87,7 @@ func TestSimulateTask_StopLossWorkflow_Sepolia(t *testing.T) {
 		SmartAccountAddress: smartWalletAddr,
 	}
 	require.NoError(t,
-		StoreWallet(db, int64(11155111), ownerAddress, &model.SmartWallet{
+		storeWalletFixture(db, int64(11155111), ownerAddress, &model.SmartWallet{
 			Owner:   &ownerAddress,
 			Address: smartWalletAddr,
 			Factory: &factory,

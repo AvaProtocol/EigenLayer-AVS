@@ -105,7 +105,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		runnerAddr, err := aa.GetSenderAddressMAv2(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
-		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
+		_ = storeWalletFixture(db, int64(1), ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
 
 		// Provide settings for new backend validation structure
 		triggerData := map[string]interface{}{
@@ -172,7 +172,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		// Seed wallet for validation
-		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
+		_ = storeWalletFixture(db, int64(1), ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
 
 		// Full USDC ABI as provided in client request (truncated for readability but key functions included)
 		contractAbi := []interface{}{
@@ -303,7 +303,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		require.NoError(t, derr, "Failed to derive runner")
 
 		// Seed wallet for validation
-		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: derivedRunner, Factory: &factory, Salt: big.NewInt(0)})
+		_ = storeWalletFixture(db, int64(1), ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: derivedRunner, Factory: &factory, Salt: big.NewInt(0)})
 
 		// Minimal ABI for transfer(address,uint256)
 		transferAbi := []interface{}{

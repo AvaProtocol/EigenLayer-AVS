@@ -121,41 +121,36 @@ func TestSimulateResolvesRunnerOnTheSimulatedChain(t *testing.T) {
 	owner := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
 	factory := aa.MAv2FactoryAddress()
 	runner := common.HexToAddress("0x00000000000000000000000000000000000000f1")
-	// Registered ONLY on the non-audience chain, so the two chains cannot
-	// agree by accident.
-	require.NoError(t, StoreWallet(db, runnerOtherChain, owner, mkWallet(owner, factory, runner, 3)))
+	// Initially materialized only on the non-audience network. Its global
+	// identity must resolve unchanged on either runtime network.
+	require.NoError(t, storeWalletFixture(db, runnerOtherChain, owner, mkWallet(owner, factory, runner, 3)))
 
-	// The audience is the chain the runner is NOT on.
+	// The JWT audience has no local runtime row yet.
 	user := &model.User{Address: owner, ChainID: runnerAudChain}
 
 	onRunnerChain := resolvedSender(t, engine, user, runner, runnerOtherChain)
 	require.Equal(t, strings.ToLower(runner.Hex()), strings.ToLower(onRunnerChain),
 		"simulating on the runner's chain must resolve to the runner itself")
 
-	// Control: the same call aimed at the audience chain, where the runner is
-	// genuinely absent. It must NOT come back as the runner — that is the
-	// silent substitution described above, and it is what proves the
-	// assertion above is reading the simulated chain rather than the
-	// audience one.
+	// Switching runtime networks must retain this exact registered runner.
 	onAudChain := resolvedSender(t, engine, user, runner, runnerAudChain)
-	require.NotEqual(t, strings.ToLower(runner.Hex()), strings.ToLower(onAudChain),
-		"the runner is not registered on the audience chain, so it cannot resolve there")
+	require.Equal(t, strings.ToLower(runner.Hex()), strings.ToLower(onAudChain),
+		"global runner identity must never be substituted when switching networks")
 }
 
 // The same routing on the RunNodeImmediately path, where the chain comes
 // from settings.chain_id (the value vmSmartWalletConfig is resolved from)
 // rather than a simulate argument.
 //
-// Here the wrong-chain outcome is loud rather than quiet: a runner missing
-// from the listed chain falls through to the salt-0..4 derivation scan, and
-// an address that is not a derived wallet is rejected outright.
+// A registered global identity must reach node validation even when the
+// requested operation network has never materialized a runtime row.
 func TestRunNodeResolvesRunnerOnTheSettingsChain(t *testing.T) {
 	engine, db := newRunnerChainEngine(t)
 
 	owner := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
 	factory := aa.MAv2FactoryAddress()
 	runner := common.HexToAddress("0x00000000000000000000000000000000000000f2")
-	require.NoError(t, StoreWallet(db, runnerOtherChain, owner, mkWallet(owner, factory, runner, 2)))
+	require.NoError(t, storeWalletFixture(db, runnerOtherChain, owner, mkWallet(owner, factory, runner, 2)))
 
 	user := &model.User{Address: owner, ChainID: runnerAudChain}
 	nodeConfig := map[string]interface{}{
@@ -169,16 +164,14 @@ func TestRunNodeResolvesRunnerOnTheSettingsChain(t *testing.T) {
 		return err
 	}
 
-	// The runner is not on the audience chain, and it is not a derived
-	// address either, so the scan rejects it.
+	// Missing ABI is the expected error after global ownership succeeds.
 	err := run(runnerAudChain)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "does not match any derived address",
-		"a runner absent from the named chain must be rejected")
+	require.NotContains(t, err.Error(), "does not match any derived address",
+		"a global identity is owned even before its network runtime row exists")
+	require.Contains(t, err.Error(), "contractAbi", "the request reaches node validation after global ownership succeeds")
 
-	// Naming the chain it IS registered on must clear that check. Whatever
-	// the write itself does afterwards, it must not be refused as an
-	// unrecognised runner.
+	// The original runtime network also retains exact ownership.
 	if err := run(runnerOtherChain); err != nil {
 		require.NotContains(t, err.Error(), "does not match any derived address",
 			"the runner is registered on the named chain and must resolve there")

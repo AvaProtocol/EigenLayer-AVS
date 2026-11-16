@@ -14,6 +14,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/walletinventory"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -31,6 +32,11 @@ var (
 
 func storeTestWallet(t *testing.T, db storage.Storage, chainID int64, w *model.SmartWallet) {
 	t.Helper()
+	if walletinventory.IsDerived(w) {
+		_, err := walletinventory.Register(db, chainID, retireOwner, w, 3)
+		require.NoError(t, err)
+		return
+	}
 	require.NoError(t, taskengine.StoreWallet(db, chainID, retireOwner, w))
 }
 

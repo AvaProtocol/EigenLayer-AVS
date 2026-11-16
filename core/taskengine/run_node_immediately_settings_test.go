@@ -45,7 +45,7 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		}
 
 		// Seed wallet in DB for validation
-		_ = StoreWallet(db, int64(1), ownerEOA, &model.SmartWallet{
+		_ = storeWalletFixture(db, int64(1), ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
 			Address: runnerAddr,
 			Factory: &factory,

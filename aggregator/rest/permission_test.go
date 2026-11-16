@@ -15,8 +15,9 @@ var expectedPermissionLevels = map[string]Level{
 
 	OpGetToken: LevelPartnerRead,
 
-	OpListWallets:  LevelPartnerWalletPreview,
-	OpCreateWallet: LevelPartnerWalletPreview,
+	OpListWallets:    LevelPartnerWalletPreview,
+	OpCreateWallet:   LevelPartnerWalletPreview,
+	OpAllocateWallet: LevelUser,
 
 	OpSimulateWorkflow: LevelUser,
 	OpPrepareWorkflow:  LevelUser,
@@ -218,5 +219,19 @@ func TestEnsurePermission_Public(t *testing.T) {
 	}
 	if p.Level != LevelPublic || p.User != nil {
 		t.Fatalf("unexpected principal %+v", p)
+	}
+}
+
+func TestEnsurePermission_AllocationRequiresOwnerJWT(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	s := newPartnerServer(t, pub, []string{scopeRead}, partnerStatusActive)
+	_, err := s.ensurePermission(ctxWithAssertion(signAssertion(t, priv, validClaims())), OpAllocateWallet)
+	assertHTTPStatus(t, err, http.StatusUnauthorized)
+	principal, err := s.ensurePermission(ctxWithUser(testPartnerSubject), OpAllocateWallet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if principal.User.Address.Hex() != testPartnerSubject {
+		t.Fatal("allocation owner must come from JWT subject")
 	}
 }

@@ -137,7 +137,7 @@ func lookupTestEngine(t *testing.T) (*Engine, storage.Storage, common.Address, c
 	}
 	owner := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	sender := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	require.NoError(t, StoreWallet(db, 11155111, owner, &model.SmartWallet{Address: &sender}))
+	require.NoError(t, storeWalletFixture(db, 11155111, owner, &model.SmartWallet{Address: &sender}))
 	return engine, db, owner, sender
 }
 

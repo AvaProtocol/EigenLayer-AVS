@@ -20,6 +20,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/walletinventory"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -82,7 +83,8 @@ func TestRestoreBackupFindsLegacyWallets(t *testing.T) {
 	maV2Factory := aa.MAv2FactoryAddress()
 	current := common.HexToAddress("0x00000000000000000000000000000000000000C2")
 	require.NoError(t, taskengine.StoreWallet(source, 84532, owner, &model.SmartWallet{Owner: &owner, Address: &legacy, Factory: &legacyFactory, Salt: big.NewInt(0)}))
-	require.NoError(t, taskengine.StoreWallet(source, 84532, owner, &model.SmartWallet{Owner: &owner, Address: &current, Factory: &maV2Factory, Salt: big.NewInt(0)}))
+	_, err = walletinventory.Register(source, 84532, owner, &model.SmartWallet{Owner: &owner, Address: &current, Factory: &maV2Factory, Salt: big.NewInt(0)}, 3)
+	require.NoError(t, err)
 
 	backupPath := filepath.Join(t.TempDir(), "full-backup.db")
 	out, err := os.Create(backupPath)

@@ -95,7 +95,7 @@ func setupUserOpWithdrawalTest(t *testing.T) (*config.Config, common.Address, *c
 	// one: a wallet stored under the wrong chain is invisible to ListWallets,
 	// and runner validation then falls back to deriving salts 0-4, which
 	// silently worked only while every fixture was salt 0.
-	err = StoreWallet(db, cfg.SmartWallet.ChainID, ownerAddress, &model.SmartWallet{
+	err = storeWalletFixture(db, cfg.SmartWallet.ChainID, ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
 		Salt:    big.NewInt(fixtureSaltWithdrawal),
@@ -399,7 +399,7 @@ func TestUserOpETHWithdrawal_Sepolia(t *testing.T) {
 	}
 
 	// Register the smart wallet in the database
-	err = StoreWallet(db, int64(11155111), ownerAddress, &model.SmartWallet{
+	err = storeWalletFixture(db, int64(11155111), ownerAddress, &model.SmartWallet{
 		Owner:   &ownerAddress,
 		Address: smartWalletAddress,
 		Salt:    big.NewInt(fixtureSaltWithdrawal),

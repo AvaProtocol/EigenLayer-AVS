@@ -48,6 +48,7 @@ func TestColonActionRouting(t *testing.T) {
 		{"GET", "/executions/:id:stream", "EXECUTION_STREAM"},
 		// Collection-level — these are the ones the original bug missed
 		{"POST", "/auth:exchange", "AUTH_EXCHANGE"},
+		{"POST", "/wallets:allocate", "WALLET_ALLOCATE"},
 		{"POST", "/workflows:simulate", "WORKFLOW_SIMULATE"},
 		{"POST", "/workflows:prepare", "WORKFLOW_PREPARE"},
 		{"POST", "/workflows:estimateFees", "WORKFLOW_ESTIMATE_FEES"},
@@ -156,6 +157,7 @@ func TestShouldDropRoute(t *testing.T) {
 		{"/workflows", false},
 		{"/workflows/:id", false},
 		{"/auth:exchange", true},
+		{"/wallets:allocate", true},
 		{"/wallets/:address/delegation:prepare", true},
 		{"/wallets/:address/delegation:submit", true},
 		{"/wallets/:address/delegation", false},

@@ -1,3 +1,6 @@
+smart_wallet_inventory:
+  max_active_wallets_per_owner: 2000
+
 # Test configuration TEMPLATE for running the Go test suite locally.
 #
 # This is the fixture that the test suite loads (testutil.DefaultConfigPath).

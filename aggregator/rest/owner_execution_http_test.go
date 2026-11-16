@@ -167,7 +167,7 @@ func ownerWorkflowHTTPRoundTrip(t *testing.T, eoa bool) {
 		cfg.SmartWallet.EOA7702Execute = true
 		cfg.SmartWallet.SMA7702Delegate, cfg.SmartWallet.SMA7702ImplHash = config.SMA7702Delegate(), config.SMA7702ImplHash()
 	} else {
-		require.NoError(t, taskengine.StoreWallet(db, 11155111, owner, &model.SmartWallet{Owner: &owner, Address: &sender, Factory: &factory, Salt: big.NewInt(0)}))
+		require.NoError(t, storeWalletFixture(db, 11155111, owner, &model.SmartWallet{Owner: &owner, Address: &sender, Factory: &factory, Salt: big.NewInt(0)}))
 	}
 	engine := taskengine.New(db, cfg, nil, testutil.GetLogger())
 	e := echo.New()
