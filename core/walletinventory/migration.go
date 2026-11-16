@@ -23,21 +23,32 @@ func Migrate(db storage.Storage) (int, error) {
 	}
 	groups := map[common.Address]map[string]*model.SmartWallet{}
 	highest := map[common.Address]*big.Int{}
+	var validationErrors []error
 	for _, row := range rows {
 		parts := strings.Split(string(row.Key), ":")
-		if len(parts) != 4 || !common.IsHexAddress(parts[2]) || !common.IsHexAddress(parts[3]) {
-			return 0, fmt.Errorf("invalid wallet runtime key %q", row.Key)
+		// Runtime wallet lookups only read four-part chain-scoped keys.
+		// Preserve every other shape for recovery without importing its
+		// identity or salt history. Check the key before decoding its value.
+		if len(parts) != 4 {
+			log.Printf("global-wallet-inventory: skipped non-chain-scoped wallet key=%s", row.Key)
+			continue
+		}
+		if !common.IsHexAddress(parts[2]) || !common.IsHexAddress(parts[3]) {
+			validationErrors = append(validationErrors, fmt.Errorf("invalid wallet runtime key %q", row.Key))
+			continue
 		}
 		var w model.SmartWallet
 		if err = w.FromStorageData(row.Value); err != nil {
-			return 0, fmt.Errorf("decode %s: %w", row.Key, err)
+			validationErrors = append(validationErrors, fmt.Errorf("decode %s: %w", row.Key, err))
+			continue
 		}
 		if !IsDerived(&w) {
 			continue
 		}
 		owner := common.HexToAddress(parts[2])
 		if *w.Owner != owner || !strings.EqualFold(w.Address.Hex(), parts[3]) {
-			return 0, fmt.Errorf("wallet key/owner mismatch: %s", row.Key)
+			validationErrors = append(validationErrors, fmt.Errorf("wallet key/owner mismatch: %s", row.Key))
+			continue
 		}
 		if groups[owner] == nil {
 			groups[owner] = map[string]*model.SmartWallet{}
@@ -52,7 +63,8 @@ func Migrate(db storage.Storage) (int, error) {
 		address := strings.ToLower(w.Address.Hex())
 		if previous := groups[owner][address]; previous != nil {
 			if previous.Salt.Cmp(w.Salt) != 0 {
-				return 0, fmt.Errorf("wallet address has conflicting salts: %s", row.Key)
+				validationErrors = append(validationErrors, fmt.Errorf("wallet address has conflicting salts: %s", row.Key))
+				continue
 			}
 			if previous.IsHidden != w.IsHidden {
 				log.Printf("global-wallet-inventory: mixed visibility owner=%s wallet=%s", owner.Hex(), address)
@@ -62,6 +74,11 @@ func Migrate(db storage.Storage) (int, error) {
 			copy := w
 			groups[owner][address] = &copy
 		}
+	}
+	// Report every invalid chain-scoped row from this scan before writing any
+	// owner. One failed startup should identify all runtime repair blockers.
+	if err := errors.Join(validationErrors...); err != nil {
+		return 0, err
 	}
 	count := 0
 	owners := make([]common.Address, 0, len(groups))
