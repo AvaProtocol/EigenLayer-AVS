@@ -33,14 +33,20 @@ func TestBudgetSigningNetworkRollout(t *testing.T) {
 }
 
 func TestBudgetSigningConfigurationWarnings(t *testing.T) {
+	type warning struct {
+		chain int64
+		kind  string
+	}
 	for _, tc := range []struct {
 		name   string
 		chains []int64
-		warned []int64
+		warned []warning
 	}{
 		{name: "default"},
 		{name: "qualified", chains: []int64{11155111, 1, 8453}},
-		{name: "typo and duplicate", chains: []int64{1, 8543, 1}, warned: []int64{8543, 1}},
+		{name: "typo and duplicate", chains: []int64{1, 8543, 1}, warned: []warning{{8543, "unqualified"}, {1, "duplicate"}}},
+		{name: "unqualified only", chains: []int64{8543}, warned: []warning{{8543, "unqualified"}}},
+		{name: "duplicate unqualified", chains: []int64{8543, 8543}, warned: []warning{{8543, "unqualified"}, {8543, "duplicate"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			core, logs := observer.New(zap.WarnLevel)
@@ -53,7 +59,8 @@ func TestBudgetSigningConfigurationWarnings(t *testing.T) {
 			require.Len(t, logs.All(), len(tc.warned))
 			for i, entry := range logs.All() {
 				require.Contains(t, entry.Message, "wallet_budget_signing_chains")
-				require.Equal(t, tc.warned[i], entry.ContextMap()["chain_id"])
+				require.Contains(t, entry.Message, tc.warned[i].kind)
+				require.Equal(t, tc.warned[i].chain, entry.ContextMap()["chain_id"])
 			}
 		})
 	}

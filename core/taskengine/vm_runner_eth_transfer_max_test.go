@@ -102,7 +102,7 @@ func newMaxTestChain(t *testing.T, balance *big.Int) (*maxTestChainRPC, *ethclie
 		case "eth_maxPriorityFeePerGas":
 			result = "0x3b9aca00"
 			if chain.tipFails {
-				rpcError = "chain tip unavailable"
+				rpcError = "chain tip unavailable at https://rpc.example/secret"
 			}
 		case "rundler_maxPriorityFeePerGas":
 			result = "0x0"
@@ -157,10 +157,11 @@ func TestETHTransferMaxSimulationUsesBundlerFeeFloor(t *testing.T) {
 		tipFails     bool
 		maxFee       int64
 		warning      string
+		diagnostic   string
 	}{
 		{name: "bundler floor", maxFee: 7_000_000_000}, // 3 gwei bundler tip + 2 * 2 gwei base fee
-		{name: "bundler unavailable", bundlerError: "method unavailable at https://rpc.example/secret", maxFee: 5_000_000_000, warning: "bundler priority fee unavailable; using the chain tip"},
-		{name: "quote unavailable", tipFails: true, maxFee: int64(GetDefaultGasPrice(uint64(maxTestChain))), warning: "native MAX fee quote unavailable; using the simulation fallback"},
+		{name: "bundler unavailable", bundlerError: "method unavailable at https://rpc.example/secret", maxFee: 5_000_000_000, warning: "bundler priority fee unavailable; using the chain tip", diagnostic: "bundler priority fee read failed"},
+		{name: "quote unavailable", tipFails: true, maxFee: int64(GetDefaultGasPrice(uint64(maxTestChain))), warning: "native MAX fee quote unavailable; using the simulation fallback", diagnostic: "native MAX fee quote failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			chain, client, url := newMaxTestChain(t, maxTestBalance)
@@ -171,7 +172,7 @@ func TestETHTransferMaxSimulationUsesBundlerFeeFloor(t *testing.T) {
 			t.Cleanup(func() { rpcConn = previousRPC })
 			vm, err := NewVMWithData(nil, nil, selfFundedMaxConfig(url), nil)
 			require.NoError(t, err)
-			core, logs := observer.New(zap.WarnLevel)
+			core, logs := observer.New(zap.DebugLevel)
 			log, err := sdklogging.NewZapLoggerByConfig(zap.NewDevelopmentConfig(), zap.WrapCore(func(zapcore.Core) zapcore.Core { return core }))
 			require.NoError(t, err)
 			vm.TaskOwner = testutil.TestUser1().Address
@@ -187,11 +188,15 @@ func TestETHTransferMaxSimulationUsesBundlerFeeFloor(t *testing.T) {
 			require.Equal(t, new(big.Int).Sub(maxTestBalance, fee).String(), transfer["value"])
 			require.Equal(t, fee.String(), metadata["gasReserve"])
 			require.Equal(t, fee.String(), step.TotalGasCost)
+			warnings := logs.FilterLevelExact(zap.WarnLevel)
 			if tc.warning == "" {
-				require.Empty(t, logs.All())
+				require.Empty(t, warnings.All())
 			} else {
-				require.Len(t, logs.FilterMessage(tc.warning).All(), 1)
-				require.NotContains(t, fmt.Sprint(logs.All()), "https://rpc.example/secret", "provider credentials must not reach warning logs")
+				require.Len(t, warnings.FilterMessage(tc.warning).All(), 1)
+				require.NotContains(t, fmt.Sprint(warnings.All()), "https://rpc.example/secret", "provider credentials must not reach warning logs")
+				diagnostics := logs.FilterLevelExact(zap.DebugLevel).FilterMessage(tc.diagnostic).All()
+				require.Len(t, diagnostics, 1)
+				require.Contains(t, fmt.Sprint(diagnostics[0].ContextMap()["error"]), "https://rpc.example/secret", "the raw error must remain available at Debug")
 			}
 		})
 	}

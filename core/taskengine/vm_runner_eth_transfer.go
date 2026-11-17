@@ -340,19 +340,22 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	return executionLog, nil
 }
 
-// currentMaxFee is the max fee a signed operation would carry now, or nil when
-// it cannot be read.
-func (p *ETHTransferProcessor) currentMaxFee() *big.Int {
+// currentMaxFee is the max fee a signed operation would carry now, or the
+// reason the quote is unavailable.
+func (p *ETHTransferProcessor) currentMaxFee() (*big.Int, error) {
 	if p.ethClient == nil {
-		return nil
+		return nil, fmt.Errorf("no chain reader for native MAX fee quote")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), nativePreflightRPCTimeout)
 	defer cancel()
 	fee, err := preset.UserOpMaxFeeV07(ctx, p.ethClient, p.smartWalletConfig, p.vm.logger)
-	if err != nil || fee == nil || fee.Sign() <= 0 {
-		return nil
+	if err != nil {
+		return nil, err
 	}
-	return fee
+	if fee == nil || fee.Sign() <= 0 {
+		return nil, fmt.Errorf("native MAX fee quote is not positive")
+	}
+	return fee, nil
 }
 
 // simulatedNativeReserve is a simulation's estimate of a self-funded MAX.
@@ -379,10 +382,11 @@ func (p *ETHTransferProcessor) simulateNativeReserve(balance, fallbackFee *big.I
 	if policy != nil {
 		units = nativePreflightGasUnitsFor(NativeSend, policy)
 	}
-	fee := p.currentMaxFee()
-	if fee == nil {
+	fee, quoteErr := p.currentMaxFee()
+	if quoteErr != nil {
 		fee = fallbackFee
 		if p.vm.logger != nil {
+			p.vm.logger.Debug("native MAX fee quote failed", "error", quoteErr)
 			p.vm.logger.Warn("native MAX fee quote unavailable; using the simulation fallback", "max_fee_per_gas", fee.String())
 		}
 	}
