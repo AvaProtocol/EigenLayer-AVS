@@ -32,11 +32,30 @@ import (
 // Discovery uses a throwaway service key over the fixture's known pairs. This
 // does NOT qualify the separate Moralis completeness/lag release canary.
 func TestBudgetOwnerHandoff_Sepolia(t *testing.T) {
+	runBudgetOwnerHandoffSepolia(t, false)
+}
+
+// Use an identity allocated on Base Sepolia for a signed budget and session
+// operation on Sepolia, with fresh salts and an isolated DB.
+func TestWalletInventoryBudgetHandoff_CrossNetwork(t *testing.T) {
+	if testing.Short() || os.Getenv("WALLET_INVENTORY_LIVE") != "1" {
+		t.Skip("set WALLET_INVENTORY_LIVE=1 for the cross-network signed probe")
+	}
+	t.Setenv("WALLET_BUDGET_SIGNING", "1")
+	runBudgetOwnerHandoffSepolia(t, true)
+}
+
+func runBudgetOwnerHandoffSepolia(t *testing.T, crossNetwork bool) {
+	t.Helper()
 	if testing.Short() || os.Getenv("WALLET_BUDGET_SIGNING") != "1" {
 		t.Skip("set WALLET_BUDGET_SIGNING=1 for isolated Sepolia budget handoff tests")
 	}
 	t.Setenv("WALLET_BUDGET_FEASIBILITY", "1")
-	for _, migration := range []bool{false, true} {
+	migrations := []bool{false, true}
+	if crossNetwork {
+		migrations = []bool{false}
+	}
+	for _, migration := range migrations {
 		t.Run(map[bool]string{false: "counterfactual_install", true: "legacy_migration_two_resets"}[migration], func(t *testing.T) {
 			f := newBudgetSpike(t, migration)
 			t.Cleanup(func() { f.readBlock = nil })
@@ -49,7 +68,16 @@ func TestBudgetOwnerHandoff_Sepolia(t *testing.T) {
 			cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 			require.NoError(t, err)
 			cfg.SmartWallet = f.sw
-			cfg.Chains = nil
+			if crossNetwork {
+				for _, chain := range cfg.Chains {
+					if chain.ChainID == testPolicyChain {
+						chain.SmartWallet = f.sw
+					}
+				}
+			} else {
+				cfg.Chains = nil
+			}
+			cfg.WalletInventory = &config.WalletInventoryConfig{MaxActiveWalletsPerOwner: 3}
 			cfg.SessionSignerPrivateKey = sessionKey
 			cfg.WalletBudgetPreparationEnabled = true
 			cfg.WalletBudgetSigningEnabled = true
@@ -61,7 +89,11 @@ func TestBudgetOwnerHandoff_Sepolia(t *testing.T) {
 			n := New(db, cfg, nil, testutil.GetLogger())
 			n.spendLimitCallerOverride = func(int64) (aa.ContractCaller, error) { return f.chain, nil }
 			factory := aa.MAv2FactoryAddress()
-			require.NoError(t, storeWalletFixture(db, testPolicyChain, f.owner, &model.SmartWallet{Owner: &f.owner, Address: &f.wallet, Factory: &factory, Salt: f.salt}))
+			if crossNetwork {
+				prepareLiveCrossNetworkInventory(t, n, f)
+			} else {
+				require.NoError(t, storeWalletFixture(db, testPolicyChain, f.owner, &model.SmartWallet{Owner: &f.owner, Address: &f.wallet, Factory: &factory, Salt: f.salt}))
+			}
 			user := &model.User{Address: f.owner}
 			until := time.Now().Add(time.Hour).UnixMilli()
 			pool := budgetContracts["aavePool"][testPolicyChain]
@@ -150,6 +182,9 @@ func TestBudgetOwnerHandoff_Sepolia(t *testing.T) {
 				require.Zero(t, new(big.Int).SetBytes(value).Sign())
 			}
 			t.Logf("budget active: wallet=%s salt=%s preparation=%s tx=%s userOp=%s finalReadBlock=%d inclusionBlock=%d maxFeeWei=%s", f.wallet, f.salt, p.ID, result.TransactionHash, p.UserOpHash, result.FinalBlock.Number, result.InclusionBlock.Number, p.MaxFeeWei)
+			if crossNetwork {
+				assertLiveCrossNetworkPolicyIsolation(t, n, f)
+			}
 			// Exercise the ordinary session send after activation. A zero approve
 			// moves no token, but the native budget must pay for its network fee.
 			before, readErr := aa.ReadNativeSpendLimit(f.ctx, f.chain, active.EntityID, f.wallet)
@@ -174,14 +209,35 @@ func TestBudgetOwnerHandoff_Sepolia(t *testing.T) {
 			t.Cleanup(func() { preset.SetSessionSendGuard(nil) })
 			data, packErr := aa.PackExecuteBatchMAv2([]aa.Call{f.call(testTokenAddr, budgetTokenCall("approve(address,uint256)", testRouterAddr, big.NewInt(0)))})
 			require.NoError(t, packErr)
-			_, sessionReceipt, sendErr := preset.SendUserOpMAv2(f.sw, f.owner, data, &f.wallet, f.salt, session, testutil.GetLogger())
+			sessionConfig := *f.sw
+			sponsored := crossNetwork && os.Getenv("WALLET_INVENTORY_SPONSOR_POLICY_ID") != ""
+			if sponsored {
+				// Explicit dedicated test policy only; no funding fallback on refusal.
+				sessionConfig.DisableGasSponsorship = false
+				sessionConfig.AlchemyPaymasterPolicyID = os.Getenv("WALLET_INVENTORY_SPONSOR_POLICY_ID")
+				sessionConfig.GasManagerWebhookSecret = os.Getenv("WALLET_INVENTORY_SPONSOR_WEBHOOK_DATA")
+			}
+			walletBefore, balanceErr := f.chain.BalanceAt(f.ctx, f.wallet, nil)
+			require.NoError(t, balanceErr)
+			sessionOp, sessionReceipt, sendErr := preset.SendUserOpMAv2(&sessionConfig, f.owner, data, &f.wallet, f.salt, session, testutil.GetLogger())
 			require.NoError(t, sendErr)
 			require.NotNil(t, sessionReceipt)
 			require.EqualValues(t, types.ReceiptStatusSuccessful, sessionReceipt.Status)
 			after, readErr := aa.ReadNativeSpendLimit(f.ctx, budgetBlockReader{f.chain, sessionReceipt.BlockNumber}, active.EntityID, f.wallet)
 			require.NoError(t, readErr)
-			require.Negative(t, after.Cmp(before), "one ordinary session operation must consume native budget for gas")
-			t.Logf("post-activation session: tx=%s nativeBefore=%s nativeAfter=%s", sessionReceipt.TxHash, before, after)
+			if sponsored {
+				require.NotNil(t, sessionOp.Paymaster)
+				require.NotEqual(t, common.Address{}, *sessionOp.Paymaster)
+				require.Zero(t, after.Cmp(before), "a standard Gas Manager paymaster must fund this zero-value operation")
+				walletAfter, balanceErr := f.chain.BalanceAt(f.ctx, f.wallet, sessionReceipt.BlockNumber)
+				require.NoError(t, balanceErr)
+				require.Zero(t, walletAfter.Cmp(walletBefore), "sponsored execution must not spend the wallet's ETH")
+			} else {
+				require.Negative(t, after.Cmp(before), "one ordinary session operation must consume native budget for gas")
+			}
+			sessionHash, hashErr := sessionOp.GetUserOpHash(preset.EntryPointV07(), big.NewInt(testPolicyChain))
+			require.NoError(t, hashErr)
+			t.Logf("post-activation session: tx=%s userOp=%s sponsored=%t nativeBefore=%s nativeAfter=%s", sessionReceipt.TxHash, sessionHash, sponsored, before, after)
 		})
 	}
 }

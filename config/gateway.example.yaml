@@ -22,9 +22,12 @@ owner_execution_enabled: false
 wallet_budget_preparation_enabled: false
 # Public signer address of the trusted backend approval-inventory service.
 wallet_budget_discovery_signer: ""
-# Sepolia-only owner-signed budget changes. Keep off until the live release
-# gates and discovery canary pass. No paymaster; the wallet pays network fees.
+# Owner-signed budget changes. Keep off until the live release gates and
+# discovery canary pass. No paymaster; the wallet pays network fees.
 wallet_budget_signing_enabled: false
+# Omitted/empty defaults to Sepolia. Ethereum (1) and Base (8453) are explicit
+# rollout opt-ins after their live bundler canaries. Unproved chains fail closed.
+wallet_budget_signing_chains: [11155111]
 # Optional public retired signer identities, scoped by chain. Recognized grants
 # still block budgets and require owner-directed removal; never a trust bypass.
 # wallet_budget_retired_session_signers:

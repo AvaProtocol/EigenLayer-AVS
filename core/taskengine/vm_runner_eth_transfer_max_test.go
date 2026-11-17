@@ -45,6 +45,7 @@ type maxTestChainRPC struct {
 	deposit      *big.Int
 	remaining    *big.Int
 	limitFails   bool
+	bundlerFloor *big.Int
 	balanceReads atomic.Int32
 	limitReads   atomic.Int32
 }
@@ -93,6 +94,11 @@ func newMaxTestChain(t *testing.T, balance *big.Int) (*maxTestChainRPC, *ethclie
 			result = hexutil.EncodeBig(chain.balance)
 		case "eth_maxPriorityFeePerGas":
 			result = "0x3b9aca00"
+		case "rundler_maxPriorityFeePerGas":
+			result = "0x0"
+			if chain.bundlerFloor != nil {
+				result = hexutil.EncodeBig(chain.bundlerFloor)
+			}
 		case "eth_getBlockByNumber":
 			result = &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(0), GasLimit: 30_000_000, BaseFee: big.NewInt(2_000_000_000), Extra: []byte{}}
 		default:
@@ -128,7 +134,32 @@ func newMaxTestProcessor(t *testing.T, client *ethclient.Client, cfg *config.Sma
 }
 
 func selfFundedMaxConfig(rpcURL string) *config.SmartWalletConfig {
-	return &config.SmartWalletConfig{ChainID: maxTestChain, EthRpcUrl: rpcURL, DisableGasSponsorship: true}
+	return &config.SmartWalletConfig{ChainID: maxTestChain, EthRpcUrl: rpcURL, DisableGasSponsorship: true,
+		BundlerProvider: config.BundlerProviderSelfHosted, BundlerURL: rpcURL}
+}
+
+func TestETHTransferMaxSimulationUsesBundlerFeeFloor(t *testing.T) {
+	chain, client, url := newMaxTestChain(t, maxTestBalance)
+	chain.bundlerFloor = big.NewInt(3_000_000_000) // above the chain's 1 gwei tip
+	previousRPC := rpcConn
+	rpcConn = client
+	t.Cleanup(func() { rpcConn = previousRPC })
+	vm, err := NewVMWithData(nil, nil, selfFundedMaxConfig(url), nil)
+	require.NoError(t, err)
+	vm.TaskOwner = testutil.TestUser1().Address
+	vm.WithLogger(testutil.GetLogger()).SetSimulation(true)
+	node := &avsproto.TaskNode{Id: "preview-max", Name: "previewMax", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+		TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{Config: &avsproto.ETHTransferNode_Config{
+			Destination: maxTestDestination, Amount: "MAX", ChainId: maxTestChain,
+		}}}}
+	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"aa_sender": maxTestWallet, "aa_salt": big.NewInt(0)})
+	require.NoError(t, err)
+	// 900k gas * (3 gwei bundler tip + 2 * 2 gwei base fee), matching Send.
+	fee := new(big.Int).Mul(big.NewInt(nativePreflightGasUnitsSteady), big.NewInt(7_000_000_000))
+	transfer, metadata := stepMaps(t, step)
+	require.Equal(t, new(big.Int).Sub(maxTestBalance, fee).String(), transfer["value"])
+	require.Equal(t, fee.String(), metadata["gasReserve"])
+	require.Equal(t, fee.String(), step.TotalGasCost)
 }
 
 // stubSends replaces both session sends for one test. reserve answers the
