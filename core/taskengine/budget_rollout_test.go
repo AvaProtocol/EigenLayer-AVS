@@ -49,6 +49,8 @@ func TestBudgetResetQualifiedDeploymentsRemainAuthoritative(t *testing.T) {
 		token string
 	}{
 		{1, "0x19de6b897Ed14A376Dda0Fe53a5420D2aC828a28"}, // retired BGB
+		{1, "0xB8c77482e45F1F44dE1745F52C74426C631bDD52"}, // BNB: approve(spender, 0) reverts
+		{1, "0xE66747a101bFF2dBA3697199DCcE5b743b454759"}, // GT: approve(spender, 0) reverts
 		{1, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"}, // another chain's USDC
 		{56, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"},
 	} {

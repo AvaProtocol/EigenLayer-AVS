@@ -47,6 +47,9 @@ type ServerInterface interface {
 	// Liveness probe
 	// (GET /health)
 	GetHealth(ctx echo.Context) error
+	// List the networks this gateway serves
+	// (GET /networks)
+	ListNetworks(ctx echo.Context) error
 	// Execute a single node with inline input variables
 	// (POST /nodes:run)
 	RunNode(ctx echo.Context) error
@@ -399,6 +402,15 @@ func (w *ServerInterfaceWrapper) GetHealth(ctx echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.GetHealth(ctx)
+	return err
+}
+
+// ListNetworks converts echo context to params.
+func (w *ServerInterfaceWrapper) ListNetworks(ctx echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListNetworks(ctx)
 	return err
 }
 
@@ -1334,6 +1346,7 @@ func RegisterHandlersWithBaseURL(router EchoRouter, si ServerInterface, baseURL 
 	router.GET(baseURL+"/executions:count", wrapper.CountExecutions)
 	router.GET(baseURL+"/executions:stats", wrapper.ExecutionStats)
 	router.GET(baseURL+"/health", wrapper.GetHealth)
+	router.GET(baseURL+"/networks", wrapper.ListNetworks)
 	router.POST(baseURL+"/nodes:run", wrapper.RunNode)
 	router.GET(baseURL+"/operators", wrapper.ListOperators)
 	router.GET(baseURL+"/secrets", wrapper.ListSecrets)
@@ -1827,6 +1840,22 @@ type GetHealth503JSONResponse HealthStatus
 func (response GetHealth503JSONResponse) VisitGetHealthResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListNetworksRequestObject struct {
+}
+
+type ListNetworksResponseObject interface {
+	VisitListNetworksResponse(w http.ResponseWriter) error
+}
+
+type ListNetworks200JSONResponse NetworkList
+
+func (response ListNetworks200JSONResponse) VisitListNetworksResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -3837,6 +3866,9 @@ type StrictServerInterface interface {
 	// Liveness probe
 	// (GET /health)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
+	// List the networks this gateway serves
+	// (GET /networks)
+	ListNetworks(ctx context.Context, request ListNetworksRequestObject) (ListNetworksResponseObject, error)
 	// Execute a single node with inline input variables
 	// (POST /nodes:run)
 	RunNode(ctx context.Context, request RunNodeRequestObject) (RunNodeResponseObject, error)
@@ -4227,6 +4259,29 @@ func (sh *strictHandler) GetHealth(ctx echo.Context) error {
 		return err
 	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
 		return validResponse.VisitGetHealthResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ListNetworks operation middleware
+func (sh *strictHandler) ListNetworks(ctx echo.Context) error {
+	var request ListNetworksRequestObject
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListNetworks(ctx.Request().Context(), request.(ListNetworksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListNetworks")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListNetworksResponseObject); ok {
+		return validResponse.VisitListNetworksResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}
