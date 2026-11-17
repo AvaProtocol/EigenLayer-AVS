@@ -12,6 +12,7 @@ var expectedPermissionLevels = map[string]Level{
 	OpGetHealth:     LevelPublic,
 	OpAuthExchange:  LevelPartnerAuth,
 	OpListOperators: LevelPublic,
+	OpListNetworks:  LevelPublic,
 
 	OpGetToken: LevelPartnerRead,
 

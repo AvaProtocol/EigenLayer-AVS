@@ -1393,6 +1393,24 @@ type NativeToken struct {
 	Symbol   string `json:"symbol"`
 }
 
+// NetworkInfo defines model for NetworkInfo.
+type NetworkInfo struct {
+	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
+	// chain-aware trigger/node configs this is required and must be a
+	// configured chain; on query/filter params it is optional.
+	ChainId ChainId `json:"chainId"`
+
+	// WalletBudgetSigning An owner can sign a new or changed wallet budget on this chain now.
+	// False when budget preparation or signing is off, or the chain is
+	// not activated in `wallet_budget_signing_chains`.
+	WalletBudgetSigning bool `json:"walletBudgetSigning"`
+}
+
+// NetworkList defines model for NetworkList.
+type NetworkList struct {
+	Data []NetworkInfo `json:"data"`
+}
+
 // Node defines model for Node.
 type Node struct {
 	Id   string  `json:"id"`
