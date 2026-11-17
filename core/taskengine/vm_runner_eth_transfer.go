@@ -348,7 +348,7 @@ func (p *ETHTransferProcessor) currentMaxFee() *big.Int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), nativePreflightRPCTimeout)
 	defer cancel()
-	fee, err := codeAndFeeFromEthClient(p.ethClient).MaxFeePerGas(ctx)
+	fee, err := preset.UserOpMaxFeeV07(ctx, p.ethClient, p.smartWalletConfig)
 	if err != nil || fee == nil || fee.Sign() <= 0 {
 		return nil
 	}

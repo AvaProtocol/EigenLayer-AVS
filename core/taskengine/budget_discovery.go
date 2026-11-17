@@ -235,12 +235,6 @@ func budgetResetSpenders(current *model.SessionPolicy, draft BudgetPolicyDraft, 
 	return out
 }
 
-// Only USDC on Sepolia has the phase-1 failure/zeroing proof so far. More
-// deployments must get that proof before they can be reset automatically.
-func budgetResetTokenTested(chainID int64, token common.Address) bool {
-	return chainID == 11155111 && token == common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
-}
-
 func readBudgetApprovals(ctx context.Context, caller aa.ContractCaller, wallet common.Address, chainID int64, pairs []BudgetApprovalPair, resetSpenders map[common.Address]bool) ([]BudgetApprovalReset, []BudgetApprovalReset, error) {
 	reads := make([]BudgetApprovalReset, 0, len(pairs))
 	resets := []BudgetApprovalReset{}

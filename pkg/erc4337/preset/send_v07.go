@@ -14,7 +14,6 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 )
@@ -658,37 +657,11 @@ func priceOperationV07(
 	// Unsponsored: the account pays, so the fee fields have to be real. A
 	// zero maxFeePerGas is accepted by estimation and then silently never
 	// mined, which reads as a hung operation rather than a pricing bug.
-	tip, err := chainRPC.SuggestGasTipCap(ctx)
+	tip, maxFee, err := userOpFeesV07(ctx, chainRPC, bundlerRPC, l)
 	if err != nil {
-		return fmt.Errorf("suggesting gas tip: %w", err)
+		return err
 	}
-	head, err := chainRPC.HeaderByNumber(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("reading latest header: %w", err)
-	}
-
-	// The bundler enforces its own priority-fee floor, independent of what the
-	// chain suggests, and rejects anything under it in precheck:
-	//
-	//	maxPriorityFeePerGas is 1500000 but must be at least 100000000
-	//
-	// On a quiet testnet the chain's suggestion is well below that floor, so
-	// the chain value alone is not enough. Ask the bundler and take whichever
-	// is higher — it is the party that decides whether to accept the operation.
-	if bundlerTip, tipErr := bundlerMaxPriorityFee(ctx, bundlerRPC); tipErr != nil {
-		l.Debug("bundler did not report a priority fee, using the chain's", "error", tipErr)
-	} else if bundlerTip.Cmp(tip) > 0 {
-		l.Debug("raising priority fee to the bundler's floor",
-			"chain_tip", tip.String(), "bundler_tip", bundlerTip.String())
-		tip = bundlerTip
-	}
-
-	op.MaxPriorityFeePerGas = tip
-	var baseFee *big.Int
-	if head != nil {
-		baseFee = head.BaseFee
-	}
-	op.MaxFeePerGas = eip1559.MaxFeeFromTipAndBase(tip, baseFee)
+	op.MaxPriorityFeePerGas, op.MaxFeePerGas = tip, maxFee
 
 	estimate, err := EstimateUserOpGasV07(ctx, bundlerRPC, op, entryPoint)
 	if err != nil {
