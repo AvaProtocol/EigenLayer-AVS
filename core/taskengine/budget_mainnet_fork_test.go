@@ -22,6 +22,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// budgetForkBatchSize keeps each forge run's case list within the OS limit
+// on one environment variable.
+const budgetForkBatchSize = 30
+
 // Only read RPC requests reach mainnet. All signatures, balance changes and
 // transactions execute on disposable Foundry forks, using public fixture keys.
 // This is contract proof, not proof of live bundler acceptance or sponsorship.
@@ -57,7 +61,7 @@ func TestBudgetAtomicResetAndInstall_MainnetForks(t *testing.T) {
 					require.FailNow(t, strings.ReplaceAll(err.Error(), url, "[RPC URL]"))
 				}
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 			defer cancel()
 			client, err := ethclient.DialContext(ctx, url)
 			checkRPC(err)
@@ -71,53 +75,60 @@ func TestBudgetAtomicResetAndInstall_MainnetForks(t *testing.T) {
 			wallet, err := aa.GetSenderAddressMAv2WithContext(ctx, client, owner, salt)
 			checkRPC(err)
 			spender := common.HexToAddress("0x2222222222222222222222222222222222222222")
-			var tokens []common.Address
-			var positive, badReset, badInstall [][]byte
-			for i, token := range budgetAutomaticResetTokens[network.chain] {
-				entity := uint32(i + 7)
-				permissions := SessionPermissions{
-					AllowedActions: []model.AllowedAction{{Target: &token, Selectors: []string{selectorApprove, selectorTransfer}}},
-					SpendCap:       &model.ERC20SpendCap{Token: &token, Amount: "500"},
-					NativeSpendCap: &model.NativeSpendCap{Amount: "1000000000000000000"},
-					ValidUntilMs:   int64(header.Time+86400) * 1000,
-				}
-				hooks, err := permissions.HooksFor(entity)
-				require.NoError(t, err)
-				install, err := aa.PackSessionSignerInstall(aa.SessionGrant{
-					EntityID: entity, Signer: crypto.PubkeyToAddress(sessionKey.PublicKey), Global: true, Hooks: hooks,
-				})
-				require.NoError(t, err)
-				resets := []BudgetApprovalReset{{Token: token, Spender: spender, Amount: "123"}}
-				pack := func(rows []BudgetApprovalReset, payload []byte) []byte {
-					calls, err := budgetPreparationCalls(*wallet, rows, nil, payload)
+			// One forge run per batch: every case travels in one environment
+			// variable, and the full catalog would exceed the OS argument limit.
+			// Each batch forks the same pinned block.
+			all := budgetAutomaticResetTokens[network.chain]
+			for first := 0; first < len(all); first += budgetForkBatchSize {
+				batch := all[first:min(first+budgetForkBatchSize, len(all))]
+				var tokens []common.Address
+				var positive, badReset, badInstall [][]byte
+				for i, token := range batch {
+					entity := uint32(i + 7)
+					permissions := SessionPermissions{
+						AllowedActions: []model.AllowedAction{{Target: &token, Selectors: []string{selectorApprove, selectorTransfer}}},
+						SpendCap:       &model.ERC20SpendCap{Token: &token, Amount: "500"},
+						NativeSpendCap: &model.NativeSpendCap{Amount: "1000000000000000000"},
+						ValidUntilMs:   int64(header.Time+86400) * 1000,
+					}
+					hooks, err := permissions.HooksFor(entity)
 					require.NoError(t, err)
-					data, err := aa.PackExecuteBatchMAv2(calls)
+					install, err := aa.PackSessionSignerInstall(aa.SessionGrant{
+						EntityID: entity, Signer: crypto.PubkeyToAddress(sessionKey.PublicKey), Global: true, Hooks: hooks,
+					})
 					require.NoError(t, err)
-					return data
+					resets := []BudgetApprovalReset{{Token: token, Spender: spender, Amount: "123"}}
+					pack := func(rows []BudgetApprovalReset, payload []byte) []byte {
+						calls, err := budgetPreparationCalls(*wallet, rows, nil, payload)
+						require.NoError(t, err)
+						data, err := aa.PackExecuteBatchMAv2(calls)
+						require.NoError(t, err)
+						return data
+					}
+					tokens = append(tokens, token)
+					positive = append(positive, pack(resets, install))
+					badReset = append(badReset, pack(append(resets, BudgetApprovalReset{
+						Token: common.HexToAddress("0xf00d"), Spender: spender, Amount: "1",
+					}), install))
+					badInstall = append(badInstall, pack(resets, install[:4])) // ABI decoding must revert
 				}
-				tokens = append(tokens, token)
-				positive = append(positive, pack(resets, install))
-				badReset = append(badReset, pack(append(resets, BudgetApprovalReset{
-					Token: common.HexToAddress("0xf00d"), Spender: spender, Amount: "1",
-				}), install))
-				badInstall = append(badInstall, pack(resets, install[:4])) // ABI decoding must revert
+				addressArray, err := abi.NewType("address[]", "", nil)
+				require.NoError(t, err)
+				bytesArray, err := abi.NewType("bytes[]", "", nil)
+				require.NoError(t, err)
+				cases, err := (abi.Arguments{{Type: addressArray}, {Type: bytesArray}, {Type: bytesArray}, {Type: bytesArray}}).Pack(tokens, positive, badReset, badInstall)
+				require.NoError(t, err)
+				command := exec.CommandContext(ctx, forge, "test", "--root", "testdata/wallet_budget_rollout", "--match-test", "testAtomicBudgetMainnet", "-vv")
+				command.Env = append(os.Environ(),
+					"BUDGET_FORK_RPC="+url, "BUDGET_FORK_BLOCK="+header.Number.String(),
+					"BUDGET_FORK_CHAIN="+chain.String(), "BUDGET_FORK_SALT="+salt.String(),
+					"BUDGET_FORK_WALLET="+wallet.Hex(), "BUDGET_FORK_CASES=0x"+common.Bytes2Hex(cases))
+				out, err := command.CombinedOutput()
+				// Never expose provider credentials in an assertion or child output.
+				output := strings.ReplaceAll(string(out), url, "[RPC URL]")
+				require.NoError(t, err, "%s", output)
 			}
-			addressArray, err := abi.NewType("address[]", "", nil)
-			require.NoError(t, err)
-			bytesArray, err := abi.NewType("bytes[]", "", nil)
-			require.NoError(t, err)
-			cases, err := (abi.Arguments{{Type: addressArray}, {Type: bytesArray}, {Type: bytesArray}, {Type: bytesArray}}).Pack(tokens, positive, badReset, badInstall)
-			require.NoError(t, err)
-			command := exec.CommandContext(ctx, forge, "test", "--root", "testdata/wallet_budget_rollout", "--match-test", "testAtomicBudgetMainnet", "-vv")
-			command.Env = append(os.Environ(),
-				"BUDGET_FORK_RPC="+url, "BUDGET_FORK_BLOCK="+header.Number.String(),
-				"BUDGET_FORK_CHAIN="+chain.String(), "BUDGET_FORK_SALT="+salt.String(),
-				"BUDGET_FORK_WALLET="+wallet.Hex(), "BUDGET_FORK_CASES=0x"+common.Bytes2Hex(cases))
-			out, err := command.CombinedOutput()
-			// Never expose provider credentials in an assertion or child output.
-			output := strings.ReplaceAll(string(out), url, "[RPC URL]")
-			require.NoError(t, err, "%s", output)
-			t.Logf("chain=%d pinnedBlock=%s tokens=%d: Go-encoded reset/install, rollback and signed owner/session operations passed", network.chain, header.Number, len(tokens))
+			t.Logf("chain=%d pinnedBlock=%s tokens=%d: Go-encoded reset/install, rollback and signed owner/session operations passed", network.chain, header.Number, len(all))
 		})
 	}
 }

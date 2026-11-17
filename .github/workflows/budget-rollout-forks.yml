@@ -7,6 +7,7 @@ on:
       - "core/taskengine/budget_*.go"
       - "core/taskengine/session_permissions.go"
       - "core/taskengine/testdata/wallet_budget_rollout/**"
+      - "core/taskengine/tokenwhitelist/**"
       - "core/config/budget_*.go"
       - "core/config/config.go"
       - "core/chainio/aa/**"
@@ -22,7 +23,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     name: Atomic budget fork (${{ matrix.chain }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -41,4 +42,4 @@ jobs:
           version: v1.2.3
       - name: Prove reset, rollback and owner/session signatures on the pinned fork
         # Public fork-only keys; no owner/controller key and no broadcast path.
-        run: go test -tags integration ./core/taskengine -run '^TestBudgetAtomicResetAndInstall_MainnetForks/${{ matrix.chain }}$' -count=1 -v -timeout 15m
+        run: go test -tags integration ./core/taskengine -run '^TestBudgetAtomicResetAndInstall_MainnetForks/${{ matrix.chain }}$' -count=1 -v -timeout 30m
