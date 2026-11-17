@@ -22,9 +22,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// budgetForkBatchSize keeps each forge run's case list within the OS limit
-// on one environment variable.
-const budgetForkBatchSize = 30
+// budgetForkBatchSize keeps each forge run's case list, which travels as one
+// hex environment string, under Linux's 128 KiB limit on a single string
+// (MAX_ARG_STRLEN; macOS has no such limit). A token's cases encode to about
+// 9.5 KB, so ten are about 95 KB. budgetForkCasesMaxBytes fails the proof
+// with a clear message if the encoding grows, instead of E2BIG from exec.
+const budgetForkBatchSize = 10
+
+const budgetForkCasesMaxBytes = 120 << 10
 
 // Only read RPC requests reach mainnet. All signatures, balance changes and
 // transactions execute on disposable Foundry forks, using public fixture keys.
@@ -118,11 +123,14 @@ func TestBudgetAtomicResetAndInstall_MainnetForks(t *testing.T) {
 				require.NoError(t, err)
 				cases, err := (abi.Arguments{{Type: addressArray}, {Type: bytesArray}, {Type: bytesArray}, {Type: bytesArray}}).Pack(tokens, positive, badReset, badInstall)
 				require.NoError(t, err)
+				casesEnv := "BUDGET_FORK_CASES=0x" + common.Bytes2Hex(cases)
+				require.Less(t, len(casesEnv), budgetForkCasesMaxBytes,
+					"a batch's cases outgrew one environment string; lower budgetForkBatchSize")
 				command := exec.CommandContext(ctx, forge, "test", "--root", "testdata/wallet_budget_rollout", "--match-test", "testAtomicBudgetMainnet", "-vv")
 				command.Env = append(os.Environ(),
 					"BUDGET_FORK_RPC="+url, "BUDGET_FORK_BLOCK="+header.Number.String(),
 					"BUDGET_FORK_CHAIN="+chain.String(), "BUDGET_FORK_SALT="+salt.String(),
-					"BUDGET_FORK_WALLET="+wallet.Hex(), "BUDGET_FORK_CASES=0x"+common.Bytes2Hex(cases))
+					"BUDGET_FORK_WALLET="+wallet.Hex(), casesEnv)
 				out, err := command.CombinedOutput()
 				// Never expose provider credentials in an assertion or child output.
 				output := strings.ReplaceAll(string(out), url, "[RPC URL]")
