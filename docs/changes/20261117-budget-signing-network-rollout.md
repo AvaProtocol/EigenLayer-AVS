@@ -2,6 +2,8 @@
 
 Budget signing now has an explicit `wallet_budget_signing_chains` deployment setting, in addition to the preparation and signing switches. An omitted or empty list preserves the existing Sepolia-only behavior. Ethereum (1) and Base (8453) require explicit opt-in; listing another chain cannot enable an unqualified deployment. Disabling preparation or signing, or removing a chain from the list, refuses new budget sends, including owner cancellation. Observation and reconciliation of submitted operations remain available.
 
+Signing-gate refusals still use `BUDGET_HANDOFF_REQUIRED`, but their detail is now "Budget signing is not enabled on this network." for both disabled global switches and networks outside the effective signing list. Clients should use the code for availability handling. Startup warnings identify duplicate and unqualified `wallet_budget_signing_chains` entries; those entries do not enable additional networks.
+
 Unsigned preparation checks the preparation switch without applying the signing chain list. It can return a review on an unlisted chain, but submission will be refused. The unsigned record has a TTL and creates no wallet nonce hold or installed policy. A durable hold is committed only during submission, before relay. Clients must check the activated networks before offering budget review.
 
 The public `GET /networks` reports them: one row per configured chain with `walletBudgetSigning`, computed by the same `BudgetSigningEnabledForChain` rule submission enforces. Studio reads it (cached for a minute) for every availability decision, so activating or deactivating a chain is this config change alone; there is no second list to keep in step.
@@ -72,4 +74,6 @@ Removing a chain stops new budget sends through the gateway. It does not cancel 
 
 ## Native MAX fee quote
 
-The live native probe exposed a preview/send difference on quiet Sepolia: the chain quote was 32 wei per gas while Alchemy required a 100,000,000 wei priority-fee floor. The sender already raised its fee to that floor; the simulation did not. Native MAX previews now use the same fee selection as the sender, including the bundler floor. The sender's selection/fallback behavior and diagnostic logs are preserved. A regression drives the VM preview with a bundler floor above the chain tip and checks the amount and fee reserve.
+The live native probe exposed a preview/send difference on quiet Sepolia: the chain quote was 32 wei per gas while Alchemy required a 100,000,000 wei priority-fee floor. The sender already raised its fee to that floor; the simulation did not. Native MAX previews now use the same fee selection as the sender, including the bundler floor. A regression drives the VM preview with a bundler floor above the chain tip and checks the amount and fee reserve.
+
+Fee selection retains the existing fallback for bundlers that do not implement `rundler_maxPriorityFeePerGas` or cannot return a floor: both sends and previews use the chain tip and now emit a warning. The VM supplies its logger to the preview quote. If the entire quote is unavailable, the preview warns before using its existing simulation fallback. These remain estimates; the signed send prices and validates the actual operation again. Raw provider errors remain at Debug so warning logs do not expose credential-bearing RPC URLs.

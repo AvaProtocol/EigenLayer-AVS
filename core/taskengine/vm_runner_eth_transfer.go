@@ -348,7 +348,7 @@ func (p *ETHTransferProcessor) currentMaxFee() *big.Int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), nativePreflightRPCTimeout)
 	defer cancel()
-	fee, err := preset.UserOpMaxFeeV07(ctx, p.ethClient, p.smartWalletConfig)
+	fee, err := preset.UserOpMaxFeeV07(ctx, p.ethClient, p.smartWalletConfig, p.vm.logger)
 	if err != nil || fee == nil || fee.Sign() <= 0 {
 		return nil
 	}
@@ -382,6 +382,9 @@ func (p *ETHTransferProcessor) simulateNativeReserve(balance, fallbackFee *big.I
 	fee := p.currentMaxFee()
 	if fee == nil {
 		fee = fallbackFee
+		if p.vm.logger != nil {
+			p.vm.logger.Warn("native MAX fee quote unavailable; using the simulation fallback", "max_fee_per_gas", fee.String())
+		}
 	}
 	maxGasCost := new(big.Int).Mul(big.NewInt(units), fee)
 	ctx, cancel := context.WithTimeout(context.Background(), nativePreflightRPCTimeout)

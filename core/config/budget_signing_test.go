@@ -3,7 +3,11 @@ package config
 import (
 	"testing"
 
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"gopkg.in/yaml.v2"
 )
 
@@ -26,4 +30,31 @@ func TestBudgetSigningNetworkRollout(t *testing.T) {
 	require.False(t, cfg.BudgetSigningEnabledForChain(1))
 	cfg.WalletBudgetSigningEnabled, cfg.WalletBudgetPreparationEnabled = true, false
 	require.False(t, cfg.BudgetSigningEnabledForChain(1))
+}
+
+func TestBudgetSigningConfigurationWarnings(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		chains []int64
+		warned []int64
+	}{
+		{name: "default"},
+		{name: "qualified", chains: []int64{11155111, 1, 8453}},
+		{name: "typo and duplicate", chains: []int64{1, 8543, 1}, warned: []int64{8543, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			core, logs := observer.New(zap.WarnLevel)
+			log, err := sdklogging.NewZapLoggerByConfig(zap.NewDevelopmentConfig(), zap.WrapCore(func(zapcore.Core) zapcore.Core { return core }))
+			require.NoError(t, err)
+			cfg := &Config{WalletBudgetPreparationEnabled: true, WalletBudgetSigningEnabled: true, WalletBudgetSigningChains: tc.chains}
+			cfg.warnBudgetSigningChains(log)
+			require.Equal(t, tc.chains, cfg.WalletBudgetSigningChains, "diagnostics must not rewrite rollout settings")
+			require.False(t, cfg.BudgetSigningEnabledForChain(8543), "a typo must not enable signing")
+			require.Len(t, logs.All(), len(tc.warned))
+			for i, entry := range logs.All() {
+				require.Contains(t, entry.Message, "wallet_budget_signing_chains")
+				require.Equal(t, tc.warned[i], entry.ContextMap()["chain_id"])
+			}
+		})
+	}
 }

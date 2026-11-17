@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -10,12 +11,16 @@ import (
 	"testing"
 	"time"
 
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -46,6 +51,8 @@ type maxTestChainRPC struct {
 	remaining    *big.Int
 	limitFails   bool
 	bundlerFloor *big.Int
+	bundlerError string
+	tipFails     bool
 	balanceReads atomic.Int32
 	limitReads   atomic.Int32
 }
@@ -94,8 +101,12 @@ func newMaxTestChain(t *testing.T, balance *big.Int) (*maxTestChainRPC, *ethclie
 			result = hexutil.EncodeBig(chain.balance)
 		case "eth_maxPriorityFeePerGas":
 			result = "0x3b9aca00"
+			if chain.tipFails {
+				rpcError = "chain tip unavailable"
+			}
 		case "rundler_maxPriorityFeePerGas":
 			result = "0x0"
+			rpcError = chain.bundlerError
 			if chain.bundlerFloor != nil {
 				result = hexutil.EncodeBig(chain.bundlerFloor)
 			}
@@ -139,27 +150,51 @@ func selfFundedMaxConfig(rpcURL string) *config.SmartWalletConfig {
 }
 
 func TestETHTransferMaxSimulationUsesBundlerFeeFloor(t *testing.T) {
-	chain, client, url := newMaxTestChain(t, maxTestBalance)
-	chain.bundlerFloor = big.NewInt(3_000_000_000) // above the chain's 1 gwei tip
-	previousRPC := rpcConn
-	rpcConn = client
-	t.Cleanup(func() { rpcConn = previousRPC })
-	vm, err := NewVMWithData(nil, nil, selfFundedMaxConfig(url), nil)
-	require.NoError(t, err)
-	vm.TaskOwner = testutil.TestUser1().Address
-	vm.WithLogger(testutil.GetLogger()).SetSimulation(true)
-	node := &avsproto.TaskNode{Id: "preview-max", Name: "previewMax", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
-		TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{Config: &avsproto.ETHTransferNode_Config{
-			Destination: maxTestDestination, Amount: "MAX", ChainId: maxTestChain,
-		}}}}
-	step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"aa_sender": maxTestWallet, "aa_salt": big.NewInt(0)})
-	require.NoError(t, err)
-	// 900k gas * (3 gwei bundler tip + 2 * 2 gwei base fee), matching Send.
-	fee := new(big.Int).Mul(big.NewInt(nativePreflightGasUnitsSteady), big.NewInt(7_000_000_000))
-	transfer, metadata := stepMaps(t, step)
-	require.Equal(t, new(big.Int).Sub(maxTestBalance, fee).String(), transfer["value"])
-	require.Equal(t, fee.String(), metadata["gasReserve"])
-	require.Equal(t, fee.String(), step.TotalGasCost)
+	// Do not use t.Parallel: this test replaces the package-global rpcConn.
+	for _, tc := range []struct {
+		name         string
+		bundlerError string
+		tipFails     bool
+		maxFee       int64
+		warning      string
+	}{
+		{name: "bundler floor", maxFee: 7_000_000_000}, // 3 gwei bundler tip + 2 * 2 gwei base fee
+		{name: "bundler unavailable", bundlerError: "method unavailable at https://rpc.example/secret", maxFee: 5_000_000_000, warning: "bundler priority fee unavailable; using the chain tip"},
+		{name: "quote unavailable", tipFails: true, maxFee: int64(GetDefaultGasPrice(uint64(maxTestChain))), warning: "native MAX fee quote unavailable; using the simulation fallback"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chain, client, url := newMaxTestChain(t, maxTestBalance)
+			chain.bundlerFloor = big.NewInt(3_000_000_000) // above the chain's 1 gwei tip
+			chain.bundlerError, chain.tipFails = tc.bundlerError, tc.tipFails
+			previousRPC := rpcConn
+			rpcConn = client
+			t.Cleanup(func() { rpcConn = previousRPC })
+			vm, err := NewVMWithData(nil, nil, selfFundedMaxConfig(url), nil)
+			require.NoError(t, err)
+			core, logs := observer.New(zap.WarnLevel)
+			log, err := sdklogging.NewZapLoggerByConfig(zap.NewDevelopmentConfig(), zap.WrapCore(func(zapcore.Core) zapcore.Core { return core }))
+			require.NoError(t, err)
+			vm.TaskOwner = testutil.TestUser1().Address
+			vm.WithLogger(log).SetSimulation(true)
+			node := &avsproto.TaskNode{Id: "preview-max", Name: "previewMax", Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+				TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{Config: &avsproto.ETHTransferNode_Config{
+					Destination: maxTestDestination, Amount: "MAX", ChainId: maxTestChain,
+				}}}}
+			step, err := vm.RunNodeWithInputs(node, map[string]interface{}{"aa_sender": maxTestWallet, "aa_salt": big.NewInt(0)})
+			require.NoError(t, err)
+			fee := new(big.Int).Mul(big.NewInt(nativePreflightGasUnitsSteady), big.NewInt(tc.maxFee))
+			transfer, metadata := stepMaps(t, step)
+			require.Equal(t, new(big.Int).Sub(maxTestBalance, fee).String(), transfer["value"])
+			require.Equal(t, fee.String(), metadata["gasReserve"])
+			require.Equal(t, fee.String(), step.TotalGasCost)
+			if tc.warning == "" {
+				require.Empty(t, logs.All())
+			} else {
+				require.Len(t, logs.FilterMessage(tc.warning).All(), 1)
+				require.NotContains(t, fmt.Sprint(logs.All()), "https://rpc.example/secret", "provider credentials must not reach warning logs")
+			}
+		})
+	}
 }
 
 // stubSends replaces both session sends for one test. reserve answers the
