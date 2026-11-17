@@ -126,12 +126,14 @@ type Config struct {
 	// Default false; enabling it does not change session/Auto execution.
 	OwnerExecutionEnabled bool
 	// Read-only budget preparation is experimental and separate from relay.
-	// Budget submission requires the separate, Sepolia-only signing flag.
+	// Budget submission requires the separate signing flag and chain rollout.
 	WalletBudgetPreparationEnabled bool
 	// Public EOA address of the trusted backend's discovery signing key.
 	WalletBudgetDiscoverySigner string
 	WalletBudgetSigningEnabled  bool
-	WalletBudgetMaxFeeWei       string
+	// Empty preserves the Sepolia-only rollout. Mainnets require explicit opt-in.
+	WalletBudgetSigningChains []int64
+	WalletBudgetMaxFeeWei     string
 	// Public retired signer identities, scoped to chains. These only enable
 	// owner-directed removal; their grants never count as usable authority.
 	WalletBudgetRetiredSessionSigners map[int64][]common.Address
@@ -608,6 +610,7 @@ type ConfigRaw struct {
 	WalletBudgetPreparationEnabled    bool               `yaml:"wallet_budget_preparation_enabled"`
 	WalletBudgetDiscoverySigner       string             `yaml:"wallet_budget_discovery_signer"`
 	WalletBudgetSigningEnabled        bool               `yaml:"wallet_budget_signing_enabled"`
+	WalletBudgetSigningChains         []int64            `yaml:"wallet_budget_signing_chains"`
 	WalletBudgetMaxFeeWei             string             `yaml:"wallet_budget_max_fee_wei"`
 	WalletBudgetRetiredSessionSigners map[int64][]string `yaml:"wallet_budget_retired_session_signers"`
 
@@ -903,6 +906,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		WalletBudgetPreparationEnabled:    configRaw.WalletBudgetPreparationEnabled,
 		WalletBudgetDiscoverySigner:       configRaw.WalletBudgetDiscoverySigner,
 		WalletBudgetSigningEnabled:        configRaw.WalletBudgetSigningEnabled,
+		WalletBudgetSigningChains:         configRaw.WalletBudgetSigningChains,
 		WalletBudgetMaxFeeWei:             configRaw.WalletBudgetMaxFeeWei,
 		WalletBudgetRetiredSessionSigners: retiredSessionSigners,
 

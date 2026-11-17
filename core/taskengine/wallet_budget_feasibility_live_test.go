@@ -207,6 +207,9 @@ func (f *budgetSpike) ownerBatch(t *testing.T, calls []aa.Call) (common.Hash, er
 
 func (f *budgetSpike) recoverFunds(t *testing.T) {
 	t.Helper()
+	// Cleanup spends current balances. A receipt-pinned proof read can predate
+	// a later funding transaction or MAX send and must not hide test assets.
+	f.readBlock = nil
 	// Recover only this fixture's assets, to its existing owner. A small unused
 	// EntryPoint refund can remain owner-controlled; report it explicitly.
 	calls := []aa.Call{f.call(common.HexToAddress(SEPOLIA_USDC), budgetTokenCall("approve(address,uint256)", common.HexToAddress(SEPOLIA_SWAPROUTER), big.NewInt(0)))}

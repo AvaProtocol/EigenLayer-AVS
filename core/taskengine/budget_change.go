@@ -85,11 +85,8 @@ func budgetSettled(s string) bool {
 	return s == budgetChangeActive || s == budgetChangeReverted || s == budgetChangeSuperseded || s == ownerSubmissionUnsent
 }
 func (n *Engine) requireBudgetSigning(chain int64) error {
-	if n.config == nil || !n.config.WalletBudgetSigningEnabled || !n.config.WalletBudgetPreparationEnabled {
-		return budgetHandoffRequired()
-	}
-	if chain != 11155111 {
-		return &BudgetPolicyError{Code: BudgetHandoffRequiredCode, Detail: "Budget signing is enabled only on Sepolia."}
+	if !n.config.BudgetSigningEnabledForChain(chain) {
+		return &BudgetPolicyError{Code: BudgetHandoffRequiredCode, Detail: "Budget signing is not enabled on this network."}
 	}
 	return nil
 }
