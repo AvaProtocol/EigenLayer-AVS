@@ -60,6 +60,8 @@ tags:
     description: Stand-alone trigger evaluation
   - name: Operators
     description: Connected operator status (read-only)
+  - name: Networks
+    description: The networks this gateway serves and what each allows (read-only)
 
 # Default: end-user JWT. Operations that accept partner assertions (or
 # require them exclusively) override `security` per path. See
@@ -2084,6 +2086,26 @@ components:
         data:
           type: array
           items: { $ref: '#/components/schemas/OperatorInfo' }
+
+    NetworkInfo:
+      type: object
+      required: [chainId, walletBudgetSigning]
+      properties:
+        chainId: { $ref: '#/components/schemas/ChainId' }
+        walletBudgetSigning:
+          type: boolean
+          description: |
+            An owner can sign a new or changed wallet budget on this chain now.
+            False when budget preparation or signing is off, or the chain is
+            not activated in `wallet_budget_signing_chains`.
+
+    NetworkList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkInfo' }
 
     # -------------------------------------------------------------------
     # Session policies
@@ -4920,3 +4942,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OperatorList' }
+
+  /networks:
+    get:
+      tags: [Networks]
+      summary: List the networks this gateway serves
+      description: |
+        Public, read-only. One row per configured chain, saying whether an
+        owner can sign a new or changed wallet budget there right now
+        (`walletBudgetSigning`): the preparation and signing switches are on
+        and the chain is in `wallet_budget_signing_chains` (Sepolia when that
+        list is empty). Clients offer budget review only where it is true, so
+        an owner never signs a budget the gateway would refuse at submission.
+        Unsigned preparation does not apply the chain list, so clients must
+        check before preparing.
+      operationId: listNetworks
+      security: []
+      responses:
+        '200':
+          description: Configured networks, sorted by chain ID.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkList' }

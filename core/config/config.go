@@ -1054,6 +1054,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			"hint", "set alchemy_paymaster_policy_id or ALCHEMY_PAYMASTER_POLICY_ID")
 	}
 
+	config.warnBudgetSigningChains(logger)
 	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
 	config.validate()
 	if err := validatePeriodicBackup(config.BackupDir, config.BackupInterval); err != nil {

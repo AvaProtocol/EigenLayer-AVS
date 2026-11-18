@@ -102,6 +102,7 @@ const (
 	OpRunTrigger = "runTrigger"
 
 	OpListOperators = "listOperators"
+	OpListNetworks  = "listNetworks"
 )
 
 // permissionMap is the single source of truth: operationId → minimal level.
@@ -169,6 +170,8 @@ var permissionMap = map[string]Level{
 
 	// Monitoring: remains open (matches today's handler; product may lock later).
 	OpListOperators: LevelPublic,
+	// Which networks can sign budgets: deployment settings, not user data.
+	OpListNetworks: LevelPublic,
 }
 
 // Principal is the result of ensurePermission: who may act and at which level.

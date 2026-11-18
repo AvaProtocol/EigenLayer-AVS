@@ -29,7 +29,8 @@ func userOpFeesV07(ctx context.Context, chain *ethclient.Client, bundler *rpc.Cl
 	if bundler != nil {
 		if floor, floorErr := bundlerMaxPriorityFee(ctx, bundler); floorErr != nil {
 			if log != nil {
-				log.Debug("bundler did not report a priority fee, using the chain's", "error", floorErr)
+				log.Warn("bundler priority fee unavailable; using the chain tip", "chain_tip", tip.String())
+				log.Debug("bundler priority fee read failed", "error", floorErr)
 			}
 		} else if floor.Cmp(tip) > 0 {
 			if log != nil {
@@ -47,7 +48,8 @@ func userOpFeesV07(ctx context.Context, chain *ethclient.Client, bundler *rpc.Cl
 
 // UserOpMaxFeeV07 reads the same maximum fee an unsponsored send will sign.
 // It neither estimates, signs nor submits an operation.
-func UserOpMaxFeeV07(ctx context.Context, chain *ethclient.Client, cfg *config.SmartWalletConfig) (*big.Int, error) {
+// An optional logger reports when the quote falls back to the chain tip.
+func UserOpMaxFeeV07(ctx context.Context, chain *ethclient.Client, cfg *config.SmartWalletConfig, logs ...logger.Logger) (*big.Int, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("missing bundler configuration for fee quote")
 	}
@@ -60,6 +62,10 @@ func UserOpMaxFeeV07(ctx context.Context, chain *ethclient.Client, cfg *config.S
 		return nil, err
 	}
 	defer bundler.Close()
-	_, fee, err := userOpFeesV07(ctx, chain, bundler, nil)
+	var log logger.Logger
+	if len(logs) > 0 {
+		log = logs[0]
+	}
+	_, fee, err := userOpFeesV07(ctx, chain, bundler, log)
 	return fee, err
 }
