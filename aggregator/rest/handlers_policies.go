@@ -1159,6 +1159,22 @@ func sessionAuthorizationToAPI(auth *taskengine.SessionAuthorization) generated.
 	if need := sessionNeedToAPI(auth.Required); need != nil {
 		out.Required = need
 	}
+	if perRun := sessionNeedToAPI(auth.PerRun); perRun != nil {
+		// ETH sent only: one run's need carries no self-funded gas.
+		perRun.NativeGasWei = nil
+		out.PerRun = perRun
+	}
+	if len(auth.PerRunUnsizedTokens) > 0 {
+		tokens := make([]generated.EthereumAddress, 0, len(auth.PerRunUnsizedTokens))
+		for _, token := range auth.PerRunUnsizedTokens {
+			tokens = append(tokens, generated.EthereumAddress(token.Hex()))
+		}
+		out.PerRunUnsizedTokens = &tokens
+	}
+	if auth.PerRunNativeUnsized {
+		unsized := true
+		out.PerRunNativeUnsized = &unsized
+	}
 	return out
 }
 

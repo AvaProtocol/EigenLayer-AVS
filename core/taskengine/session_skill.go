@@ -249,7 +249,19 @@ type SessionAuthorization struct {
 	MissingTokens []common.Address
 	NeedsUntil    int64
 	Required      *WorkflowNeed
-	Detail        string
+	// PerRun is one run's need, sized for a single run and filled from what
+	// this simulation ran, in every mode (budget, workflow grant, no grant).
+	// It is never a run-count multiple and never holds self-funded gas: its
+	// native cap is ETH sent. Set on a reported simulate verdict for a
+	// fund-moving workflow. Required keeps its own meaning.
+	PerRun *WorkflowNeed
+	// PerRunUnsizedTokens are tokens one run transfers or approves without a
+	// one-run amount: a split, a batch ceiling, or an amount the simulation
+	// did not send. The caller asks the owner for one.
+	PerRunUnsizedTokens []common.Address
+	// PerRunNativeUnsized means one run's ETH sent has no amount.
+	PerRunNativeUnsized bool
+	Detail              string
 }
 
 // SimulateAuth travels on the simulate context. Report false leaves the
@@ -2717,6 +2729,59 @@ func authorizationRank(status string) int {
 	}
 }
 
+// simulatePerRun is one run's need on chainID: the static walk sized for a
+// single run (budgetNeedForTask) filled with what this simulation ran, the
+// way the budget verdict fills its need. A loop over an earlier step's
+// output is sized from the simulation. It is never a run-count multiple and
+// carries no self-funded gas. Nil when the workflow moves no funds.
+func simulatePerRun(task *avsproto.Task, settings map[string]any, chainID int64, report *SessionGrantReport, now time.Time) *WorkflowNeed {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	var need *WorkflowNeed
+	if task != nil {
+		need = budgetNeedForTask(task, settings, chainID, now)
+	}
+	_, _, saw, _, _, _, tokens, native, planned := report.snapshot()
+	if (need == nil || !need.HasFundMove) && !saw {
+		return nil
+	}
+	return fillObserved(need, saw, planned, tokens, native, SkillSchedule{MaxExecution: 1, Now: now})
+}
+
+// perRunUnsized lists the tokens one run transfers or approves without an
+// amount, in address order, and whether its ETH sent has none. It reads the
+// same targets fillObserved treats as spend-limited.
+func perRunUnsized(need *WorkflowNeed) ([]common.Address, bool) {
+	if need == nil {
+		return nil, false
+	}
+	seen := map[common.Address]bool{}
+	var tokens []common.Address
+	for _, action := range need.Actions {
+		if action.Target == nil || seen[*action.Target] {
+			continue
+		}
+		seen[*action.Target] = true
+		if !transferApproveOnly(*action.Target, need.Actions) || capAmount(need, *action.Target) != nil {
+			continue
+		}
+		tokens = append(tokens, *action.Target)
+	}
+	sort.Slice(tokens, func(i, j int) bool { return tokens[i].Hex() < tokens[j].Hex() })
+	return tokens, need.NativeUnsized
+}
+
+// withPerRun attaches one run's need to a verdict.
+func withPerRun(auth *SessionAuthorization, perRun *WorkflowNeed) *SessionAuthorization {
+	if auth == nil || perRun == nil {
+		return auth
+	}
+	auth.PerRun = perRun
+	auth.PerRunUnsizedTokens, auth.PerRunNativeUnsized = perRunUnsized(perRun)
+	return auth
+}
+
 // fillSimulateAuthorization writes the opt-in verdict onto the context
 // the handler allocated. Enforce mode leaves it unset.
 func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User, task *model.Workflow, vm *VM, chainID int64) {
@@ -2757,7 +2822,7 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		report = vm.sessionGrantReport
 	}
 	if len(needs) == 0 {
-		auth.Result = BuildAuthorization(nil, nil, report, sched)
+		auth.Result = withPerRun(BuildAuthorization(nil, nil, report, sched), simulatePerRun(task.Task, settings, chainID, report, sched.Now))
 		return
 	}
 	var worst *SessionAuthorization
@@ -2765,6 +2830,13 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		if need == nil || !need.HasFundMove {
 			continue
 		}
+		var chainReport *SessionGrantReport
+		if chain == chainID || len(needs) == 1 {
+			chainReport = report
+		}
+		// One run's need, whatever the grant: the caller sizes a budget
+		// proposal from it, never from Required's run-count total.
+		perRun := simulatePerRun(task.Task, settings, chain, chainReport, sched.Now)
 		var policy *model.SessionPolicy
 		if report != nil && chain == chainID {
 			policy, _, _, _, _, _, _, _, _ = report.snapshot()
@@ -2773,15 +2845,11 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 			if sender := getAASenderAddress(vm); sender != nil {
 				got, err := ActiveSessionPolicyForWallet(vm.db, chain, user.Address, *sender)
 				if err != nil {
-					auth.Result = &SessionAuthorization{Status: AuthNoGrant, Detail: err.Error(), Required: need}
+					auth.Result = withPerRun(&SessionAuthorization{Status: AuthNoGrant, Detail: err.Error(), Required: need}, perRun)
 					return
 				}
 				policy = got
 			}
-		}
-		var chainReport *SessionGrantReport
-		if chain == chainID || len(needs) == 1 {
-			chainReport = report
 		}
 		var got *SessionAuthorization
 		if isWalletBudget(policy) {
@@ -2808,12 +2876,13 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 				Required: required,
 			}
 		}
+		got = withPerRun(got, perRun)
 		if worst == nil || authorizationRank(got.Status) > authorizationRank(worst.Status) {
 			worst = got
 		}
 	}
 	if worst == nil {
-		worst = BuildAuthorization(nil, nil, report, sched)
+		worst = withPerRun(BuildAuthorization(nil, nil, report, sched), simulatePerRun(task.Task, settings, chainID, report, sched.Now))
 	}
 	auth.Result = worst
 }

@@ -2183,6 +2183,14 @@ components:
         Opt-in simulate verdict. Returned only when `authorizationMode` is
         `report`. It does not replace step errors from anything other than
         grant coverage.
+
+        `perRun` is what one run of this workflow needs, in every mode:
+        budget, workflow grant, or no grant. It is sized for a single run
+        and filled from what this simulation sent, so a loop over an earlier
+        step's output has amounts. It is never multiplied by the runs left,
+        unlike `required` in workflow mode. Its `nativeSpendCap` is ETH the
+        workflow sends; it never includes self-funded gas, and its
+        `nativeGasWei` is omitted. Present when the workflow moves funds.
       properties:
         status:
           type: string
@@ -2220,6 +2228,18 @@ components:
           description: Budget mode only. The recurring workflow end that exceeds the budget end, in Unix milliseconds.
         required:
           $ref: '#/components/schemas/SessionPolicyNeed'
+        perRun:
+          $ref: '#/components/schemas/SessionPolicyNeed'
+        perRunUnsizedTokens:
+          type: array
+          description: |
+            Tokens one run transfers or approves without a one-run amount
+            in `perRun`: a split, a batch ceiling, or an amount the
+            simulation did not send. The caller asks the owner for one.
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+        perRunNativeUnsized:
+          type: boolean
+          description: One run's ETH sent has no amount in `perRun`. The caller asks the owner for one.
         detail:
           type: string
 
