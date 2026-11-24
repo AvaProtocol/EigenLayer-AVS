@@ -200,6 +200,10 @@ type WorkflowNeed struct {
 	// for ETH. One run's amounts (completePerRun) set it beside what each
 	// node sent in the simulation.
 	nodeSends map[nodeAsset]*nodeSend
+	// unreadNodes have a call whose target or method the walk could not
+	// read. Their fixed sends are not their whole amount: the unread call
+	// may send the same token.
+	unreadNodes map[string]bool
 }
 
 // nodeAsset is one workflow node's sends of one token, or its ETH sent
@@ -367,8 +371,8 @@ type SessionGrantReport struct {
 }
 
 // runSend is one contract call or ETH transfer the simulation made, with
-// its network and the workflow node that made it. A loop iteration counts
-// as its loop.
+// its network and the step that made it: a workflow node's ID, or a loop
+// iteration's "<loop>_iter_<n>". simulatePerRun maps a step to its node.
 type runSend struct {
 	chain int64
 	node  string
@@ -386,10 +390,9 @@ func (r *SessionGrantReport) observeRunCalls(chain int64, stepID string, planned
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	node := workflowNodeID(stepID)
 	for index := range planned {
 		call := planned[index]
-		r.RunSends = append(r.RunSends, runSend{chain: chain, node: node, call: &call})
+		r.RunSends = append(r.RunSends, runSend{chain: chain, node: stepID, call: &call})
 	}
 }
 
@@ -400,7 +403,7 @@ func (r *SessionGrantReport) observeRunNative(chain int64, stepID string, sent *
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.RunSends = append(r.RunSends, runSend{chain: chain, node: workflowNodeID(stepID), sent: new(big.Int).Set(sent)})
+	r.RunSends = append(r.RunSends, runSend{chain: chain, node: stepID, sent: new(big.Int).Set(sent)})
 }
 
 // runSendsOn is a copy of the sends made on chain.
@@ -419,19 +422,42 @@ func (r *SessionGrantReport) runSendsOn(chain int64) []runSend {
 	return out
 }
 
-// workflowNodeID is the workflow node a step belongs to. A loop iteration
-// runs as "<loop>_iter_<n>".
-func workflowNodeID(stepID string) string {
-	for {
-		suffix := strings.LastIndex(stepID, "_iter_")
-		if suffix < 0 {
-			return stepID
-		}
-		if _, err := strconv.Atoi(stepID[suffix+len("_iter_"):]); err != nil {
-			return stepID
-		}
-		stepID = stepID[:suffix]
+// workflowNodeOf is the workflow node a step ran as. A loop iteration runs
+// as "<loop>_iter_<n>" and belongs to its loop. A node whose own ID ends
+// that way is itself, and so is a step whose prefix is not a loop.
+func workflowNodeOf(stepID string, nodes, loops map[string]bool) string {
+	if nodes[stepID] {
+		return stepID
 	}
+	suffix := strings.LastIndex(stepID, "_iter_")
+	if suffix < 0 {
+		return stepID
+	}
+	if _, err := strconv.Atoi(stepID[suffix+len("_iter_"):]); err != nil || !loops[stepID[:suffix]] {
+		return stepID
+	}
+	return stepID[:suffix]
+}
+
+// attributeRunSends maps each send's step to its workflow node in task.
+func attributeRunSends(task *avsproto.Task, sends []runSend) []runSend {
+	nodes := map[string]bool{}
+	loops := map[string]bool{}
+	for _, node := range task.GetNodes() {
+		if node == nil {
+			continue
+		}
+		nodes[node.GetId()] = true
+		if node.GetLoop() != nil {
+			loops[node.GetId()] = true
+		}
+	}
+	out := make([]runSend, 0, len(sends))
+	for _, send := range sends {
+		send.node = workflowNodeOf(send.node, nodes, loops)
+		out = append(out, send)
+	}
+	return out
 }
 
 func (r *SessionGrantReport) observeCalls(planned []PlannedCall) {
@@ -620,6 +646,10 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 			// A template the walk cannot read still moves funds. Leaving
 			// it off the need would let a new grant drop it.
 			need.Unresolved = true
+			if need.unreadNodes == nil {
+				need.unreadNodes = map[string]bool{}
+			}
+			need.unreadNodes[site.node] = true
 			if site.amountUnknown || site.loopUnknown || !runsKnown {
 				need.CapNeedsInput = true
 			}
@@ -1504,7 +1534,8 @@ func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger 
 
 // visitContractWrite marks one UserOp per method call. Deployed workflows
 // submit each call on its own. Run-node batches them, and the grant is
-// sized for the deployed path. A node-level value rides those calls.
+// sized for the deployed path. A node-level value rides each of those
+// calls, as the deployed path and the simulation send it.
 func visitContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopUnknown bool, loopMult int, visit func(fundSite)) {
 	collectContractWrite(cw, scope, loopUnknown, loopMult, func(site fundSite) {
 		if site.kind == fundCall {
@@ -1520,6 +1551,17 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopU
 		return
 	}
 	nodeTarget, nodeTargetOK := resolveAddress(cfg.GetContractAddress(), scope)
+	// visitValue is the node's value on one call.
+	visitValue := func() {
+		if v, ok, unknown := resolveAmount(cfg.GetValue(), scope); ok && v.Sign() > 0 || unknown {
+			visit(fundSite{
+				chain: cfg.GetChainId(), kind: fundValue,
+				amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
+				amountImprecise: unknown && resolvedAmountImprecise(cfg.GetValue(), scope),
+				loopUnknown:     loopUnknown, loopMult: loopMult,
+			})
+		}
+	}
 	calls := cfg.GetMethodCalls()
 	if len(calls) == 0 {
 		sel, selOK, amt, amtOK, amtUnknown := decodeCall(cfg.GetCallData(), "", nil, scope)
@@ -1531,14 +1573,7 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopU
 			loopUnknown: loopUnknown, loopMult: loopMult,
 		}
 		visit(site)
-		if v, ok, unknown := resolveAmount(cfg.GetValue(), scope); ok && v.Sign() > 0 || unknown {
-			visit(fundSite{
-				chain: cfg.GetChainId(), kind: fundValue,
-				amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
-				amountImprecise: unknown && resolvedAmountImprecise(cfg.GetValue(), scope),
-				loopUnknown:     loopUnknown, loopMult: loopMult,
-			})
-		}
+		visitValue()
 		return
 	}
 	for _, mc := range calls {
@@ -1564,14 +1599,7 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopU
 			amountImprecise: imprecise,
 			loopUnknown:     loopUnknown, loopMult: loopMult,
 		})
-	}
-	if v, ok, unknown := resolveAmount(cfg.GetValue(), scope); ok && v.Sign() > 0 || unknown {
-		visit(fundSite{
-			chain: cfg.GetChainId(), kind: fundValue,
-			amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
-			amountImprecise: unknown && resolvedAmountImprecise(cfg.GetValue(), scope),
-			loopUnknown:     loopUnknown, loopMult: loopMult,
-		})
+		visitValue()
 	}
 }
 
@@ -2901,7 +2929,7 @@ func simulatePerRun(task *avsproto.Task, settings map[string]any, chainID int64,
 	if task != nil {
 		need = budgetNeedForTask(task, settings, chainID, now)
 	}
-	sends := report.runSendsOn(chainID)
+	sends := attributeRunSends(task, report.runSendsOn(chainID))
 	saw := len(sends) > 0
 	if (need == nil || !need.HasFundMove) && !saw {
 		return nil
@@ -2962,12 +2990,13 @@ func sendAmounts(send runSend) map[nodeAsset]*big.Int {
 // runAmounts is one run's amount of each token, and of ETH, keyed with no
 // node. A node's sized sends count whether or not this run reached them,
 // for example on a branch it didn't take. A node with a send the walk
-// could not size counts what it sent in this run, and so does a node the
-// walk could not read. Nil is an amount the run leaves unknown: a split
+// could not size counts what it sent in this run, and so does a node with
+// a call the walk could not read (unread): its fixed sends are not its
+// whole amount. Nil is an amount the run leaves unknown: a split
 // or batch ceiling, whose one simulated iteration is not the total; a
 // node with an unsized send the run did not reach; or a total past
 // uint256. A ceiling on one token leaves the others sized.
-func runAmounts(walked map[nodeAsset]*nodeSend, sends []runSend) map[nodeAsset]*big.Int {
+func runAmounts(walked map[nodeAsset]*nodeSend, unread map[string]bool, sends []runSend) map[nodeAsset]*big.Int {
 	ran := map[nodeAsset]*big.Int{}
 	for _, send := range sends {
 		for key, amount := range sendAmounts(send) {
@@ -2991,7 +3020,7 @@ func runAmounts(walked map[nodeAsset]*nodeSend, sends []runSend) map[nodeAsset]*
 		case walk.ceiling:
 			add(key, big.NewInt(0))
 			unknown[nodeAsset{token: key.token, native: key.native}] = true
-		case !walk.unsized:
+		case !walk.unsized && !unread[key.node]:
 			add(key, walk.fixed)
 		case ran[key] != nil:
 			add(key, ran[key])
@@ -3023,12 +3052,14 @@ func completePerRun(filled, static *WorkflowNeed, sends []runSend) {
 	unsized := map[common.Address]bool{}
 	nativeUnknown := false
 	var walked map[nodeAsset]*nodeSend
+	var unread map[string]bool
 	if static != nil {
 		for _, token := range static.UnsizedTokens {
 			unsized[token] = true
 		}
 		nativeUnknown = static.NativeUnsized
 		walked = static.nodeSends
+		unread = static.unreadNodes
 	}
 	for _, send := range sends {
 		if send.call == nil || send.call.Target == (common.Address{}) {
@@ -3039,7 +3070,7 @@ func completePerRun(filled, static *WorkflowNeed, sends []runSend) {
 			filled.HasFundMove = true
 		}
 	}
-	for asset, amount := range runAmounts(walked, sends) {
+	for asset, amount := range runAmounts(walked, unread, sends) {
 		if asset.native {
 			nativeUnknown = amount == nil
 			filled.NativeSpendCap = nil

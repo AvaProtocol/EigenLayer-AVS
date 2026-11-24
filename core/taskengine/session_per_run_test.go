@@ -2,7 +2,9 @@ package taskengine
 
 import (
 	"context"
+	"io"
 	"math/big"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -440,12 +442,17 @@ func TestSimulatePerRunIsForTheSimulatedNetwork(t *testing.T) {
 	require.Equal(t, "", perRunCapOf(got.PerRun, skillUSDC))
 }
 
-// A loop iteration's sends belong to its loop node.
-func TestWorkflowNodeIDOfALoopIteration(t *testing.T) {
-	require.Equal(t, "sendTokens", workflowNodeID("sendTokens_iter_3"))
-	require.Equal(t, "sendTokens", workflowNodeID("sendTokens"))
-	require.Equal(t, "send_iter_x", workflowNodeID("send_iter_x"))
-	require.Equal(t, "", workflowNodeID(""))
+// A node whose own ID ends in "_iter_<n>" is itself, and so is a step whose
+// prefix is not a loop.
+func TestWorkflowNodeOfALoopIteration(t *testing.T) {
+	nodes := map[string]bool{"sendTokens": true, "pay_iter_0": true, "pay": true}
+	loops := map[string]bool{"sendTokens": true}
+	require.Equal(t, "sendTokens", workflowNodeOf("sendTokens_iter_3", nodes, loops))
+	require.Equal(t, "sendTokens", workflowNodeOf("sendTokens", nodes, loops))
+	require.Equal(t, "pay_iter_0", workflowNodeOf("pay_iter_0", nodes, loops))
+	require.Equal(t, "pay_iter_1", workflowNodeOf("pay_iter_1", nodes, loops), "pay is not a loop")
+	require.Equal(t, "send_iter_x", workflowNodeOf("send_iter_x", nodes, loops))
+	require.Equal(t, "", workflowNodeOf("", nodes, loops))
 }
 
 // A percentage split makes its token a ceiling: one simulated iteration is
@@ -489,4 +496,114 @@ func TestSimulatePerRunCountsAZeroSendAsReached(t *testing.T) {
 	got := perRunVerdict(t, skillWorkflow(perRunFixedAndUnknown(payee), runner), runner, 1, report, skillSepolia)
 	require.Equal(t, "7", perRunCapOf(got.PerRun, skillUSDC))
 	require.Empty(t, got.PerRunUnsizedTokens)
+}
+
+// perRunSimulateWrite runs one contract-write node through its processor
+// against a stubbed simulation service, then sizes one run from what it
+// sent. It returns perRun, the grant report, and how many calls the
+// simulation service received.
+func perRunSimulateWrite(t *testing.T, id string, cfg map[string]any) (*WorkflowNeed, *SessionGrantReport, int) {
+	t.Helper()
+	const runner = "0x0000000000000000000000000000000000000052"
+	db := testutil.TestMustDB()
+	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+	vm := NewVM().WithLogger(testutil.GetLogger()).WithDb(db).SetSimulation(true)
+	vm.AddVar("aa_sender", runner)
+	vm.AddVar("settings", map[string]any{"chain_id": skillSepolia, "runner": runner})
+	vm.AddVar("tokenLookup", map[string]any{"data": skillUSDC})
+	report := &SessionGrantReport{}
+	vm.sessionGrantReport = report
+	vm.tenderlyClient = NewTenderlyClient(&config.Config{TenderlyAccount: "fixture", TenderlyProject: "fixture", TenderlyAccessKey: "fixture"}, testutil.GetLogger())
+	simulated := 0
+	vm.tenderlyClient.httpClient.SetTransport(approvalLayoutTransport(func(request *http.Request) (*http.Response, error) {
+		simulated++
+		body := `{"simulation":{"status":true},"transaction":{"gas_used":21000,"gas_price":1,"transaction_info":{"call_trace":{"output":"0x0000000000000000000000000000000000000000000000000000000000000001"}}}}`
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
+	}))
+	node, err := CreateNodeFromType("contractWrite", cfg, "")
+	require.NoError(t, err)
+	node.Id = id
+	task := perRunTask(node)
+	processor := NewContractWriteProcessor(vm, nil, &config.SmartWalletConfig{ChainID: skillSepolia}, common.HexToAddress(runner))
+	processor.CommonProcessor.SetTaskNode(node)
+	step, err := processor.Execute(id, node.GetContractWrite())
+	require.NoError(t, err)
+	require.True(t, step.Success, step.Error)
+	perRun := simulatePerRun(task, nil, skillSepolia, report, skillNow())
+	require.NotNil(t, perRun)
+	return perRun, report, simulated
+}
+
+// perRunTransferConfig is a USDC contract-write node making calls.
+func perRunTransferConfig(calls []any) map[string]any {
+	return map[string]any{
+		"chainId":         skillSepolia,
+		"contractAddress": skillUSDC,
+		"contractAbi": []any{map[string]any{
+			"type": "function", "name": "transfer", "stateMutability": "nonpayable",
+			"inputs":  []any{map[string]any{"name": "to", "type": "address"}, map[string]any{"name": "amount", "type": "uint256"}},
+			"outputs": []any{map[string]any{"name": "", "type": "bool"}},
+		}},
+		"methodCalls": calls,
+	}
+}
+
+// A node's value goes with each of its calls: two deposit() calls at 7 wei
+// send 14, in one run and in every run Required sizes.
+func TestSimulatePerRunCountsTheValueOfEachCall(t *testing.T) {
+	cfg := map[string]any{
+		"chainId": skillSepolia, "contractAddress": skillWETH, "value": "7",
+		"contractAbi": []any{map[string]any{"type": "function", "name": "deposit", "stateMutability": "payable", "inputs": []any{}, "outputs": []any{}}},
+		"methodCalls": []any{
+			map[string]any{"methodName": "deposit", "methodParams": []any{}},
+			map[string]any{"methodName": "deposit", "methodParams": []any{}},
+		},
+	}
+	perRun, report, simulated := perRunSimulateWrite(t, "deposits", cfg)
+	require.Equal(t, 2, simulated)
+	require.Equal(t, big.NewInt(14), report.NativeSpend)
+	require.NotNil(t, perRun.NativeSpendCap)
+	require.Equal(t, "14", perRun.NativeSpendCap.Amount)
+
+	node, err := CreateNodeFromType("contractWrite", cfg, "")
+	require.NoError(t, err)
+	task := perRunTask(node)
+	task.MaxExecution = 12
+	need := DeriveWorkflowNeeds(task, nil, SkillSchedule{MaxExecution: 12, Now: skillNow()}, skillSepolia)[skillSepolia]
+	require.NotNil(t, need.NativeSpendCap)
+	require.Equal(t, "168", need.NativeSpendCap.Amount, "12 runs of two 7-wei calls")
+}
+
+// A call whose token the walk can't read can send the same token as a
+// fixed call beside it. The node's amount is what it sent, and a node the
+// run did not reach leaves the token without one.
+func TestSimulatePerRunReadsANodeWithAnUnreadCallFromTheRun(t *testing.T) {
+	recipient := "0x0000000000000000000000000000000000000053"
+	cfg := perRunTransferConfig([]any{
+		map[string]any{"methodName": "transfer", "methodParams": []any{recipient, "7"}},
+		map[string]any{"contractAddress": "{{tokenLookup.data}}", "methodName": "transfer", "methodParams": []any{recipient, "13"}},
+	})
+	perRun, report, simulated := perRunSimulateWrite(t, "pay", cfg)
+	require.Equal(t, 2, simulated)
+	require.Equal(t, big.NewInt(20), report.TokenSpend[common.HexToAddress(skillUSDC)])
+	require.Equal(t, "20", perRunCapOf(perRun, skillUSDC))
+	require.Empty(t, perRun.UnsizedTokens)
+
+	node, err := CreateNodeFromType("contractWrite", cfg, "")
+	require.NoError(t, err)
+	node.Id = "pay"
+	notReached := simulatePerRun(perRunTask(node), nil, skillSepolia, &SessionGrantReport{}, skillNow())
+	require.Equal(t, "", perRunCapOf(notReached, skillUSDC))
+	require.Equal(t, []common.Address{common.HexToAddress(skillUSDC)}, notReached.UnsizedTokens)
+}
+
+// A node whose own ID ends in "_iter_0" is not a loop iteration: its send
+// counts once.
+func TestSimulatePerRunCountsANodeNamedLikeAnIterationOnce(t *testing.T) {
+	cfg := perRunTransferConfig([]any{
+		map[string]any{"methodName": "transfer", "methodParams": []any{"0x0000000000000000000000000000000000000053", "7"}},
+	})
+	perRun, _, simulated := perRunSimulateWrite(t, "pay_iter_0", cfg)
+	require.Equal(t, 1, simulated)
+	require.Equal(t, "7", perRunCapOf(perRun, skillUSDC))
 }
