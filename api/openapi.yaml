@@ -2188,9 +2188,21 @@ components:
         budget, workflow grant, or no grant. It is sized for a single run
         and filled from what this simulation sent, so a loop over an earlier
         step's output has amounts. It is never multiplied by the runs left,
-        unlike `required` in workflow mode. Its `nativeSpendCap` is ETH the
-        workflow sends; it never includes self-funded gas, and its
-        `nativeGasWei` is omitted. Present when the workflow moves funds.
+        unlike `required` in workflow mode. Present when the workflow moves
+        funds.
+
+        Its `nativeSpendCap` is the ETH one run sends plus, on a network
+        that does not sponsor gas, that run's self-funded gas, and
+        `nativeGasWei` is the gas part. So `nativeSpendCap` less
+        `nativeGasWei` is the ETH sent, and the run count times
+        `nativeSpendCap` is what the create check charges a wallet budget
+        for that many runs. Gas is included only where the create check
+        charges it: when the run sends ETH, or when the wallet's grant
+        already caps ETH. A run that sends no ETH can then have a
+        `nativeSpendCap` that is all gas. It is steady UserOps only; the
+        wallet's one install is priced by the grant's own preparation. A
+        send whose UserOp count is unknown (a loop over an earlier step's
+        output) adds no gas, as at create.
 
         `perRun` is for the network this simulation ran on (the request's
         `chainId`), even when `status` and `required` report another chain

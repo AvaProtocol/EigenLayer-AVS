@@ -1160,8 +1160,8 @@ func sessionAuthorizationToAPI(auth *taskengine.SessionAuthorization) generated.
 		out.Required = need
 	}
 	if perRun := sessionNeedToAPI(auth.PerRun); perRun != nil {
-		// ETH sent only: one run's need carries no self-funded gas.
-		perRun.NativeGasWei = nil
+		// Like required, nativeGasWei is the part of nativeSpendCap that is
+		// one run's self-funded gas.
 		out.PerRun = perRun
 	}
 	if len(auth.PerRunUnsizedTokens) > 0 {

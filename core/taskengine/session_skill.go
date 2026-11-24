@@ -301,9 +301,11 @@ type SessionAuthorization struct {
 	Required      *WorkflowNeed
 	// PerRun is one run's need, sized for a single run and filled from what
 	// this simulation ran, in every mode (budget, workflow grant, no grant).
-	// It is never a run-count multiple and never holds self-funded gas: its
-	// native cap is ETH sent. Set on a reported simulate verdict for a
-	// fund-moving workflow. Required keeps its own meaning.
+	// It is never a run-count multiple. Its native cap is ETH sent plus one
+	// run's steady self-funded gas when the create check would charge it,
+	// and NativeGasWei is that gas (pricePerRunGas). Set on a reported
+	// simulate verdict for a fund-moving workflow. Required keeps its own
+	// meaning.
 	PerRun *WorkflowNeed
 	// PerRunUnsizedTokens are tokens one run transfers or approves without a
 	// one-run amount: a split, a batch ceiling, or an amount the simulation
@@ -2909,8 +2911,8 @@ func authorizationRank(status string) int {
 // simulatePerRun is one run's need on chainID: the static walk sized for a
 // single run (budgetNeedForTask), completed with what this simulation sent
 // on chainID. A send on another network is that network's. It is never a
-// run-count multiple and carries no self-funded gas. Nil when the workflow
-// moves no funds.
+// run-count multiple. Its gas is priced by the caller once the network's
+// grant is known (pricePerRunGas). Nil when the workflow moves no funds.
 func simulatePerRun(task *avsproto.Task, settings map[string]any, chainID int64, report *SessionGrantReport, now time.Time) *WorkflowNeed {
 	if now.IsZero() {
 		now = time.Now()
@@ -3107,6 +3109,25 @@ func perRunUnsized(need *WorkflowNeed) ([]common.Address, bool) {
 	return tokens, need.NativeUnsized
 }
 
+// pricePerRunGas folds one run's self-funded gas into perRun the way the
+// create check charges it per run: steady UserOps at the network's fee
+// assumption, on a network that does not sponsor gas, when the run sends
+// ETH or the wallet's grant already caps ETH. NativeGasWei is that part of
+// NativeSpendCap, so NativeSpendCap less NativeGasWei is the ETH one run
+// sends. The wallet's one install is not included: the grant's own
+// preparation prices it. A send whose UserOp count is unknown (a loop over
+// an earlier step's output) adds no gas, as at create. A run that sends no
+// ETH can end with a NativeSpendCap that is gas alone.
+func (n *Engine) pricePerRunGas(perRun *WorkflowNeed, policy *model.SessionPolicy, chainID int64) {
+	if n == nil || perRun == nil {
+		return
+	}
+	perRun.priceFee = n.selfFundedGrantFee(chainID)
+	// The only error is gas past uint256, which leaves the need as it was:
+	// one run's ETH sent, without gas.
+	_ = priceDraftNativeGas(perRun, policy)
+}
+
 // withPerRun attaches one run's need to a verdict.
 func withPerRun(auth *SessionAuthorization, perRun *WorkflowNeed) *SessionAuthorization {
 	if auth == nil || perRun == nil {
@@ -3160,7 +3181,9 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 	// proposal from it, never from Required's run-count total. It is for
 	// the network this simulation ran on, whichever chain's verdict is
 	// reported, and reads only the sends made on that network. A workflow
-	// on one other chain keeps that chain, as its verdict does.
+	// on one other chain keeps that chain, as its verdict does. Its ETH
+	// includes one run's self-funded gas once that network's grant is known
+	// (pricePerRunGas).
 	perRunChain := chainID
 	if len(needs) == 1 {
 		for chain := range needs {
@@ -3169,6 +3192,11 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 	}
 	perRun := simulatePerRun(task.Task, settings, perRunChain, report, sched.Now)
 	if len(needs) == 0 {
+		var policy *model.SessionPolicy
+		if report != nil {
+			policy, _, _, _, _, _, _, _, _ = report.snapshot()
+		}
+		n.pricePerRunGas(perRun, policy, perRunChain)
 		auth.Result = withPerRun(BuildAuthorization(nil, nil, report, sched), perRun)
 		return
 	}
@@ -3181,6 +3209,7 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 	sort.Slice(chains, func(i, j int) bool { return chains[i] < chains[j] })
 	var worst *SessionAuthorization
 	worstChain := int64(0)
+	var perRunPolicy *model.SessionPolicy
 	for _, chain := range chains {
 		need := needs[chain]
 		if need == nil || !need.HasFundMove {
@@ -3198,11 +3227,15 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 			if sender := getAASenderAddress(vm); sender != nil {
 				got, err := ActiveSessionPolicyForWallet(vm.db, chain, user.Address, *sender)
 				if err != nil {
+					n.pricePerRunGas(perRun, perRunPolicy, perRunChain)
 					auth.Result = withPerRun(&SessionAuthorization{Status: AuthNoGrant, Detail: err.Error(), Required: need}, perRun)
 					return
 				}
 				policy = got
 			}
+		}
+		if chain == perRunChain {
+			perRunPolicy = policy
 		}
 		var got *SessionAuthorization
 		if isWalletBudget(policy) {
@@ -3241,6 +3274,7 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 	if worst == nil {
 		worst = BuildAuthorization(nil, nil, report, sched)
 	}
+	n.pricePerRunGas(perRun, perRunPolicy, perRunChain)
 	auth.Result = withPerRun(worst, perRun)
 }
 

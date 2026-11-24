@@ -11,8 +11,9 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 )
 
-// perRun maps beside required. It never reports gas: its native cap is ETH
-// sent, and the unsized markers say which amounts the owner must enter.
+// perRun maps beside required. Like required, nativeGasWei is the gas inside
+// its native cap, and the unsized markers say which amounts the owner must
+// enter.
 func TestSessionAuthorizationToAPIMapsPerRun(t *testing.T) {
 	usdc := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
 	usdt := common.HexToAddress("0x7169D38820dfd117C3FA1f22a697dBA58d90BA06")
@@ -38,7 +39,8 @@ func TestSessionAuthorizationToAPIMapsPerRun(t *testing.T) {
 
 	require.NotNil(t, out.PerRun)
 	require.Equal(t, "7", (*out.PerRun.Erc20SpendCaps)[0].Amount)
-	require.Nil(t, out.PerRun.NativeGasWei, "one run's need reports no gas")
+	require.NotNil(t, out.PerRun.NativeGasWei, "one run's need reports the gas in its native cap")
+	require.Equal(t, "400", *out.PerRun.NativeGasWei)
 	require.NotNil(t, out.PerRunUnsizedTokens)
 	require.Equal(t, usdt.Hex(), string((*out.PerRunUnsizedTokens)[0]))
 	require.NotNil(t, out.PerRunNativeUnsized)
