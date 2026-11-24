@@ -269,10 +269,13 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		"gasPrice":        executionLog.GasPrice,
 		"totalGasCost":    executionLog.TotalGasCost,
 	}
+	sent := amountWei
 	if estimate != nil {
 		amountStr = estimate.sized.Value.String()
+		sent = estimate.sized.Value
 		addNativeReserveMetadata(resultObj, estimate.sized)
 	}
+	p.observeRunNative(sent)
 
 	// Create output data: only transfer object in data field (matches ERC20 format)
 	ethData := map[string]interface{}{
@@ -531,6 +534,21 @@ func (p *ETHTransferProcessor) preflightSessionGrant(destination common.Address,
 
 func (p *ETHTransferProcessor) preflightSessionGrantError(destination common.Address, amount *big.Int) error {
 	return p.preflightNativeSend(destination, amount, amount)
+}
+
+// observeRunNative records the ETH this simulated transfer sends, for one
+// run's amount. A self-funded MAX sends its balance less the fee reserve;
+// preflightNativeSend has already reported the whole balance for the
+// grant. It reports under the same conditions.
+func (p *ETHTransferProcessor) observeRunNative(sent *big.Int) {
+	if p == nil || p.smartWalletConfig == nil || p.vm == nil || p.vm.db == nil || p.taskOwner == nil || p.vm.sessionGrantReport == nil || getAASenderAddress(p.vm) == nil {
+		return
+	}
+	chainID := p.smartWalletConfig.ChainID
+	if chainID <= 0 {
+		chainID = p.vm.vmDefaultChainID()
+	}
+	p.vm.sessionGrantReport.observeRunNative(chainID, p.vm.workflowNodeOf(p.GetTaskNode()), sent)
 }
 
 // preflightNativeSend checks checked against the grant. A grant report

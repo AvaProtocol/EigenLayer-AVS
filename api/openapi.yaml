@@ -2183,6 +2183,39 @@ components:
         Opt-in simulate verdict. Returned only when `authorizationMode` is
         `report`. It does not replace step errors from anything other than
         grant coverage.
+
+        `perRun` is what one run of this workflow needs, in every mode:
+        budget, workflow grant, or no grant. It is sized for a single run
+        and filled from what this simulation sent, so a loop over an earlier
+        step's output has amounts. It is never multiplied by the runs left,
+        unlike `required` in workflow mode. Present when the workflow moves
+        funds.
+
+        Its `nativeSpendCap` is the ETH one run sends plus, on a network
+        that does not sponsor gas, that run's self-funded gas, and
+        `nativeGasWei` is the gas part. So `nativeSpendCap` less
+        `nativeGasWei` is the ETH sent, and the run count times
+        `nativeSpendCap` is what the create check charges a wallet budget
+        for that many runs. Gas is included only where the create check
+        charges it: when the run sends ETH, or when the wallet's grant
+        already caps ETH. A run that sends no ETH can then have a
+        `nativeSpendCap` that is all gas. It is steady UserOps only; the
+        wallet's one install is priced by the grant's own preparation. A
+        send whose UserOp count is unknown (a loop over an earlier step's
+        output) adds no gas, as at create.
+
+        `perRun` is for the network this simulation ran on (the request's
+        `chainId`), even when `status` and `required` report another chain
+        of a multi-chain workflow. A workflow whose sends are all on one
+        other chain reports that chain, and only sends on that network
+        count. Each amount is the token's whole amount for the run: its
+        fixed sends, whether or not the simulation reached them, plus what
+        the simulation sent from each workflow node whose amount is not
+        fixed. When the simulation did not reach one of those nodes, for
+        example on a branch it didn't take, the token has no amount and is
+        listed in `perRunUnsizedTokens`. ETH follows the same rule. A
+        self-funded `MAX` transfer counts the value it sends, not the
+        network fee it reserves.
       properties:
         status:
           type: string
@@ -2220,6 +2253,20 @@ components:
           description: Budget mode only. The recurring workflow end that exceeds the budget end, in Unix milliseconds.
         required:
           $ref: '#/components/schemas/SessionPolicyNeed'
+        perRun:
+          $ref: '#/components/schemas/SessionPolicyNeed'
+        perRunUnsizedTokens:
+          type: array
+          description: |
+            Tokens one run transfers or approves without a one-run amount
+            in `perRun`: a split, a batch ceiling, or a send whose amount
+            the simulation did not show. A token listed here has no amount
+            in `perRun`, even when some of its sends are fixed. The caller
+            asks the owner for one.
+          items: { $ref: '#/components/schemas/EthereumAddress' }
+        perRunNativeUnsized:
+          type: boolean
+          description: One run's native budget could not be sized, including any applicable self-funded gas. The caller needs an amount before it can propose that limit.
         detail:
           type: string
 

@@ -1078,6 +1078,7 @@ func (r *ContractWriteProcessor) preflightSessionGrantError(planned []PlannedCal
 	report := r.vm.sessionGrantReport
 	if report != nil {
 		report.observeCalls(planned)
+		report.observeRunCalls(chainID, r.vm.workflowNodeOf(r.GetTaskNode()), planned)
 	}
 	policy, err := ActiveSessionPolicyForWallet(r.vm.db, chainID, r.owner, *sender)
 	if err != nil {

@@ -188,9 +188,59 @@ type WorkflowNeed struct {
 	// NativeGasWei is self-funded gas folded into NativeSpendCap,
 	// excluding the ETH this workflow sends.
 	NativeGasWei *big.Int
+	// UnsizedTokens are tokens with at least one transfer or approve the
+	// walk could not size: an unknown amount or loop count, a ceiling, or
+	// a total past uint256. A cap on one of them holds only its sized
+	// sends, so it is not the token's whole amount.
+	UnsizedTokens []common.Address
 	// priceFee prices gas after observed spend is copied onto the
 	// simulate verdict. Nil leaves the cap as the value sent.
 	priceFee *big.Int
+	// nodeSends is what the walk read of each node's sends, per token and
+	// for ETH. One run's amounts (completePerRun) set it beside what each
+	// node sent in the simulation.
+	nodeSends map[nodeAsset]*nodeSend
+	// unreadNodes have a call whose target or method the walk could not
+	// read. Their fixed token sends are not their whole amount: the unread
+	// call may send the same token. Their ETH is the node's value, which
+	// the walk reads either way.
+	unreadNodes map[string]bool
+}
+
+// nodeAsset is one workflow node's sends of one token, or its ETH sent
+// when native is set.
+type nodeAsset struct {
+	node   string
+	token  common.Address
+	native bool
+}
+
+// nodeSend is the walk's reading of a nodeAsset: the sum of its sized
+// sends for one run, and whether it also has a send with no amount. A
+// ceiling is a split or batch row whose one simulated iteration is not
+// the total.
+type nodeSend struct {
+	fixed   *big.Int
+	unsized bool
+	ceiling bool
+}
+
+// noteNodeSend records one fund site on its node. A nil amount is a send
+// the walk could not size.
+func noteNodeSend(need *WorkflowNeed, key nodeAsset, amount *big.Int) {
+	if need.nodeSends == nil {
+		need.nodeSends = map[nodeAsset]*nodeSend{}
+	}
+	send := need.nodeSends[key]
+	if send == nil {
+		send = &nodeSend{fixed: big.NewInt(0)}
+		need.nodeSends[key] = send
+	}
+	if amount == nil {
+		send.unsized = true
+		return
+	}
+	send.fixed.Add(send.fixed, amount)
 }
 
 // PolicyAddition is the automation being set up. Cap amounts are totals
@@ -249,7 +299,21 @@ type SessionAuthorization struct {
 	MissingTokens []common.Address
 	NeedsUntil    int64
 	Required      *WorkflowNeed
-	Detail        string
+	// PerRun is one run's need, sized for a single run and filled from what
+	// this simulation ran, in every mode (budget, workflow grant, no grant).
+	// It is never a run-count multiple. Its native cap is ETH sent plus one
+	// run's steady self-funded gas when the create check would charge it,
+	// and NativeGasWei is that gas (pricePerRunGas). Set on a reported
+	// simulate verdict for a fund-moving workflow. Required keeps its own
+	// meaning.
+	PerRun *WorkflowNeed
+	// PerRunUnsizedTokens are tokens one run transfers or approves without a
+	// one-run amount: a split, a batch ceiling, or an amount the simulation
+	// did not send. The caller asks the owner for one.
+	PerRunUnsizedTokens []common.Address
+	// PerRunNativeUnsized means one run's native budget cannot be sized.
+	PerRunNativeUnsized bool
+	Detail              string
 }
 
 // SimulateAuth travels on the simulate context. Report false leaves the
@@ -303,6 +367,88 @@ type SessionGrantReport struct {
 	TokenSpend       map[common.Address]*big.Int
 	NativeSpend      *big.Int
 	NativeRecipients []common.Address
+	// RunSends are the sends one run's amounts read (simulatePerRun).
+	// TokenSpend and NativeSpend pool every network, and NativeSpend
+	// holds a self-funded MAX's whole balance, network fee included.
+	RunSends []runSend
+}
+
+// runSend is one contract call or ETH transfer the simulation made, with
+// its network and the workflow node that made it. A loop iteration's send
+// is its loop's (VM.workflowNodeOf).
+type runSend struct {
+	chain int64
+	node  string
+	// call is the contract call; nil for an ETH transfer.
+	call *PlannedCall
+	// sent is an ETH transfer's value, after any fee reserve.
+	sent *big.Int
+}
+
+// observeRunCalls records a node's contract calls on chain for one run's
+// amounts.
+func (r *SessionGrantReport) observeRunCalls(chain int64, node string, planned []PlannedCall) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for index := range planned {
+		call := planned[index]
+		call.Calldata = bytes.Clone(call.Calldata)
+		if call.Value != nil {
+			call.Value = new(big.Int).Set(call.Value)
+		}
+		r.RunSends = append(r.RunSends, runSend{chain: chain, node: node, call: &call})
+	}
+}
+
+// observeRunNative records the ETH a transfer node sent on chain.
+func (r *SessionGrantReport) observeRunNative(chain int64, node string, sent *big.Int) {
+	if r == nil || sent == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.RunSends = append(r.RunSends, runSend{chain: chain, node: node, sent: new(big.Int).Set(sent)})
+}
+
+// runSendsOn is a copy of the sends made on chain.
+func (r *SessionGrantReport) runSendsOn(chain int64) []runSend {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []runSend
+	for _, send := range r.RunSends {
+		if send.chain == chain {
+			out = append(out, send)
+		}
+	}
+	return out
+}
+
+// noteLoopIteration records that iteration runs one pass of loop. Its ID,
+// "<loop>_iter_<n>", can also be a workflow node's own ID, so a simulate
+// report reads the loop from here, never from the ID. Recorded only while
+// a grant report is open.
+func (v *VM) noteLoopIteration(iteration *avsproto.TaskNode, loop string) {
+	if v == nil || iteration == nil || v.sessionGrantReport == nil {
+		return
+	}
+	v.loopIterations.Store(iteration, loop)
+}
+
+// workflowNodeOf is the workflow node that runs step: its loop for a loop
+// iteration, otherwise the node itself.
+func (v *VM) workflowNodeOf(step *avsproto.TaskNode) string {
+	if v != nil && step != nil {
+		if loop, ok := v.loopIterations.Load(step); ok {
+			return loop.(string)
+		}
+	}
+	return step.GetId()
 }
 
 func (r *SessionGrantReport) observeCalls(planned []PlannedCall) {
@@ -465,13 +611,20 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 					need.Unresolved = true
 				}
 			}
+			native := nodeAsset{node: site.node, native: true}
 			if site.amountUnknown || site.loopUnknown || !runsKnown {
 				need.CapNeedsInput = true
 				need.NativeUnsized = true
+				noteNodeSend(need, native, nil)
 				return
 			}
 			if site.amountOK {
 				total, ok := scaleSpend(site.amount, runs, site.loopMult)
+				if ok {
+					noteNodeSend(need, native, total)
+				} else {
+					noteNodeSend(need, native, nil)
+				}
 				if !ok || !addNative(need, total) {
 					need.CapNeedsInput = true
 					need.NativeUnsized = true
@@ -484,6 +637,10 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 			// A template the walk cannot read still moves funds. Leaving
 			// it off the need would let a new grant drop it.
 			need.Unresolved = true
+			if need.unreadNodes == nil {
+				need.unreadNodes = map[string]bool{}
+			}
+			need.unreadNodes[site.node] = true
 			if site.amountUnknown || site.loopUnknown || !runsKnown {
 				need.CapNeedsInput = true
 			}
@@ -491,6 +648,7 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 		}
 		addAction(need, site.target, site.selector)
 		spendLimited := site.selector == selectorTransfer || site.selector == selectorApprove
+		token := nodeAsset{node: site.node, token: site.target}
 		if site.ceiling && spendLimited {
 			// The token is named. The amount is not a total, so it is not
 			// stored and one simulation must not fill it in. Unknown runs
@@ -500,15 +658,26 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 			if runsKnown {
 				need.CapCeiling = true
 			}
+			markUnsizedToken(need, site.target)
+			noteNodeSend(need, token, nil)
+			need.nodeSends[token].ceiling = true
 			return
 		}
 		if spendLimited && (site.amountUnknown || site.loopUnknown || !runsKnown) {
 			need.CapNeedsInput = true
+			markUnsizedToken(need, site.target)
+			noteNodeSend(need, token, nil)
 		} else if spendLimited && site.amountOK && runsKnown {
 			total, ok := scaleSpend(site.amount, runs, site.loopMult)
+			if ok {
+				noteNodeSend(need, token, total)
+			} else {
+				noteNodeSend(need, token, nil)
+			}
 			if !ok || !addCap(need, site.target, total) {
 				need.CapNeedsInput = true
 				removeCap(need, site.target)
+				markUnsizedToken(need, site.target)
 			}
 		}
 	})
@@ -1269,7 +1438,9 @@ const (
 )
 
 type fundSite struct {
-	chain         int64
+	chain int64
+	// node is the workflow node that sends: a loop's own id for its body.
+	node          string
 	kind          fundKind
 	target        common.Address
 	targetOK      bool
@@ -1301,11 +1472,15 @@ type fundScope struct {
 	hasValue bool
 }
 
-func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger *avsproto.TaskTrigger, visit func(fundSite)) {
+func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger *avsproto.TaskTrigger, visitSite func(fundSite)) {
 	scope := fundScope{settings: settings}
 	for _, node := range nodes {
 		if node == nil {
 			continue
+		}
+		visit := func(site fundSite) {
+			site.node = node.GetId()
+			visitSite(site)
 		}
 		if cw := node.GetContractWrite(); cw != nil {
 			visitContractWrite(cw, scope, false, 1, visit)
@@ -1350,7 +1525,8 @@ func walkFundMoves(nodes []*avsproto.TaskNode, settings map[string]any, trigger 
 
 // visitContractWrite marks one UserOp per method call. Deployed workflows
 // submit each call on its own. Run-node batches them, and the grant is
-// sized for the deployed path. A node-level value rides those calls.
+// sized for the deployed path. A node-level value rides each of those
+// calls, as the deployed path and the simulation send it.
 func visitContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopUnknown bool, loopMult int, visit func(fundSite)) {
 	collectContractWrite(cw, scope, loopUnknown, loopMult, func(site fundSite) {
 		if site.kind == fundCall {
@@ -1366,6 +1542,17 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopU
 		return
 	}
 	nodeTarget, nodeTargetOK := resolveAddress(cfg.GetContractAddress(), scope)
+	// visitValue is the node's value on one call.
+	visitValue := func() {
+		if v, ok, unknown := resolveAmount(cfg.GetValue(), scope); ok && v.Sign() > 0 || unknown {
+			visit(fundSite{
+				chain: cfg.GetChainId(), kind: fundValue,
+				amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
+				amountImprecise: unknown && resolvedAmountImprecise(cfg.GetValue(), scope),
+				loopUnknown:     loopUnknown, loopMult: loopMult,
+			})
+		}
+	}
 	calls := cfg.GetMethodCalls()
 	if len(calls) == 0 {
 		sel, selOK, amt, amtOK, amtUnknown := decodeCall(cfg.GetCallData(), "", nil, scope)
@@ -1377,14 +1564,7 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopU
 			loopUnknown: loopUnknown, loopMult: loopMult,
 		}
 		visit(site)
-		if v, ok, unknown := resolveAmount(cfg.GetValue(), scope); ok && v.Sign() > 0 || unknown {
-			visit(fundSite{
-				chain: cfg.GetChainId(), kind: fundValue,
-				amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
-				amountImprecise: unknown && resolvedAmountImprecise(cfg.GetValue(), scope),
-				loopUnknown:     loopUnknown, loopMult: loopMult,
-			})
-		}
+		visitValue()
 		return
 	}
 	for _, mc := range calls {
@@ -1410,14 +1590,7 @@ func collectContractWrite(cw *avsproto.ContractWriteNode, scope fundScope, loopU
 			amountImprecise: imprecise,
 			loopUnknown:     loopUnknown, loopMult: loopMult,
 		})
-	}
-	if v, ok, unknown := resolveAmount(cfg.GetValue(), scope); ok && v.Sign() > 0 || unknown {
-		visit(fundSite{
-			chain: cfg.GetChainId(), kind: fundValue,
-			amount: v, amountOK: ok && v != nil && v.Sign() > 0, amountUnknown: unknown,
-			amountImprecise: unknown && resolvedAmountImprecise(cfg.GetValue(), scope),
-			loopUnknown:     loopUnknown, loopMult: loopMult,
-		})
+		visitValue()
 	}
 }
 
@@ -1445,7 +1618,12 @@ func decodeCall(calldata, method string, params []string, scope fundScope) (sel 
 		if len(data) >= 4 && !strings.ContainsAny(raw, "{}$") {
 			sel = SelectorFromCalldata(data)
 			selOK = sel != "0x00000000"
-			if decoded, ok := decodeTransferAmount(data); ok {
+			if decoded, ok := decodeSpendAmount(data); ok {
+				if decoded.Sign() == 0 {
+					// An explicit zero, such as an allowance reset, is
+					// known: no amount, as resolveAmount reads "0".
+					return sel, selOK, nil, false, false
+				}
 				return sel, selOK, decoded, true, false
 			}
 			if sel == selectorTransfer || sel == selectorApprove {
@@ -1475,6 +1653,16 @@ func decodeCall(calldata, method string, params []string, scope fundScope) (sel 
 }
 
 func decodeTransferAmount(data []byte) (*big.Int, bool) {
+	amt, ok := decodeSpendAmount(data)
+	if !ok || amt.Sign() <= 0 {
+		return nil, false
+	}
+	return amt, true
+}
+
+// decodeSpendAmount is a transfer or approve's amount, zero included. A
+// run that reached a send with nothing to move still reached it.
+func decodeSpendAmount(data []byte) (*big.Int, bool) {
 	if len(data) < 68 {
 		return nil, false
 	}
@@ -1482,11 +1670,7 @@ func decodeTransferAmount(data []byte) (*big.Int, bool) {
 	if sel != selectorTransfer && sel != selectorApprove {
 		return nil, false
 	}
-	amt := new(big.Int).SetBytes(data[36:68])
-	if amt.Sign() <= 0 {
-		return nil, false
-	}
-	return amt, true
+	return new(big.Int).SetBytes(data[36:68]), true
 }
 
 func resolveAddress(raw string, scope fundScope) (common.Address, bool) {
@@ -1768,6 +1952,16 @@ func removeCap(need *WorkflowNeed, token common.Address) {
 		out = append(out, cap)
 	}
 	need.Caps = out
+}
+
+// markUnsizedToken records a token with a send the walk could not size.
+func markUnsizedToken(need *WorkflowNeed, token common.Address) {
+	for _, have := range need.UnsizedTokens {
+		if have == token {
+			return
+		}
+	}
+	need.UnsizedTokens = append(need.UnsizedTokens, token)
 }
 
 func addNative(need *WorkflowNeed, amt *big.Int) bool {
@@ -2202,6 +2396,7 @@ func fillObserved(need *WorkflowNeed, saw bool, planned []PlannedCall, tokenSpen
 		filled.Actions = append([]model.AllowedAction(nil), need.Actions...)
 		filled.Caps = append([]model.ERC20SpendCap(nil), need.Caps...)
 		filled.NativeRecipients = append([]*common.Address(nil), need.NativeRecipients...)
+		filled.UnsizedTokens = append([]common.Address(nil), need.UnsizedTokens...)
 		if need.NativeSpendCap != nil {
 			cp := *need.NativeSpendCap
 			filled.NativeSpendCap = &cp
@@ -2717,6 +2912,251 @@ func authorizationRank(status string) int {
 	}
 }
 
+// simulatePerRun is one run's need on chainID: the static walk sized for a
+// single run (budgetNeedForTask), completed with what this simulation sent
+// on chainID. A send on another network is that network's. It is never a
+// run-count multiple. Its gas is priced by the caller once the network's
+// grant is known (pricePerRunGas). Nil when the workflow moves no funds.
+func simulatePerRun(task *avsproto.Task, settings map[string]any, chainID int64, report *SessionGrantReport, now time.Time) *WorkflowNeed {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	var need *WorkflowNeed
+	if task != nil {
+		need = budgetNeedForTask(task, settings, chainID, now)
+	}
+	sends := report.runSendsOn(chainID)
+	saw := len(sends) > 0
+	if (need == nil || !need.HasFundMove) && !saw {
+		return nil
+	}
+	planned, tokens, native := runTotals(sends)
+	filled := fillObserved(need, saw, planned, tokens, native, SkillSchedule{MaxExecution: 1, Now: now})
+	if filled == nil {
+		return nil
+	}
+	completePerRun(filled, need, sends)
+	return filled
+}
+
+// runTotals is sends the way fillObserved reads a simulation: the calls,
+// each token's transfers and approves, and the ETH sent.
+func runTotals(sends []runSend) ([]PlannedCall, map[common.Address]*big.Int, *big.Int) {
+	var planned []PlannedCall
+	tokens := map[common.Address]*big.Int{}
+	native := big.NewInt(0)
+	for _, send := range sends {
+		if send.call != nil {
+			planned = append(planned, *send.call)
+		}
+		for asset, amount := range sendAmounts(send) {
+			if asset.native {
+				native.Add(native, amount)
+				continue
+			}
+			if tokens[asset.token] == nil {
+				tokens[asset.token] = big.NewInt(0)
+			}
+			tokens[asset.token].Add(tokens[asset.token], amount)
+		}
+	}
+	return planned, tokens, native
+}
+
+// sendAmounts is what one send moved, keyed by its node: a token's
+// transfer or approve, and ETH sent. A transfer, approve or ETH transfer
+// of zero is recorded too, since the run reached it.
+func sendAmounts(send runSend) map[nodeAsset]*big.Int {
+	out := map[nodeAsset]*big.Int{}
+	if send.sent != nil {
+		out[nodeAsset{node: send.node, native: true}] = send.sent
+	}
+	if send.call == nil {
+		return out
+	}
+	if amount, ok := decodeSpendAmount(send.call.Calldata); ok {
+		out[nodeAsset{node: send.node, token: send.call.Target}] = amount
+	}
+	if send.call.Value != nil && send.call.Value.Sign() > 0 {
+		out[nodeAsset{node: send.node, native: true}] = send.call.Value
+	}
+	return out
+}
+
+// runAmounts is one run's amount of each token, and of ETH, keyed with no
+// node. A node's sized sends count whether or not this run reached them,
+// for example on a branch it didn't take. A node with a send the walk
+// could not size counts what it sent in this run, and so do a node's
+// tokens when it has a call the walk could not read (unread): its fixed
+// token sends are not its whole amount. Its ETH still comes from the
+// node's value. A nil total marks a split or batch ceiling, an unreached
+// unsized send, or a sum past uint256. Other assets keep their amounts.
+func runAmounts(walked map[nodeAsset]*nodeSend, unread map[string]bool, sends []runSend) map[nodeAsset]*big.Int {
+	ran := map[nodeAsset]*big.Int{}
+	for _, send := range sends {
+		for key, amount := range sendAmounts(send) {
+			if ran[key] == nil {
+				ran[key] = big.NewInt(0)
+			}
+			ran[key].Add(ran[key], amount)
+		}
+	}
+	totals := map[nodeAsset]*big.Int{}
+	unknown := map[nodeAsset]bool{}
+	add := func(key nodeAsset, amount *big.Int) {
+		asset := nodeAsset{token: key.token, native: key.native}
+		if totals[asset] == nil {
+			totals[asset] = big.NewInt(0)
+		}
+		totals[asset].Add(totals[asset], amount)
+	}
+	for key, walk := range walked {
+		switch {
+		case walk.ceiling:
+			add(key, big.NewInt(0))
+			unknown[nodeAsset{token: key.token, native: key.native}] = true
+		case !walk.unsized && (key.native || !unread[key.node]):
+			add(key, walk.fixed)
+		case ran[key] != nil:
+			add(key, ran[key])
+		default:
+			add(key, big.NewInt(0))
+			unknown[nodeAsset{token: key.token, native: key.native}] = true
+		}
+	}
+	for key, amount := range ran {
+		if walked[key] == nil {
+			add(key, amount)
+		}
+	}
+	out := map[nodeAsset]*big.Int{}
+	for asset, total := range totals {
+		if unknown[asset] || total.Cmp(maxUint256) > 0 {
+			out[asset] = nil
+			continue
+		}
+		out[asset] = total
+	}
+	return out
+}
+
+// completePerRun gives each token and ETH one run's whole amount
+// (runAmounts), or lists it as having none. fillObserved adds no observed
+// action under a ceiling, so a token sized here gets its action too.
+func completePerRun(filled, static *WorkflowNeed, sends []runSend) {
+	unsized := map[common.Address]bool{}
+	nativeUnknown := false
+	var walked map[nodeAsset]*nodeSend
+	var unread map[string]bool
+	if static != nil {
+		for _, token := range static.UnsizedTokens {
+			unsized[token] = true
+		}
+		nativeUnknown = static.NativeUnsized
+		walked = static.nodeSends
+		unread = static.unreadNodes
+	}
+	for _, send := range sends {
+		if send.call == nil || send.call.Target == (common.Address{}) {
+			continue
+		}
+		if selector, ok := observedSpendSelector(*send.call); ok {
+			addAction(filled, send.call.Target, selector)
+			filled.HasFundMove = true
+		}
+	}
+	for asset, amount := range runAmounts(walked, unread, sends) {
+		if asset.native {
+			// runAmounts has one combined ETH entry across all nodes.
+			nativeUnknown = amount == nil
+			filled.NativeSpendCap = nil
+			if amount != nil && amount.Sign() > 0 {
+				filled.NativeSpendCap = &model.NativeSpendCap{Amount: amount.String()}
+			}
+			continue
+		}
+		removeCap(filled, asset.token)
+		if amount == nil {
+			unsized[asset.token] = true
+			continue
+		}
+		delete(unsized, asset.token)
+		if amount.Sign() > 0 {
+			addCap(filled, asset.token, amount)
+		}
+	}
+	var tokens []common.Address
+	for token := range unsized {
+		removeCap(filled, token)
+		tokens = append(tokens, token)
+	}
+	sort.Slice(tokens, func(i, j int) bool { return tokens[i].Hex() < tokens[j].Hex() })
+	filled.UnsizedTokens = tokens
+	filled.NativeUnsized = nativeUnknown
+	if nativeUnknown {
+		filled.NativeSpendCap = nil
+	}
+	if len(unsized) > 0 || nativeUnknown {
+		filled.CapNeedsInput = true
+	}
+}
+
+// perRunUnsized lists the tokens one run sends without an amount, in
+// address order, and whether its ETH sent has none. completePerRun
+// decides both; this only reads them.
+func perRunUnsized(need *WorkflowNeed) ([]common.Address, bool) {
+	if need == nil {
+		return nil, false
+	}
+	tokens := append([]common.Address(nil), need.UnsizedTokens...)
+	sort.Slice(tokens, func(i, j int) bool { return tokens[i].Hex() < tokens[j].Hex() })
+	return tokens, need.NativeUnsized
+}
+
+// pricePerRunGas folds one run's self-funded gas into perRun the way the
+// create check charges it per run: steady UserOps at the network's fee
+// assumption, on a network that does not sponsor gas, when the run sends
+// ETH or the wallet's grant already caps ETH. NativeGasWei is that part of
+// NativeSpendCap, so NativeSpendCap less NativeGasWei is the ETH one run
+// sends. The wallet's one install is not included: the grant's own
+// preparation prices it. A send whose UserOp count is unknown (a loop over
+// an earlier step's output) adds no gas, as at create. A run that sends no
+// ETH can end with a NativeSpendCap that is gas alone.
+func (n *Engine) pricePerRunGas(perRun *WorkflowNeed, policy *model.SessionPolicy, chainID int64, policyErr error) {
+	if n == nil || perRun == nil {
+		return
+	}
+	perRun.priceFee = n.selfFundedGrantFee(chainID)
+	if perRun.priceFee == nil {
+		return
+	}
+	// A token-only run charges gas if the existing grant caps ETH. An
+	// unreadable policy leaves that native amount unknown.
+	if policyErr != nil && perRun.NativeSpendCap == nil && (perRun.NativeSendOps > 0 || perRun.NativeValueOps > 0) {
+		perRun.NativeUnsized = true
+		perRun.CapNeedsInput = true
+		return
+	}
+	if err := priceDraftNativeGas(perRun, policy); err != nil {
+		perRun.NativeSpendCap = nil
+		perRun.NativeUnsized = true
+		perRun.CapNeedsInput = true
+		if n.logger != nil {
+			n.logger.Debug("Could not size one run's native budget including gas", "chain_id", chainID, "error", err)
+		}
+	}
+}
+
+// withPerRun attaches one run's need to a verdict.
+func withPerRun(auth *SessionAuthorization, perRun *WorkflowNeed) *SessionAuthorization {
+	if auth == nil || perRun == nil {
+		return auth
+	}
+	auth.PerRun = perRun
+	auth.PerRunUnsizedTokens, auth.PerRunNativeUnsized = perRunUnsized(perRun)
+	return auth
+}
+
 // fillSimulateAuthorization writes the opt-in verdict onto the context
 // the handler allocated. Enforce mode leaves it unset.
 func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User, task *model.Workflow, vm *VM, chainID int64) {
@@ -2756,32 +3196,75 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 	if vm != nil {
 		report = vm.sessionGrantReport
 	}
-	if len(needs) == 0 {
-		auth.Result = BuildAuthorization(nil, nil, report, sched)
-		return
-	}
-	var worst *SessionAuthorization
-	for chain, need := range needs {
-		if need == nil || !need.HasFundMove {
-			continue
+	// One run's need, whatever the grant: the caller sizes a budget
+	// proposal from it, never from Required's run-count total. It is for
+	// the network this simulation ran on, whichever chain's verdict is
+	// reported, and reads only the sends made on that network. A workflow
+	// on one other chain keeps that chain, as its verdict does. Its ETH
+	// includes one run's self-funded gas once that network's grant is known
+	// (pricePerRunGas).
+	perRunChain := chainID
+	if len(needs) == 1 {
+		for chain := range needs {
+			perRunChain = chain
 		}
+	}
+	perRun := simulatePerRun(task.Task, settings, perRunChain, report, sched.Now)
+	if len(needs) == 0 {
 		var policy *model.SessionPolicy
-		if report != nil && chain == chainID {
+		if report != nil {
 			policy, _, _, _, _, _, _, _, _ = report.snapshot()
 		}
-		if policy == nil && vm != nil && vm.db != nil && user != nil {
-			if sender := getAASenderAddress(vm); sender != nil {
-				got, err := ActiveSessionPolicyForWallet(vm.db, chain, user.Address, *sender)
-				if err != nil {
-					auth.Result = &SessionAuthorization{Status: AuthNoGrant, Detail: err.Error(), Required: need}
-					return
-				}
-				policy = got
+		n.pricePerRunGas(perRun, policy, perRunChain, nil)
+		auth.Result = withPerRun(BuildAuthorization(nil, nil, report, sched), perRun)
+		return
+	}
+	policyFor := func(chain int64) (*model.SessionPolicy, error) {
+		if chain == chainID && report != nil {
+			if policy, _, _, _, _, _, _, _, _ := report.snapshot(); policy != nil {
+				return policy, nil
 			}
+		}
+		if vm != nil && vm.db != nil && user != nil {
+			if sender := getAASenderAddress(vm); sender != nil {
+				return ActiveSessionPolicyForWallet(vm.db, chain, user.Address, *sender)
+			}
+		}
+		return nil, nil
+	}
+	// Price the simulated chain before another chain's lookup can end the
+	// verdict. Reuse its lookup when assessing coverage on the same chain.
+	var perRunPolicy *model.SessionPolicy
+	var perRunPolicyErr error
+	if perRun != nil || needs[perRunChain] != nil {
+		perRunPolicy, perRunPolicyErr = policyFor(perRunChain)
+		n.pricePerRunGas(perRun, perRunPolicy, perRunChain, perRunPolicyErr)
+	}
+	// Chains in a fixed order, so equally severe verdicts never depend on
+	// map order. On a tie the simulated network's verdict wins.
+	chains := make([]int64, 0, len(needs))
+	for chain := range needs {
+		chains = append(chains, chain)
+	}
+	sort.Slice(chains, func(i, j int) bool { return chains[i] < chains[j] })
+	var worst *SessionAuthorization
+	worstChain := int64(0)
+	for _, chain := range chains {
+		need := needs[chain]
+		if need == nil || !need.HasFundMove {
+			continue
 		}
 		var chainReport *SessionGrantReport
 		if chain == chainID || len(needs) == 1 {
 			chainReport = report
+		}
+		policy, err := perRunPolicy, perRunPolicyErr
+		if chain != perRunChain {
+			policy, err = policyFor(chain)
+		}
+		if err != nil {
+			auth.Result = withPerRun(&SessionAuthorization{Status: AuthNoGrant, Detail: err.Error(), Required: need}, perRun)
+			return
 		}
 		var got *SessionAuthorization
 		if isWalletBudget(policy) {
@@ -2808,14 +3291,19 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 				Required: required,
 			}
 		}
-		if worst == nil || authorizationRank(got.Status) > authorizationRank(worst.Status) {
+		rank, worstRank := authorizationRank(got.Status), 0
+		if worst != nil {
+			worstRank = authorizationRank(worst.Status)
+		}
+		if worst == nil || rank > worstRank || (rank == worstRank && chain == chainID && worstChain != chainID) {
 			worst = got
+			worstChain = chain
 		}
 	}
 	if worst == nil {
 		worst = BuildAuthorization(nil, nil, report, sched)
 	}
-	auth.Result = worst
+	auth.Result = withPerRun(worst, perRun)
 }
 
 func (n *Engine) sessionPolicyDeployCheckEnabled() bool {

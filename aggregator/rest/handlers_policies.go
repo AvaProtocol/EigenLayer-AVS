@@ -1159,6 +1159,22 @@ func sessionAuthorizationToAPI(auth *taskengine.SessionAuthorization) generated.
 	if need := sessionNeedToAPI(auth.Required); need != nil {
 		out.Required = need
 	}
+	if perRun := sessionNeedToAPI(auth.PerRun); perRun != nil {
+		// Like required, nativeGasWei is the part of nativeSpendCap that is
+		// one run's self-funded gas.
+		out.PerRun = perRun
+	}
+	if len(auth.PerRunUnsizedTokens) > 0 {
+		tokens := make([]generated.EthereumAddress, 0, len(auth.PerRunUnsizedTokens))
+		for _, token := range auth.PerRunUnsizedTokens {
+			tokens = append(tokens, generated.EthereumAddress(token.Hex()))
+		}
+		out.PerRunUnsizedTokens = &tokens
+	}
+	if auth.PerRunNativeUnsized {
+		unsized := true
+		out.PerRunNativeUnsized = &unsized
+	}
 	return out
 }
 

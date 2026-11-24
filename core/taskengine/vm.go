@@ -240,6 +240,9 @@ type VM struct {
 	parsedTriggerData *triggerDataType
 	// Published before receipt waiting so a collector timeout retains submitted hashes.
 	iterationWrites sync.Map // step ID -> *Execution_Step; mutation guarded by mu
+	// loopIterations maps a loop iteration's node to its loop's ID, for a
+	// simulate grant report (noteLoopIteration).
+	loopIterations sync.Map // *avsproto.TaskNode -> string
 	// Parallel successors share one prerequisite receipt lookup per execution leg.
 	writeReconciliations sync.Map // log step ID -> *sync.Once
 	ExecutionLogs        []*avsproto.Execution_Step
@@ -5230,6 +5233,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, iterationIndex)
 				nestedNode := createNestedNodeFromLoop(node, iterationStepID, iterInputs, v)
 				propagateRetryPolicyToIteration(taskNode, nestedNode)
+				v.noteLoopIteration(nestedNode, stepID)
 
 				// Debug: Log what variables are being set for this iteration
 				if v.logger != nil {
@@ -5317,6 +5321,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
 			nestedNode := createNestedNodeFromLoop(node, iterationStepID, iterInputs, v)
 			propagateRetryPolicyToIteration(taskNode, nestedNode)
+			v.noteLoopIteration(nestedNode, stepID)
 
 			resultChannel := make(chan *ExecutionResult, 1)
 			iterCtx, cancel := context.WithCancel(v.context())
