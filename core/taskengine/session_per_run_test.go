@@ -781,3 +781,64 @@ func TestSimulatePerRunChargesATokenRunsGasToABudgetThatCapsEth(t *testing.T) {
 	require.Nil(t, got.PerRun.NativeSpendCap)
 	require.Nil(t, got.PerRun.NativeGasWei)
 }
+
+func TestSimulatePerRunPricesGasWhenAnotherChainsPolicyIsUnreadable(t *testing.T) {
+	const base = int64(8453)
+	runner := common.HexToAddress("0x52")
+	owner := common.HexToAddress("0x51")
+	task := perRunTask(
+		perRunCallNode("sepolia", skillUSDC, transferCalldata(testRouterAddr, big.NewInt(7)), skillSepolia),
+		perRunCallNode("base", skillWETH, transferCalldata(testRouterAddr, big.NewInt(9)), base),
+	)
+	report := &SessionGrantReport{}
+	report.notePolicy(&model.SessionPolicy{ChainID: skillSepolia, NativeSpendCap: &model.NativeSpendCap{Amount: "100"}})
+	got := perRunVerdictOn(t, func(n *Engine) {
+		require.NoError(t, n.db.Set(SessionPolicyKey(base, owner, "unreadable"), []byte("invalid")))
+	}, skillWorkflow(task, runner), runner, 1, report, skillSepolia)
+
+	require.Equal(t, AuthNoGrant, got.Status)
+	require.Contains(t, got.Detail, "unreadable")
+	require.Equal(t, base, got.Required.ChainID)
+	require.Equal(t, "7", perRunCapOf(got.PerRun, skillUSDC))
+	require.NotNil(t, got.PerRun.NativeGasWei)
+	require.Equal(t, sepoliaSteadyGas(0, 1), got.PerRun.NativeGasWei.String())
+}
+
+func TestSimulatePerRunFlagsUnknownGasWhenItsOwnPolicyIsUnreadable(t *testing.T) {
+	runner := common.HexToAddress("0x52")
+	owner := common.HexToAddress("0x51")
+	task := perRunTask(perRunCallNode("pay", skillUSDC, transferCalldata(testRouterAddr, big.NewInt(7)), skillSepolia))
+	got := perRunVerdictOn(t, func(n *Engine) {
+		require.NoError(t, n.db.Set(SessionPolicyKey(skillSepolia, owner, "unreadable"), []byte("invalid")))
+	}, skillWorkflow(task, runner), runner, 1, nil, skillSepolia)
+
+	require.Equal(t, AuthNoGrant, got.Status)
+	require.Contains(t, got.Detail, "unreadable")
+	require.Equal(t, "7", perRunCapOf(got.PerRun, skillUSDC))
+	require.True(t, got.PerRunNativeUnsized)
+	require.Nil(t, got.PerRun.NativeSpendCap)
+}
+
+func TestSimulatePerRunMarksNativeCapIncludingGasOverflowUnsized(t *testing.T) {
+	runner := common.HexToAddress("0x52")
+	task := perRunTask(perRunEthNode("send", testRouterAddr, maxUint256.String()))
+	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 1, nil, skillSepolia)
+	require.NotNil(t, got.PerRun)
+	require.True(t, got.PerRunNativeUnsized)
+	require.Nil(t, got.PerRun.NativeSpendCap)
+	require.Nil(t, got.PerRun.NativeGasWei)
+}
+
+func TestSimulatePerRunSnapshotsCallDataAndValue(t *testing.T) {
+	report := &SessionGrantReport{}
+	value := big.NewInt(7)
+	data := common.FromHex(transferCalldata(testRouterAddr, big.NewInt(13)))
+	report.observeRunCalls(skillSepolia, "pay", []PlannedCall{{Target: testTokenAddr, Calldata: data, Value: value}})
+	value.SetInt64(0)
+	clear(data)
+	sends := report.runSendsOn(skillSepolia)
+	require.Len(t, sends, 1)
+	amounts := sendAmounts(sends[0])
+	require.Equal(t, big.NewInt(7), amounts[nodeAsset{node: "pay", native: true}])
+	require.Equal(t, big.NewInt(13), amounts[nodeAsset{node: "pay", token: testTokenAddr}])
+}

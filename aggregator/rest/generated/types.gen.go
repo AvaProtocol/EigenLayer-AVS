@@ -2213,7 +2213,7 @@ type SessionAuthorization struct {
 	// this need. Cap amounts are in the token's smallest unit.
 	PerRun *SessionPolicyNeed `json:"perRun,omitempty"`
 
-	// PerRunNativeUnsized One run's ETH sent has no amount in `perRun`. The caller asks the owner for one.
+	// PerRunNativeUnsized One run's native budget could not be sized, including any applicable self-funded gas. The caller needs an amount before it can propose that limit.
 	PerRunNativeUnsized *bool `json:"perRunNativeUnsized,omitempty"`
 
 	// PerRunUnsizedTokens Tokens one run transfers or approves without a one-run amount

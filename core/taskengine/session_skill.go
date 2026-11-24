@@ -311,7 +311,7 @@ type SessionAuthorization struct {
 	// one-run amount: a split, a batch ceiling, or an amount the simulation
 	// did not send. The caller asks the owner for one.
 	PerRunUnsizedTokens []common.Address
-	// PerRunNativeUnsized means one run's ETH sent has no amount.
+	// PerRunNativeUnsized means one run's native budget cannot be sized.
 	PerRunNativeUnsized bool
 	Detail              string
 }
@@ -395,6 +395,10 @@ func (r *SessionGrantReport) observeRunCalls(chain int64, node string, planned [
 	defer r.mu.Unlock()
 	for index := range planned {
 		call := planned[index]
+		call.Calldata = bytes.Clone(call.Calldata)
+		if call.Value != nil {
+			call.Value = new(big.Int).Set(call.Value)
+		}
 		r.RunSends = append(r.RunSends, runSend{chain: chain, node: node, call: &call})
 	}
 }
@@ -2984,10 +2988,9 @@ func sendAmounts(send runSend) map[nodeAsset]*big.Int {
 // for example on a branch it didn't take. A node with a send the walk
 // could not size counts what it sent in this run, and so do a node's
 // tokens when it has a call the walk could not read (unread): its fixed
-// token sends are not its whole amount. Its ETH stays fixed. Nil is an amount the run leaves unknown: a split
-// or batch ceiling, whose one simulated iteration is not the total; a
-// node with an unsized send the run did not reach; or a total past
-// uint256. A ceiling on one token leaves the others sized.
+// token sends are not its whole amount. Its ETH still comes from the
+// node's value. A nil total marks a split or batch ceiling, an unreached
+// unsized send, or a sum past uint256. Other assets keep their amounts.
 func runAmounts(walked map[nodeAsset]*nodeSend, unread map[string]bool, sends []runSend) map[nodeAsset]*big.Int {
 	ran := map[nodeAsset]*big.Int{}
 	for _, send := range sends {
@@ -3064,6 +3067,7 @@ func completePerRun(filled, static *WorkflowNeed, sends []runSend) {
 	}
 	for asset, amount := range runAmounts(walked, unread, sends) {
 		if asset.native {
+			// runAmounts has one combined ETH entry across all nodes.
 			nativeUnknown = amount == nil
 			filled.NativeSpendCap = nil
 			if amount != nil && amount.Sign() > 0 {
@@ -3118,14 +3122,29 @@ func perRunUnsized(need *WorkflowNeed) ([]common.Address, bool) {
 // preparation prices it. A send whose UserOp count is unknown (a loop over
 // an earlier step's output) adds no gas, as at create. A run that sends no
 // ETH can end with a NativeSpendCap that is gas alone.
-func (n *Engine) pricePerRunGas(perRun *WorkflowNeed, policy *model.SessionPolicy, chainID int64) {
+func (n *Engine) pricePerRunGas(perRun *WorkflowNeed, policy *model.SessionPolicy, chainID int64, policyErr error) {
 	if n == nil || perRun == nil {
 		return
 	}
 	perRun.priceFee = n.selfFundedGrantFee(chainID)
-	// The only error is gas past uint256, which leaves the need as it was:
-	// one run's ETH sent, without gas.
-	_ = priceDraftNativeGas(perRun, policy)
+	if perRun.priceFee == nil {
+		return
+	}
+	// A token-only run charges gas if the existing grant caps ETH. An
+	// unreadable policy leaves that native amount unknown.
+	if policyErr != nil && perRun.NativeSpendCap == nil && (perRun.NativeSendOps > 0 || perRun.NativeValueOps > 0) {
+		perRun.NativeUnsized = true
+		perRun.CapNeedsInput = true
+		return
+	}
+	if err := priceDraftNativeGas(perRun, policy); err != nil {
+		perRun.NativeSpendCap = nil
+		perRun.NativeUnsized = true
+		perRun.CapNeedsInput = true
+		if n.logger != nil {
+			n.logger.Debug("Could not size one run's native budget including gas", "chain_id", chainID, "error", err)
+		}
+	}
 }
 
 // withPerRun attaches one run's need to a verdict.
@@ -3196,9 +3215,30 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		if report != nil {
 			policy, _, _, _, _, _, _, _, _ = report.snapshot()
 		}
-		n.pricePerRunGas(perRun, policy, perRunChain)
+		n.pricePerRunGas(perRun, policy, perRunChain, nil)
 		auth.Result = withPerRun(BuildAuthorization(nil, nil, report, sched), perRun)
 		return
+	}
+	policyFor := func(chain int64) (*model.SessionPolicy, error) {
+		if chain == chainID && report != nil {
+			if policy, _, _, _, _, _, _, _, _ := report.snapshot(); policy != nil {
+				return policy, nil
+			}
+		}
+		if vm != nil && vm.db != nil && user != nil {
+			if sender := getAASenderAddress(vm); sender != nil {
+				return ActiveSessionPolicyForWallet(vm.db, chain, user.Address, *sender)
+			}
+		}
+		return nil, nil
+	}
+	// Price the simulated chain before another chain's lookup can end the
+	// verdict. Reuse its lookup when assessing coverage on the same chain.
+	var perRunPolicy *model.SessionPolicy
+	var perRunPolicyErr error
+	if perRun != nil || needs[perRunChain] != nil {
+		perRunPolicy, perRunPolicyErr = policyFor(perRunChain)
+		n.pricePerRunGas(perRun, perRunPolicy, perRunChain, perRunPolicyErr)
 	}
 	// Chains in a fixed order, so equally severe verdicts never depend on
 	// map order. On a tie the simulated network's verdict wins.
@@ -3209,7 +3249,6 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 	sort.Slice(chains, func(i, j int) bool { return chains[i] < chains[j] })
 	var worst *SessionAuthorization
 	worstChain := int64(0)
-	var perRunPolicy *model.SessionPolicy
 	for _, chain := range chains {
 		need := needs[chain]
 		if need == nil || !need.HasFundMove {
@@ -3219,23 +3258,13 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		if chain == chainID || len(needs) == 1 {
 			chainReport = report
 		}
-		var policy *model.SessionPolicy
-		if report != nil && chain == chainID {
-			policy, _, _, _, _, _, _, _, _ = report.snapshot()
+		policy, err := perRunPolicy, perRunPolicyErr
+		if chain != perRunChain {
+			policy, err = policyFor(chain)
 		}
-		if policy == nil && vm != nil && vm.db != nil && user != nil {
-			if sender := getAASenderAddress(vm); sender != nil {
-				got, err := ActiveSessionPolicyForWallet(vm.db, chain, user.Address, *sender)
-				if err != nil {
-					n.pricePerRunGas(perRun, perRunPolicy, perRunChain)
-					auth.Result = withPerRun(&SessionAuthorization{Status: AuthNoGrant, Detail: err.Error(), Required: need}, perRun)
-					return
-				}
-				policy = got
-			}
-		}
-		if chain == perRunChain {
-			perRunPolicy = policy
+		if err != nil {
+			auth.Result = withPerRun(&SessionAuthorization{Status: AuthNoGrant, Detail: err.Error(), Required: need}, perRun)
+			return
 		}
 		var got *SessionAuthorization
 		if isWalletBudget(policy) {
@@ -3274,7 +3303,6 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 	if worst == nil {
 		worst = BuildAuthorization(nil, nil, report, sched)
 	}
-	n.pricePerRunGas(perRun, perRunPolicy, perRunChain)
 	auth.Result = withPerRun(worst, perRun)
 }
 

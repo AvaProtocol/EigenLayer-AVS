@@ -2266,7 +2266,7 @@ components:
           items: { $ref: '#/components/schemas/EthereumAddress' }
         perRunNativeUnsized:
           type: boolean
-          description: One run's ETH sent has no amount in `perRun`. The caller asks the owner for one.
+          description: One run's native budget could not be sized, including any applicable self-funded gas. The caller needs an amount before it can propose that limit.
         detail:
           type: string
 
