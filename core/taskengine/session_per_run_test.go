@@ -447,3 +447,46 @@ func TestWorkflowNodeIDOfALoopIteration(t *testing.T) {
 	require.Equal(t, "send_iter_x", workflowNodeID("send_iter_x"))
 	require.Equal(t, "", workflowNodeID(""))
 }
+
+// A percentage split makes its token a ceiling: one simulated iteration is
+// not the total. Other assets in the workflow are still sized from the run.
+func TestSimulatePerRunCeilingLeavesOtherAssetsSized(t *testing.T) {
+	runner := common.HexToAddress("0x000000000000000000000000000000000000005e")
+	payee := common.HexToAddress("0x000000000000000000000000000000000000000b")
+	task := splitLoopTask(splitTemplateSource, [][]string{{skillUSDC}}, 1)
+	task.Nodes[1].Id = "loop1"
+	task.Nodes = append(task.Nodes,
+		perRunEthNode("eth", payee, "{{custom_code1.data}}"),
+		perRunUnknownTransferNode("weth", skillWETH, payee, skillSepolia),
+	)
+	report := &SessionGrantReport{}
+	report.noteNoGrant()
+	perRunObserve(report, "loop1_iter_0", skillUSDC, payee, 30)
+	report.observeRunNative(skillSepolia, "eth", big.NewInt(13))
+	perRunObserve(report, "weth", skillWETH, payee, 5)
+
+	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 1, report, skillSepolia)
+	require.True(t, got.PerRun.CapCeiling)
+	require.Equal(t, "", perRunCapOf(got.PerRun, skillUSDC), "one split iteration is not the total")
+	require.Equal(t, []common.Address{common.HexToAddress(skillUSDC)}, got.PerRunUnsizedTokens)
+	require.Equal(t, "5", perRunCapOf(got.PerRun, skillWETH))
+	require.True(t, actionHasSelector(got.PerRun.Actions, skillWETH, selectorTransfer))
+	require.NotNil(t, got.PerRun.NativeSpendCap)
+	require.Equal(t, "13", got.PerRun.NativeSpendCap.Amount)
+	require.False(t, got.PerRunNativeUnsized)
+}
+
+// A send the run reached with an amount of zero was reached: the token
+// keeps the amount its other sends make.
+func TestSimulatePerRunCountsAZeroSendAsReached(t *testing.T) {
+	runner := common.HexToAddress("0x000000000000000000000000000000000000005f")
+	payee := common.HexToAddress("0x000000000000000000000000000000000000000c")
+	report := &SessionGrantReport{}
+	report.noteNoGrant()
+	perRunObserve(report, "fixed", skillUSDC, payee, 7)
+	perRunObserve(report, "dynamic", skillUSDC, payee, 0)
+
+	got := perRunVerdict(t, skillWorkflow(perRunFixedAndUnknown(payee), runner), runner, 1, report, skillSepolia)
+	require.Equal(t, "7", perRunCapOf(got.PerRun, skillUSDC))
+	require.Empty(t, got.PerRunUnsizedTokens)
+}

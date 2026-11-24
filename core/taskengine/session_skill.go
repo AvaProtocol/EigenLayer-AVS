@@ -211,10 +211,13 @@ type nodeAsset struct {
 }
 
 // nodeSend is the walk's reading of a nodeAsset: the sum of its sized
-// sends for one run, and whether it also has a send with no amount.
+// sends for one run, and whether it also has a send with no amount. A
+// ceiling is a split or batch row whose one simulated iteration is not
+// the total.
 type nodeSend struct {
 	fixed   *big.Int
 	unsized bool
+	ceiling bool
 }
 
 // noteNodeSend records one fund site on its node. A nil amount is a send
@@ -636,6 +639,7 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 			}
 			markUnsizedToken(need, site.target)
 			noteNodeSend(need, token, nil)
+			need.nodeSends[token].ceiling = true
 			return
 		}
 		if spendLimited && (site.amountUnknown || site.loopUnknown || !runsKnown) {
@@ -1625,6 +1629,16 @@ func decodeCall(calldata, method string, params []string, scope fundScope) (sel 
 }
 
 func decodeTransferAmount(data []byte) (*big.Int, bool) {
+	amt, ok := decodeSpendAmount(data)
+	if !ok || amt.Sign() <= 0 {
+		return nil, false
+	}
+	return amt, true
+}
+
+// decodeSpendAmount is a transfer or approve's amount, zero included. A
+// run that reached a send with nothing to move still reached it.
+func decodeSpendAmount(data []byte) (*big.Int, bool) {
 	if len(data) < 68 {
 		return nil, false
 	}
@@ -1632,11 +1646,7 @@ func decodeTransferAmount(data []byte) (*big.Int, bool) {
 	if sel != selectorTransfer && sel != selectorApprove {
 		return nil, false
 	}
-	amt := new(big.Int).SetBytes(data[36:68])
-	if amt.Sign() <= 0 {
-		return nil, false
-	}
-	return amt, true
+	return new(big.Int).SetBytes(data[36:68]), true
 }
 
 func resolveAddress(raw string, scope fundScope) (common.Address, bool) {
@@ -2930,8 +2940,8 @@ func runTotals(sends []runSend) ([]PlannedCall, map[common.Address]*big.Int, *bi
 }
 
 // sendAmounts is what one send moved, keyed by its node: a token's
-// transfer or approve, and ETH sent. An ETH transfer is recorded even at
-// zero, since the run reached it.
+// transfer or approve, and ETH sent. A transfer, approve or ETH transfer
+// of zero is recorded too, since the run reached it.
 func sendAmounts(send runSend) map[nodeAsset]*big.Int {
 	out := map[nodeAsset]*big.Int{}
 	if send.sent != nil {
@@ -2940,7 +2950,7 @@ func sendAmounts(send runSend) map[nodeAsset]*big.Int {
 	if send.call == nil {
 		return out
 	}
-	if amount, ok := decodeTransferAmount(send.call.Calldata); ok {
+	if amount, ok := decodeSpendAmount(send.call.Calldata); ok {
 		out[nodeAsset{node: send.node, token: send.call.Target}] = amount
 	}
 	if send.call.Value != nil && send.call.Value.Sign() > 0 {
@@ -2953,8 +2963,10 @@ func sendAmounts(send runSend) map[nodeAsset]*big.Int {
 // node. A node's sized sends count whether or not this run reached them,
 // for example on a branch it didn't take. A node with a send the walk
 // could not size counts what it sent in this run, and so does a node the
-// walk could not read. Nil is an amount the run leaves unknown: a node
-// with an unsized send the run did not reach, or a total past uint256.
+// walk could not read. Nil is an amount the run leaves unknown: a split
+// or batch ceiling, whose one simulated iteration is not the total; a
+// node with an unsized send the run did not reach; or a total past
+// uint256. A ceiling on one token leaves the others sized.
 func runAmounts(walked map[nodeAsset]*nodeSend, sends []runSend) map[nodeAsset]*big.Int {
 	ran := map[nodeAsset]*big.Int{}
 	for _, send := range sends {
@@ -2976,6 +2988,9 @@ func runAmounts(walked map[nodeAsset]*nodeSend, sends []runSend) map[nodeAsset]*
 	}
 	for key, walk := range walked {
 		switch {
+		case walk.ceiling:
+			add(key, big.NewInt(0))
+			unknown[nodeAsset{token: key.token, native: key.native}] = true
 		case !walk.unsized:
 			add(key, walk.fixed)
 		case ran[key] != nil:
@@ -3002,8 +3017,8 @@ func runAmounts(walked map[nodeAsset]*nodeSend, sends []runSend) map[nodeAsset]*
 }
 
 // completePerRun gives each token and ETH one run's whole amount
-// (runAmounts), or lists it as having none. A split or batch ceiling
-// never takes one run's amount: one iteration is not the total.
+// (runAmounts), or lists it as having none. fillObserved adds no observed
+// action under a ceiling, so a token sized here gets its action too.
 func completePerRun(filled, static *WorkflowNeed, sends []runSend) {
 	unsized := map[common.Address]bool{}
 	nativeUnknown := false
@@ -3015,25 +3030,32 @@ func completePerRun(filled, static *WorkflowNeed, sends []runSend) {
 		nativeUnknown = static.NativeUnsized
 		walked = static.nodeSends
 	}
-	if !filled.CapCeiling {
-		for asset, amount := range runAmounts(walked, sends) {
-			if asset.native {
-				nativeUnknown = amount == nil
-				filled.NativeSpendCap = nil
-				if amount != nil && amount.Sign() > 0 {
-					filled.NativeSpendCap = &model.NativeSpendCap{Amount: amount.String()}
-				}
-				continue
+	for _, send := range sends {
+		if send.call == nil || send.call.Target == (common.Address{}) {
+			continue
+		}
+		if selector, ok := observedSpendSelector(*send.call); ok {
+			addAction(filled, send.call.Target, selector)
+			filled.HasFundMove = true
+		}
+	}
+	for asset, amount := range runAmounts(walked, sends) {
+		if asset.native {
+			nativeUnknown = amount == nil
+			filled.NativeSpendCap = nil
+			if amount != nil && amount.Sign() > 0 {
+				filled.NativeSpendCap = &model.NativeSpendCap{Amount: amount.String()}
 			}
-			removeCap(filled, asset.token)
-			if amount == nil {
-				unsized[asset.token] = true
-				continue
-			}
-			delete(unsized, asset.token)
-			if amount.Sign() > 0 {
-				addCap(filled, asset.token, amount)
-			}
+			continue
+		}
+		removeCap(filled, asset.token)
+		if amount == nil {
+			unsized[asset.token] = true
+			continue
+		}
+		delete(unsized, asset.token)
+		if amount.Sign() > 0 {
+			addCap(filled, asset.token, amount)
 		}
 	}
 	var tokens []common.Address
