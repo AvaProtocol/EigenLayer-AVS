@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
@@ -33,13 +34,42 @@ func perRunCapOf(need *WorkflowNeed, token string) string {
 	return ""
 }
 
+// perRunEthSent is the ETH one run sends: its native cap less the gas in it.
+func perRunEthSent(t *testing.T, need *WorkflowNeed) string {
+	t.Helper()
+	require.NotNil(t, need)
+	require.NotNil(t, need.NativeSpendCap)
+	sent, ok := new(big.Int).SetString(need.NativeSpendCap.Amount, 10)
+	require.True(t, ok, "native cap %q", need.NativeSpendCap.Amount)
+	if need.NativeGasWei != nil {
+		sent.Sub(sent, need.NativeGasWei)
+	}
+	return sent.String()
+}
+
+// sepoliaSteadyGas is what the create check charges for these UserOps on
+// Sepolia, which the test engine leaves self-funded.
+func sepoliaSteadyGas(sendOps, valueOps int64) string {
+	total, _ := selfFundedGasWei(sendOps, valueOps, NativeGrantMaxFee(skillSepolia), nil)
+	return total.String()
+}
+
 // perRunVerdict runs the reported simulate verdict the way the simulate
 // handler does, with an optional grant report from the simulated run.
 func perRunVerdict(t *testing.T, workflow *model.Workflow, runner common.Address, maxExecution int64, report *SessionGrantReport, chainID int64) *SessionAuthorization {
 	t.Helper()
+	return perRunVerdictOn(t, nil, workflow, runner, maxExecution, report, chainID)
+}
+
+// perRunVerdictOn is perRunVerdict on an engine configure adjusts.
+func perRunVerdictOn(t *testing.T, configure func(*Engine), workflow *model.Workflow, runner common.Address, maxExecution int64, report *SessionGrantReport, chainID int64) *SessionAuthorization {
+	t.Helper()
 	db := testutil.TestMustDB()
 	t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
 	engine := deployCheckEngine(db)
+	if configure != nil {
+		configure(engine)
+	}
 	auth := &SimulateAuth{Report: true, MaxExecution: maxExecution}
 	vm := &VM{db: db, mu: &sync.Mutex{}, vars: map[string]any{"aa_sender": runner.Hex()}, sessionGrantReport: report}
 	owner := common.HexToAddress("0x0000000000000000000000000000000000000051")
@@ -63,7 +93,7 @@ func TestSimulatePerRunIsOneRunInWorkflowMode(t *testing.T) {
 	require.Equal(t, "7", perRunCapOf(got.PerRun, skillUSDC))
 	require.Empty(t, got.PerRunUnsizedTokens)
 	require.False(t, got.PerRunNativeUnsized)
-	require.Nil(t, got.PerRun.NativeGasWei, "one run's need carries no self-funded gas")
+	require.Nil(t, got.PerRun.NativeGasWei, "a token run on a wallet with no ETH cap is charged no gas")
 }
 
 // A budget verdict carries perRun too, from the same one-run sizing.
@@ -114,8 +144,8 @@ func TestSimulatePerRunSizesSweepLoopFromTheSimulation(t *testing.T) {
 
 	require.NotNil(t, got.PerRun)
 	require.Equal(t, "640000000", perRunCapOf(got.PerRun, skillUSDC))
-	require.NotNil(t, got.PerRun.NativeSpendCap)
-	require.Equal(t, "50000000000000000", got.PerRun.NativeSpendCap.Amount)
+	require.Equal(t, "50000000000000000", perRunEthSent(t, got.PerRun))
+	require.NotNil(t, got.PerRun.NativeGasWei, "a run that sends ETH on a self-funded network includes its gas")
 	require.Equal(t, []common.Address{common.HexToAddress(skillUSDT)}, got.PerRunUnsizedTokens)
 	require.False(t, got.PerRunNativeUnsized)
 	require.Contains(t, nativeRecipientSet(got.PerRun), sweepDestination)
@@ -308,8 +338,9 @@ func TestSimulatePerRunCompletesEthSent(t *testing.T) {
 	sentMore.observeRunNative(skillSepolia, "fixed", big.NewInt(7))
 	sentMore.observeRunNative(skillSepolia, "dynamic", big.NewInt(13))
 	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 1, sentMore, skillSepolia)
-	require.NotNil(t, got.PerRun.NativeSpendCap)
-	require.Equal(t, "20", got.PerRun.NativeSpendCap.Amount)
+	require.Equal(t, "20", perRunEthSent(t, got.PerRun))
+	require.NotNil(t, got.PerRun.NativeGasWei)
+	require.Equal(t, sepoliaSteadyGas(2, 0), got.PerRun.NativeGasWei.String(), "two ETH sends are two steady UserOps")
 	require.False(t, got.PerRunNativeUnsized)
 
 	fixedOnly := &SessionGrantReport{}
@@ -546,8 +577,7 @@ func TestSimulatePerRunCeilingLeavesOtherAssetsSized(t *testing.T) {
 	require.Equal(t, []common.Address{common.HexToAddress(skillUSDC)}, got.PerRunUnsizedTokens)
 	require.Equal(t, "5", perRunCapOf(got.PerRun, skillWETH))
 	require.True(t, actionHasSelector(got.PerRun.Actions, skillWETH, selectorTransfer))
-	require.NotNil(t, got.PerRun.NativeSpendCap)
-	require.Equal(t, "13", got.PerRun.NativeSpendCap.Amount)
+	require.Equal(t, "13", perRunEthSent(t, got.PerRun))
 	require.False(t, got.PerRunNativeUnsized)
 }
 
@@ -674,4 +704,80 @@ func TestSimulatePerRunCountsANodeNamedLikeAnIterationOnce(t *testing.T) {
 	perRun, _, simulated := perRunSimulateWrite(t, "pay_iter_0", cfg)
 	require.Equal(t, 1, simulated)
 	require.Equal(t, "7", perRunCapOf(perRun, skillUSDC))
+}
+
+// One run's native cap is what the create check charges a budget per run,
+// so the run count times it passes that check for those runs.
+func TestSimulatePerRunGasMatchesTheCreateCheck(t *testing.T) {
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000070")
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000071")
+	task := perRunTask(perRunEthNode("pay", payee, "10000000000000000"))
+	task.MaxExecution = 12
+	report := &SessionGrantReport{}
+	report.noteNoGrant()
+	report.observeRunNative(skillSepolia, "pay", big.NewInt(10_000_000_000_000_000))
+
+	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 12, report, skillSepolia)
+	require.Equal(t, "10000000000000000", perRunEthSent(t, got.PerRun))
+	require.NotNil(t, got.PerRun.NativeGasWei)
+	require.Equal(t, sepoliaSteadyGas(1, 0), got.PerRun.NativeGasWei.String())
+
+	// The create check on a wallet whose grant is applied: steady gas for
+	// every run, no install.
+	need := DeriveWorkflowNeeds(task, nil, scheduleFromTask(task, time.Now()), skillSepolia)[skillSepolia]
+	require.NotNil(t, need)
+	_, _, err := priceWalletNativeGas([]*WorkflowNeed{need}, NativeGrantMaxFee(skillSepolia), true, nil)
+	require.NoError(t, err)
+	perRunCap, ok := new(big.Int).SetString(got.PerRun.NativeSpendCap.Amount, 10)
+	require.True(t, ok)
+	require.Equal(t, need.NativeSpendCap.Amount, new(big.Int).Mul(perRunCap, big.NewInt(12)).String())
+}
+
+// A network that sponsors gas charges none, so one run's ETH is what it sends.
+func TestSimulatePerRunHasNoGasOnASponsoredNetwork(t *testing.T) {
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000072")
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000073")
+	task := perRunTask(perRunEthNode("pay", payee, "7"))
+	report := &SessionGrantReport{}
+	report.noteNoGrant()
+	report.observeRunNative(skillSepolia, "pay", big.NewInt(7))
+	sponsored := func(engine *Engine) {
+		engine.smartWalletConfig = &config.SmartWalletConfig{
+			ChainID:                  skillSepolia,
+			BundlerProvider:          config.BundlerProviderAlchemy,
+			AlchemyAPIKey:            "key",
+			AlchemyPaymasterPolicyID: "policy",
+		}
+	}
+
+	got := perRunVerdictOn(t, sponsored, skillWorkflow(task, runner), runner, 1, report, skillSepolia)
+	require.NotNil(t, got.PerRun.NativeSpendCap)
+	require.Equal(t, "7", got.PerRun.NativeSpendCap.Amount)
+	require.Nil(t, got.PerRun.NativeGasWei)
+}
+
+// A token run spends gas from the wallet's ETH cap once the budget has
+// one, as the create check charges it. Without an ETH cap it is charged
+// none.
+func TestSimulatePerRunChargesATokenRunsGasToABudgetThatCapsEth(t *testing.T) {
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000074")
+	withEth, _ := semanticsBudget()
+	withEth.Runner = nil
+	task := skillWriteTask("pay", "Pay", testTokenAddr.Hex(), transferCalldata(testRouterAddr, big.NewInt(100)), withEth.ChainID, 12, 0, 0)
+	report := &SessionGrantReport{}
+	report.notePolicy(withEth)
+
+	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 12, report, withEth.ChainID)
+	require.Equal(t, "100", perRunCapOf(got.PerRun, testTokenAddr.Hex()))
+	require.NotNil(t, got.PerRun.NativeGasWei)
+	require.Equal(t, "0", perRunEthSent(t, got.PerRun), "the run sends no ETH; its native cap is gas")
+
+	tokensOnly, _ := semanticsBudget()
+	tokensOnly.Runner = nil
+	tokensOnly.NativeSpendCap = nil
+	report = &SessionGrantReport{}
+	report.notePolicy(tokensOnly)
+	got = perRunVerdict(t, skillWorkflow(task, runner), runner, 12, report, tokensOnly.ChainID)
+	require.Nil(t, got.PerRun.NativeSpendCap)
+	require.Nil(t, got.PerRun.NativeGasWei)
 }
