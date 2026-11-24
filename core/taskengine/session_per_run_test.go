@@ -12,6 +12,7 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -135,4 +136,156 @@ func TestSimulatePerRunMarksUnsizedAmounts(t *testing.T) {
 	require.Equal(t, []common.Address{common.HexToAddress(skillUSDC)}, tokens)
 	require.False(t, native)
 	require.Nil(t, withPerRun(nil, &WorkflowNeed{}))
+}
+
+// perRunUnknownTransferNode transfers token with an amount the static walk
+// can't read: it comes from an earlier step's output.
+func perRunUnknownTransferNode(token string, payee common.Address) *avsproto.TaskNode {
+	return &avsproto.TaskNode{
+		TaskType: &avsproto.TaskNode_ContractWrite{
+			ContractWrite: &avsproto.ContractWriteNode{
+				Config: &avsproto.ContractWriteNode_Config{
+					ChainId:         skillSepolia,
+					ContractAddress: token,
+					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{{
+						MethodName:   "transfer",
+						MethodParams: []string{payee.Hex(), "{{custom_code1.data}}"},
+					}},
+				},
+			},
+		},
+	}
+}
+
+// perRunEthNode sends amount wei of ETH to payee on Sepolia.
+func perRunEthNode(payee common.Address, amount string) *avsproto.TaskNode {
+	return &avsproto.TaskNode{
+		TaskType: &avsproto.TaskNode_EthTransfer{
+			EthTransfer: &avsproto.ETHTransferNode{
+				Config: &avsproto.ETHTransferNode_Config{
+					Destination: payee.Hex(),
+					Amount:      amount,
+					ChainId:     skillSepolia,
+				},
+			},
+		},
+	}
+}
+
+// perRunObserve records the token transfers the simulated run sent.
+func perRunObserve(report *SessionGrantReport, token string, payee common.Address, amounts ...int64) {
+	calls := make([]PlannedCall, 0, len(amounts))
+	for _, amount := range amounts {
+		calls = append(calls, PlannedCall{
+			Target:   common.HexToAddress(token),
+			Selector: selectorTransfer,
+			Calldata: common.FromHex(transferCalldata(payee, big.NewInt(amount))),
+		})
+	}
+	report.observeCalls(calls)
+}
+
+// A fixed send of 7 beside a send the simulation sized at 13 is a run of
+// 20. The fixed cap alone would propose 7 for it.
+func TestSimulatePerRunAddsTheSimulatedSendToAFixedOne(t *testing.T) {
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000056")
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000002")
+	task := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(7)), skillSepolia, 1, 0, 0)
+	task.Nodes = append(task.Nodes, perRunUnknownTransferNode(skillUSDC, payee))
+	report := &SessionGrantReport{}
+	report.noteNoGrant()
+	perRunObserve(report, skillUSDC, payee, 7, 13)
+
+	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 1, report, skillSepolia)
+	require.NotNil(t, got.PerRun)
+	require.Equal(t, "20", perRunCapOf(got.PerRun, skillUSDC))
+	require.Empty(t, got.PerRunUnsizedTokens)
+}
+
+// When the simulation sent only the fixed part, the other send is still
+// unknown: the token has no amount rather than the fixed part's 7.
+func TestSimulatePerRunLeavesAPartlyUnknownTokenUnsized(t *testing.T) {
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000057")
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000003")
+	task := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(7)), skillSepolia, 1, 0, 0)
+	task.Nodes = append(task.Nodes, perRunUnknownTransferNode(skillUSDC, payee))
+	report := &SessionGrantReport{}
+	report.noteNoGrant()
+	perRunObserve(report, skillUSDC, payee, 7)
+
+	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 1, report, skillSepolia)
+	require.NotNil(t, got.PerRun)
+	require.Equal(t, "", perRunCapOf(got.PerRun, skillUSDC))
+	require.Equal(t, []common.Address{common.HexToAddress(skillUSDC)}, got.PerRunUnsizedTokens)
+	require.True(t, got.PerRun.CapNeedsInput)
+}
+
+// Fixed sends keep their whole total when the simulation ran fewer of
+// them, for example on a branch it didn't take.
+func TestSimulatePerRunKeepsFixedSendsTheRunSkipped(t *testing.T) {
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000058")
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	task := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(7)), skillSepolia, 1, 0, 0)
+	second := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(5)), skillSepolia, 1, 0, 0)
+	task.Nodes = append(task.Nodes, second.Nodes...)
+	report := &SessionGrantReport{}
+	report.noteNoGrant()
+	perRunObserve(report, skillUSDC, payee, 7)
+
+	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 1, report, skillSepolia)
+	require.Equal(t, "12", perRunCapOf(got.PerRun, skillUSDC))
+	require.Empty(t, got.PerRunUnsizedTokens)
+}
+
+// ETH sent follows the same rule as a token.
+func TestSimulatePerRunCompletesEthSent(t *testing.T) {
+	runner := common.HexToAddress("0x0000000000000000000000000000000000000059")
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000005")
+	task := &avsproto.Task{
+		Id:           "eth",
+		Name:         "Send ETH",
+		MaxExecution: 1,
+		Nodes:        []*avsproto.TaskNode{perRunEthNode(payee, "7"), perRunEthNode(payee, "{{custom_code1.data}}")},
+	}
+
+	sentMore := &SessionGrantReport{}
+	sentMore.noteNoGrant()
+	sentMore.observeNative(payee, big.NewInt(7))
+	sentMore.observeNative(payee, big.NewInt(13))
+	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 1, sentMore, skillSepolia)
+	require.NotNil(t, got.PerRun.NativeSpendCap)
+	require.Equal(t, "20", got.PerRun.NativeSpendCap.Amount)
+	require.False(t, got.PerRunNativeUnsized)
+
+	fixedOnly := &SessionGrantReport{}
+	fixedOnly.noteNoGrant()
+	fixedOnly.observeNative(payee, big.NewInt(7))
+	got = perRunVerdict(t, skillWorkflow(task, runner), runner, 1, fixedOnly, skillSepolia)
+	require.Nil(t, got.PerRun.NativeSpendCap)
+	require.True(t, got.PerRunNativeUnsized)
+}
+
+// A two-chain workflow reports one run on the simulated network every
+// time, and equally severe chain verdicts are chosen the same way each time.
+func TestSimulatePerRunIsForTheSimulatedNetwork(t *testing.T) {
+	const base = int64(8453)
+	const baseUSDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+	runner := common.HexToAddress("0x000000000000000000000000000000000000005a")
+	payee := common.HexToAddress("0x0000000000000000000000000000000000000006")
+	task := skillWriteTask("pay", "Pay", skillUSDC, transferCalldata(payee, big.NewInt(7)), skillSepolia, 1, 0, 0)
+	other := skillWriteTask("pay", "Pay", baseUSDC, transferCalldata(payee, big.NewInt(9)), base, 1, 0, 0)
+	task.Nodes = append(task.Nodes, other.Nodes...)
+
+	for attempt := 0; attempt < 32; attempt++ {
+		got := perRunVerdict(t, skillWorkflow(task, runner), runner, 1, nil, skillSepolia)
+		require.Equal(t, AuthNoGrant, got.Status)
+		require.Equal(t, skillSepolia, got.Required.ChainID, "attempt %d: the tie goes to the simulated network", attempt)
+		require.Equal(t, "7", perRunCapOf(got.PerRun, skillUSDC), "attempt %d", attempt)
+		require.Equal(t, "", perRunCapOf(got.PerRun, baseUSDC), "attempt %d", attempt)
+	}
+
+	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 1, nil, base)
+	require.Equal(t, base, got.Required.ChainID)
+	require.Equal(t, "9", perRunCapOf(got.PerRun, baseUSDC))
+	require.Equal(t, "", perRunCapOf(got.PerRun, skillUSDC))
 }

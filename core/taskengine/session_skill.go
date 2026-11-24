@@ -188,6 +188,11 @@ type WorkflowNeed struct {
 	// NativeGasWei is self-funded gas folded into NativeSpendCap,
 	// excluding the ETH this workflow sends.
 	NativeGasWei *big.Int
+	// UnsizedTokens are tokens with at least one transfer or approve the
+	// walk could not size: an unknown amount or loop count, a ceiling, or
+	// a total past uint256. A cap on one of them holds only its sized
+	// sends, so it is not the token's whole amount.
+	UnsizedTokens []common.Address
 	// priceFee prices gas after observed spend is copied onto the
 	// simulate verdict. Nil leaves the cap as the value sent.
 	priceFee *big.Int
@@ -512,15 +517,18 @@ func DeriveWorkflowNeeds(task *avsproto.Task, settings map[string]any, sched Ski
 			if runsKnown {
 				need.CapCeiling = true
 			}
+			markUnsizedToken(need, site.target)
 			return
 		}
 		if spendLimited && (site.amountUnknown || site.loopUnknown || !runsKnown) {
 			need.CapNeedsInput = true
+			markUnsizedToken(need, site.target)
 		} else if spendLimited && site.amountOK && runsKnown {
 			total, ok := scaleSpend(site.amount, runs, site.loopMult)
 			if !ok || !addCap(need, site.target, total) {
 				need.CapNeedsInput = true
 				removeCap(need, site.target)
+				markUnsizedToken(need, site.target)
 			}
 		}
 	})
@@ -1782,6 +1790,16 @@ func removeCap(need *WorkflowNeed, token common.Address) {
 	need.Caps = out
 }
 
+// markUnsizedToken records a token with a send the walk could not size.
+func markUnsizedToken(need *WorkflowNeed, token common.Address) {
+	for _, have := range need.UnsizedTokens {
+		if have == token {
+			return
+		}
+	}
+	need.UnsizedTokens = append(need.UnsizedTokens, token)
+}
+
 func addNative(need *WorkflowNeed, amt *big.Int) bool {
 	if amt == nil || amt.Sign() <= 0 || amt.Cmp(maxUint256) > 0 {
 		return false
@@ -2214,6 +2232,7 @@ func fillObserved(need *WorkflowNeed, saw bool, planned []PlannedCall, tokenSpen
 		filled.Actions = append([]model.AllowedAction(nil), need.Actions...)
 		filled.Caps = append([]model.ERC20SpendCap(nil), need.Caps...)
 		filled.NativeRecipients = append([]*common.Address(nil), need.NativeRecipients...)
+		filled.UnsizedTokens = append([]common.Address(nil), need.UnsizedTokens...)
 		if need.NativeSpendCap != nil {
 			cp := *need.NativeSpendCap
 			filled.NativeSpendCap = &cp
@@ -2746,7 +2765,81 @@ func simulatePerRun(task *avsproto.Task, settings map[string]any, chainID int64,
 	if (need == nil || !need.HasFundMove) && !saw {
 		return nil
 	}
-	return fillObserved(need, saw, planned, tokens, native, SkillSchedule{MaxExecution: 1, Now: now})
+	filled := fillObserved(need, saw, planned, tokens, native, SkillSchedule{MaxExecution: 1, Now: now})
+	if filled == nil {
+		return nil
+	}
+	completePerRun(filled, need, tokens, native)
+	return filled
+}
+
+// completePerRun makes each of one run's amounts whole, or leaves it
+// without one. fillObserved keeps a static cap and does not read the run
+// for that token, so a fixed send of 7 beside a simulated send of 13 would
+// read as 7. Here a token's amount is the greater of its fixed sends and
+// what the run sent. A token with a send the walk could not size takes
+// the run's amount only when the run sent more than its fixed sends;
+// otherwise that send is unknown and the token has no amount. ETH sent
+// follows the same rule. A split or batch ceiling never takes one run's
+// amount: one iteration is not the total.
+func completePerRun(filled, static *WorkflowNeed, tokenSpend map[common.Address]*big.Int, nativeSpend *big.Int) {
+	unsized := map[common.Address]bool{}
+	nativeUnknown := false
+	if static != nil {
+		for _, token := range static.UnsizedTokens {
+			unsized[token] = true
+		}
+		nativeUnknown = static.NativeUnsized
+	}
+	useRun := !filled.CapCeiling
+	if useRun {
+		for token, sent := range tokenSpend {
+			if sent == nil || sent.Sign() <= 0 {
+				continue
+			}
+			fixed := big.NewInt(0)
+			if static != nil {
+				if amount := capAmount(static, token); amount != nil {
+					fixed = amount
+				}
+			}
+			if sent.Cmp(fixed) <= 0 {
+				continue
+			}
+			removeCap(filled, token)
+			if addCap(filled, token, sent) {
+				delete(unsized, token)
+			} else {
+				unsized[token] = true
+			}
+		}
+		if nativeSpend != nil && nativeSpend.Sign() > 0 {
+			fixed := big.NewInt(0)
+			if static != nil && static.NativeSpendCap != nil {
+				if amount, err := parseCapAmount(static.NativeSpendCap.Amount); err == nil {
+					fixed = amount
+				}
+			}
+			if nativeSpend.Cmp(fixed) > 0 {
+				if nativeSpend.Cmp(maxUint256) <= 0 {
+					filled.NativeSpendCap = &model.NativeSpendCap{Amount: nativeSpend.String()}
+					nativeUnknown = false
+				} else {
+					nativeUnknown = true
+				}
+			}
+		}
+	}
+	for token := range unsized {
+		removeCap(filled, token)
+	}
+	filled.NativeUnsized = nativeUnknown
+	if nativeUnknown {
+		filled.NativeSpendCap = nil
+	}
+	if len(unsized) > 0 || nativeUnknown {
+		filled.CapNeedsInput = true
+	}
 }
 
 // perRunUnsized lists the tokens one run transfers or approves without an
@@ -2821,12 +2914,33 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 	if vm != nil {
 		report = vm.sessionGrantReport
 	}
+	// One run's need, whatever the grant: the caller sizes a budget
+	// proposal from it, never from Required's run-count total. It is for
+	// the network this simulation ran on, the one its observed spend came
+	// from, whichever chain's verdict is reported. A workflow on one other
+	// chain keeps that chain, as its verdict does.
+	perRunChain := chainID
+	if len(needs) == 1 {
+		for chain := range needs {
+			perRunChain = chain
+		}
+	}
+	perRun := simulatePerRun(task.Task, settings, perRunChain, report, sched.Now)
 	if len(needs) == 0 {
-		auth.Result = withPerRun(BuildAuthorization(nil, nil, report, sched), simulatePerRun(task.Task, settings, chainID, report, sched.Now))
+		auth.Result = withPerRun(BuildAuthorization(nil, nil, report, sched), perRun)
 		return
 	}
+	// Chains in a fixed order, so equally severe verdicts never depend on
+	// map order. On a tie the simulated network's verdict wins.
+	chains := make([]int64, 0, len(needs))
+	for chain := range needs {
+		chains = append(chains, chain)
+	}
+	sort.Slice(chains, func(i, j int) bool { return chains[i] < chains[j] })
 	var worst *SessionAuthorization
-	for chain, need := range needs {
+	worstChain := int64(0)
+	for _, chain := range chains {
+		need := needs[chain]
 		if need == nil || !need.HasFundMove {
 			continue
 		}
@@ -2834,9 +2948,6 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 		if chain == chainID || len(needs) == 1 {
 			chainReport = report
 		}
-		// One run's need, whatever the grant: the caller sizes a budget
-		// proposal from it, never from Required's run-count total.
-		perRun := simulatePerRun(task.Task, settings, chain, chainReport, sched.Now)
 		var policy *model.SessionPolicy
 		if report != nil && chain == chainID {
 			policy, _, _, _, _, _, _, _, _ = report.snapshot()
@@ -2876,15 +2987,19 @@ func (n *Engine) fillSimulateAuthorization(ctx context.Context, user *model.User
 				Required: required,
 			}
 		}
-		got = withPerRun(got, perRun)
-		if worst == nil || authorizationRank(got.Status) > authorizationRank(worst.Status) {
+		rank, worstRank := authorizationRank(got.Status), 0
+		if worst != nil {
+			worstRank = authorizationRank(worst.Status)
+		}
+		if worst == nil || rank > worstRank || (rank == worstRank && chain == chainID && worstChain != chainID) {
 			worst = got
+			worstChain = chain
 		}
 	}
 	if worst == nil {
-		worst = withPerRun(BuildAuthorization(nil, nil, report, sched), simulatePerRun(task.Task, settings, chainID, report, sched.Now))
+		worst = BuildAuthorization(nil, nil, report, sched)
 	}
-	auth.Result = worst
+	auth.Result = withPerRun(worst, perRun)
 }
 
 func (n *Engine) sessionPolicyDeployCheckEnabled() bool {

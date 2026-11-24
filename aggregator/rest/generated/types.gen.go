@@ -1039,6 +1039,15 @@ type Execution struct {
 	// unlike `required` in workflow mode. Its `nativeSpendCap` is ETH the
 	// workflow sends; it never includes self-funded gas, and its
 	// `nativeGasWei` is omitted. Present when the workflow moves funds.
+	//
+	// `perRun` is for the network this simulation ran on (the request's
+	// `chainId`), even when `status` and `required` report another chain
+	// of a multi-chain workflow. A workflow whose sends are all on one
+	// other chain reports that chain. Each amount is the token's whole
+	// amount for the run: the greater of its fixed sends and what the
+	// simulation sent. A token with a send whose amount is unknown has an
+	// amount only when the simulation sent more than its fixed sends;
+	// otherwise it has none and is listed in `perRunUnsizedTokens`.
 	Authorization *SessionAuthorization `json:"authorization,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
@@ -2148,6 +2157,15 @@ type SecretList struct {
 // unlike `required` in workflow mode. Its `nativeSpendCap` is ETH the
 // workflow sends; it never includes self-funded gas, and its
 // `nativeGasWei` is omitted. Present when the workflow moves funds.
+//
+// `perRun` is for the network this simulation ran on (the request's
+// `chainId`), even when `status` and `required` report another chain
+// of a multi-chain workflow. A workflow whose sends are all on one
+// other chain reports that chain. Each amount is the token's whole
+// amount for the run: the greater of its fixed sends and what the
+// simulation sent. A token with a send whose amount is unknown has an
+// amount only when the simulation sent more than its fixed sends;
+// otherwise it has none and is listed in `perRunUnsizedTokens`.
 type SessionAuthorization struct {
 	Detail         *string          `json:"detail,omitempty"`
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
@@ -2167,8 +2185,10 @@ type SessionAuthorization struct {
 	PerRunNativeUnsized *bool `json:"perRunNativeUnsized,omitempty"`
 
 	// PerRunUnsizedTokens Tokens one run transfers or approves without a one-run amount
-	// in `perRun`: a split, a batch ceiling, or an amount the
-	// simulation did not send. The caller asks the owner for one.
+	// in `perRun`: a split, a batch ceiling, or a send whose amount
+	// the simulation did not show. A token listed here has no amount
+	// in `perRun`, even when some of its sends are fixed. The caller
+	// asks the owner for one.
 	PerRunUnsizedTokens *[]EthereumAddress `json:"perRunUnsizedTokens,omitempty"`
 
 	// PolicyId The runner's current usable grant, when there is one.
