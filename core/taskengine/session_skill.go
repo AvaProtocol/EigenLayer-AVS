@@ -201,8 +201,9 @@ type WorkflowNeed struct {
 	// node sent in the simulation.
 	nodeSends map[nodeAsset]*nodeSend
 	// unreadNodes have a call whose target or method the walk could not
-	// read. Their fixed sends are not their whole amount: the unread call
-	// may send the same token.
+	// read. Their fixed token sends are not their whole amount: the unread
+	// call may send the same token. Their ETH is the node's value, which
+	// the walk reads either way.
 	unreadNodes map[string]bool
 }
 
@@ -371,8 +372,8 @@ type SessionGrantReport struct {
 }
 
 // runSend is one contract call or ETH transfer the simulation made, with
-// its network and the step that made it: a workflow node's ID, or a loop
-// iteration's "<loop>_iter_<n>". simulatePerRun maps a step to its node.
+// its network and the workflow node that made it. A loop iteration's send
+// is its loop's (VM.workflowNodeOf).
 type runSend struct {
 	chain int64
 	node  string
@@ -384,7 +385,7 @@ type runSend struct {
 
 // observeRunCalls records a node's contract calls on chain for one run's
 // amounts.
-func (r *SessionGrantReport) observeRunCalls(chain int64, stepID string, planned []PlannedCall) {
+func (r *SessionGrantReport) observeRunCalls(chain int64, node string, planned []PlannedCall) {
 	if r == nil {
 		return
 	}
@@ -392,18 +393,18 @@ func (r *SessionGrantReport) observeRunCalls(chain int64, stepID string, planned
 	defer r.mu.Unlock()
 	for index := range planned {
 		call := planned[index]
-		r.RunSends = append(r.RunSends, runSend{chain: chain, node: stepID, call: &call})
+		r.RunSends = append(r.RunSends, runSend{chain: chain, node: node, call: &call})
 	}
 }
 
 // observeRunNative records the ETH a transfer node sent on chain.
-func (r *SessionGrantReport) observeRunNative(chain int64, stepID string, sent *big.Int) {
+func (r *SessionGrantReport) observeRunNative(chain int64, node string, sent *big.Int) {
 	if r == nil || sent == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.RunSends = append(r.RunSends, runSend{chain: chain, node: stepID, sent: new(big.Int).Set(sent)})
+	r.RunSends = append(r.RunSends, runSend{chain: chain, node: node, sent: new(big.Int).Set(sent)})
 }
 
 // runSendsOn is a copy of the sends made on chain.
@@ -422,42 +423,26 @@ func (r *SessionGrantReport) runSendsOn(chain int64) []runSend {
 	return out
 }
 
-// workflowNodeOf is the workflow node a step ran as. A loop iteration runs
-// as "<loop>_iter_<n>" and belongs to its loop. A node whose own ID ends
-// that way is itself, and so is a step whose prefix is not a loop.
-func workflowNodeOf(stepID string, nodes, loops map[string]bool) string {
-	if nodes[stepID] {
-		return stepID
+// noteLoopIteration records that iteration runs one pass of loop. Its ID,
+// "<loop>_iter_<n>", can also be a workflow node's own ID, so a simulate
+// report reads the loop from here, never from the ID. Recorded only while
+// a grant report is open.
+func (v *VM) noteLoopIteration(iteration *avsproto.TaskNode, loop string) {
+	if v == nil || iteration == nil || v.sessionGrantReport == nil {
+		return
 	}
-	suffix := strings.LastIndex(stepID, "_iter_")
-	if suffix < 0 {
-		return stepID
-	}
-	if _, err := strconv.Atoi(stepID[suffix+len("_iter_"):]); err != nil || !loops[stepID[:suffix]] {
-		return stepID
-	}
-	return stepID[:suffix]
+	v.loopIterations.Store(iteration, loop)
 }
 
-// attributeRunSends maps each send's step to its workflow node in task.
-func attributeRunSends(task *avsproto.Task, sends []runSend) []runSend {
-	nodes := map[string]bool{}
-	loops := map[string]bool{}
-	for _, node := range task.GetNodes() {
-		if node == nil {
-			continue
-		}
-		nodes[node.GetId()] = true
-		if node.GetLoop() != nil {
-			loops[node.GetId()] = true
+// workflowNodeOf is the workflow node that runs step: its loop for a loop
+// iteration, otherwise the node itself.
+func (v *VM) workflowNodeOf(step *avsproto.TaskNode) string {
+	if v != nil && step != nil {
+		if loop, ok := v.loopIterations.Load(step); ok {
+			return loop.(string)
 		}
 	}
-	out := make([]runSend, 0, len(sends))
-	for _, send := range sends {
-		send.node = workflowNodeOf(send.node, nodes, loops)
-		out = append(out, send)
-	}
-	return out
+	return step.GetId()
 }
 
 func (r *SessionGrantReport) observeCalls(planned []PlannedCall) {
@@ -1627,7 +1612,12 @@ func decodeCall(calldata, method string, params []string, scope fundScope) (sel 
 		if len(data) >= 4 && !strings.ContainsAny(raw, "{}$") {
 			sel = SelectorFromCalldata(data)
 			selOK = sel != "0x00000000"
-			if decoded, ok := decodeTransferAmount(data); ok {
+			if decoded, ok := decodeSpendAmount(data); ok {
+				if decoded.Sign() == 0 {
+					// An explicit zero, such as an allowance reset, is
+					// known: no amount, as resolveAmount reads "0".
+					return sel, selOK, nil, false, false
+				}
 				return sel, selOK, decoded, true, false
 			}
 			if sel == selectorTransfer || sel == selectorApprove {
@@ -2929,7 +2919,7 @@ func simulatePerRun(task *avsproto.Task, settings map[string]any, chainID int64,
 	if task != nil {
 		need = budgetNeedForTask(task, settings, chainID, now)
 	}
-	sends := attributeRunSends(task, report.runSendsOn(chainID))
+	sends := report.runSendsOn(chainID)
 	saw := len(sends) > 0
 	if (need == nil || !need.HasFundMove) && !saw {
 		return nil
@@ -2990,9 +2980,9 @@ func sendAmounts(send runSend) map[nodeAsset]*big.Int {
 // runAmounts is one run's amount of each token, and of ETH, keyed with no
 // node. A node's sized sends count whether or not this run reached them,
 // for example on a branch it didn't take. A node with a send the walk
-// could not size counts what it sent in this run, and so does a node with
-// a call the walk could not read (unread): its fixed sends are not its
-// whole amount. Nil is an amount the run leaves unknown: a split
+// could not size counts what it sent in this run, and so do a node's
+// tokens when it has a call the walk could not read (unread): its fixed
+// token sends are not its whole amount. Its ETH stays fixed. Nil is an amount the run leaves unknown: a split
 // or batch ceiling, whose one simulated iteration is not the total; a
 // node with an unsized send the run did not reach; or a total past
 // uint256. A ceiling on one token leaves the others sized.
@@ -3020,7 +3010,7 @@ func runAmounts(walked map[nodeAsset]*nodeSend, unread map[string]bool, sends []
 		case walk.ceiling:
 			add(key, big.NewInt(0))
 			unknown[nodeAsset{token: key.token, native: key.native}] = true
-		case !walk.unsized && !unread[key.node]:
+		case !walk.unsized && (key.native || !unread[key.node]):
 			add(key, walk.fixed)
 		case ran[key] != nil:
 			add(key, ran[key])

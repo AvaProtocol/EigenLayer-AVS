@@ -103,9 +103,9 @@ func TestSimulatePerRunSizesSweepLoopFromTheSimulation(t *testing.T) {
 		Calldata: common.FromHex(transferCalldata(destination, big.NewInt(640_000_000))),
 	}}
 	report.observeCalls(usdc)
-	report.observeRunCalls(skillSepolia, "sendTokens_iter_0", usdc)
+	report.observeRunCalls(skillSepolia, "sendTokens", usdc)
 	report.observeNative(destination, big.NewInt(50_000_000_000_000_000))
-	report.observeRunNative(skillSepolia, "sendEth_iter_0", big.NewInt(50_000_000_000_000_000))
+	report.observeRunNative(skillSepolia, "sendEth", big.NewInt(50_000_000_000_000_000))
 
 	got := perRunVerdict(t, skillWorkflow(task, runner), runner, 0, report, skillSepolia)
 	require.Equal(t, AuthNoGrant, got.Status)
@@ -442,17 +442,85 @@ func TestSimulatePerRunIsForTheSimulatedNetwork(t *testing.T) {
 	require.Equal(t, "", perRunCapOf(got.PerRun, skillUSDC))
 }
 
-// A node whose own ID ends in "_iter_<n>" is itself, and so is a step whose
-// prefix is not a loop.
-func TestWorkflowNodeOfALoopIteration(t *testing.T) {
-	nodes := map[string]bool{"sendTokens": true, "pay_iter_0": true, "pay": true}
-	loops := map[string]bool{"sendTokens": true}
-	require.Equal(t, "sendTokens", workflowNodeOf("sendTokens_iter_3", nodes, loops))
-	require.Equal(t, "sendTokens", workflowNodeOf("sendTokens", nodes, loops))
-	require.Equal(t, "pay_iter_0", workflowNodeOf("pay_iter_0", nodes, loops))
-	require.Equal(t, "pay_iter_1", workflowNodeOf("pay_iter_1", nodes, loops), "pay is not a loop")
-	require.Equal(t, "send_iter_x", workflowNodeOf("send_iter_x", nodes, loops))
-	require.Equal(t, "", workflowNodeOf("", nodes, loops))
+// A loop's iteration runs as "<loop>_iter_<n>", which can also be a
+// workflow node's own ID. The VM records each iteration's loop, so a loop
+// "pay" sending 7 and a node "pay_iter_0" sending 13 make 20, not 27.
+func TestSimulatePerRunTellsALoopIterationFromANodeWithItsID(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	vm := NewVM().WithLogger(testutil.GetLogger()).SetSimulation(true)
+	vm.WithDb(db)
+	vm.TaskOwner = testutil.TestUser1().Address
+	vm.AddVar("aa_sender", maxTestWallet)
+	settings := map[string]any{"items": []any{"first"}}
+	vm.AddVar("settings", settings)
+	vm.AddVar("quote", map[string]any{"data": "13"})
+	vm.smartWalletConfig = &config.SmartWalletConfig{ChainID: skillSepolia, EthRpcUrl: "http://127.0.0.1:1"}
+	report := &SessionGrantReport{}
+	vm.sessionGrantReport = report
+	loop := loopEthNode("pay", "{{settings.items}}", "item", maxTestDestination, "7")
+	loop.Id = "pay"
+	loop.Type = avsproto.NodeType_NODE_TYPE_LOOP
+	ordinary := perRunEthNode("pay_iter_0", common.HexToAddress(maxTestDestination), "{{quote.data}}")
+	ordinary.Name = "lastPayment"
+	ordinary.Type = avsproto.NodeType_NODE_TYPE_ETH_TRANSFER
+	task := perRunTask(loop, ordinary)
+	require.NoError(t, validateWorkflowGraphReferences(&avsproto.TaskTrigger{Id: "start"}, task.Nodes, []*avsproto.TaskEdge{{Source: "start", Target: loop.Id}, {Source: loop.Id, Target: ordinary.Id}}))
+	vm.TaskNodes[loop.Id], vm.TaskNodes[ordinary.Id] = loop, ordinary
+
+	looped, err := vm.runLoop(loop)
+	require.NoError(t, err)
+	require.True(t, looped.Success, looped.Error)
+	sent, err := vm.runEthTransfer(ordinary)
+	require.NoError(t, err)
+	require.True(t, sent.Success, sent.Error)
+
+	sends := report.runSendsOn(skillSepolia)
+	require.Len(t, sends, 2)
+	require.ElementsMatch(t, []string{"pay", "pay_iter_0"}, []string{sends[0].node, sends[1].node})
+	perRun := simulatePerRun(task, settings, skillSepolia, report, skillNow())
+	require.NotNil(t, perRun.NativeSpendCap)
+	require.Equal(t, "20", perRun.NativeSpendCap.Amount)
+}
+
+// A call the walk can't read leaves the node's tokens to the run, not its
+// ETH: the node's value is read either way. Two 7-wei calls are 14 even
+// when the run never reached the node.
+func TestSimulatePerRunKeepsAnUnreadNodesValue(t *testing.T) {
+	deposit := map[string]any{"methodName": "deposit", "callData": "0xd0e30db0"}
+	cfg := map[string]any{
+		"chainId": skillSepolia, "contractAddress": skillWETH, "value": "7",
+		"contractAbi": []any{map[string]any{"type": "function", "name": "deposit", "stateMutability": "payable", "inputs": []any{}, "outputs": []any{}}},
+		"methodCalls": []any{deposit, map[string]any{"contractAddress": "{{tokenLookup.data}}", "methodName": "deposit", "callData": "0xd0e30db0"}},
+	}
+	node, err := CreateNodeFromType("contractWrite", cfg, "")
+	require.NoError(t, err)
+	node.Id = "deposits"
+	require.NotNil(t, node.GetContractWrite().Config.MethodCalls[1].ContractAddress, "the second call's target is a template")
+
+	perRun := simulatePerRun(perRunTask(node), nil, skillSepolia, &SessionGrantReport{}, skillNow())
+	require.True(t, perRun.Unresolved)
+	require.NotNil(t, perRun.NativeSpendCap)
+	require.Equal(t, "14", perRun.NativeSpendCap.Amount)
+	require.False(t, perRun.NativeUnsized)
+}
+
+// An explicit approve(0) in calldata is known, as methodParams "0" is: a
+// run that skipped it keeps the token's other amount.
+func TestSimulatePerRunReadsAnExplicitZeroApprove(t *testing.T) {
+	payee := common.HexToAddress("0x000000000000000000000000000000000000000d")
+	reset := selectorApprove + strings.TrimPrefix(transferCalldata(payee, big.NewInt(0)), selectorTransfer)
+	task := perRunTask(
+		perRunCallNode("fixed", skillUSDC, transferCalldata(payee, big.NewInt(7)), skillSepolia),
+		perRunCallNode("reset", skillUSDC, reset, skillSepolia),
+	)
+	report := &SessionGrantReport{}
+	perRunObserve(report, "fixed", skillUSDC, payee, 7)
+
+	perRun := simulatePerRun(task, nil, skillSepolia, report, skillNow())
+	require.Equal(t, "7", perRunCapOf(perRun, skillUSDC))
+	require.Empty(t, perRun.UnsizedTokens)
+	require.True(t, actionHasSelector(perRun.Actions, skillUSDC, selectorApprove), "the reset still needs its action")
 }
 
 // A percentage split makes its token a ceiling: one simulated iteration is
@@ -468,7 +536,7 @@ func TestSimulatePerRunCeilingLeavesOtherAssetsSized(t *testing.T) {
 	)
 	report := &SessionGrantReport{}
 	report.noteNoGrant()
-	perRunObserve(report, "loop1_iter_0", skillUSDC, payee, 30)
+	perRunObserve(report, "loop1", skillUSDC, payee, 30)
 	report.observeRunNative(skillSepolia, "eth", big.NewInt(13))
 	perRunObserve(report, "weth", skillWETH, payee, 5)
 

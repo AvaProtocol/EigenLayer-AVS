@@ -548,7 +548,7 @@ func (p *ETHTransferProcessor) observeRunNative(sent *big.Int) {
 	if chainID <= 0 {
 		chainID = p.vm.vmDefaultChainID()
 	}
-	p.vm.sessionGrantReport.observeRunNative(chainID, p.GetTaskNode().GetId(), sent)
+	p.vm.sessionGrantReport.observeRunNative(chainID, p.vm.workflowNodeOf(p.GetTaskNode()), sent)
 }
 
 // preflightNativeSend checks checked against the grant. A grant report
