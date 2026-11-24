@@ -1043,11 +1043,15 @@ type Execution struct {
 	// `perRun` is for the network this simulation ran on (the request's
 	// `chainId`), even when `status` and `required` report another chain
 	// of a multi-chain workflow. A workflow whose sends are all on one
-	// other chain reports that chain. Each amount is the token's whole
-	// amount for the run: the greater of its fixed sends and what the
-	// simulation sent. A token with a send whose amount is unknown has an
-	// amount only when the simulation sent more than its fixed sends;
-	// otherwise it has none and is listed in `perRunUnsizedTokens`.
+	// other chain reports that chain, and only sends on that network
+	// count. Each amount is the token's whole amount for the run: its
+	// fixed sends, whether or not the simulation reached them, plus what
+	// the simulation sent from each workflow node whose amount is not
+	// fixed. When the simulation did not reach one of those nodes, for
+	// example on a branch it didn't take, the token has no amount and is
+	// listed in `perRunUnsizedTokens`. ETH follows the same rule. A
+	// self-funded `MAX` transfer counts the value it sends, not the
+	// network fee it reserves.
 	Authorization *SessionAuthorization `json:"authorization,omitempty"`
 
 	// ChainId Numeric chain ID (e.g. 11155111 for Sepolia, 8453 for Base). On
@@ -2161,11 +2165,15 @@ type SecretList struct {
 // `perRun` is for the network this simulation ran on (the request's
 // `chainId`), even when `status` and `required` report another chain
 // of a multi-chain workflow. A workflow whose sends are all on one
-// other chain reports that chain. Each amount is the token's whole
-// amount for the run: the greater of its fixed sends and what the
-// simulation sent. A token with a send whose amount is unknown has an
-// amount only when the simulation sent more than its fixed sends;
-// otherwise it has none and is listed in `perRunUnsizedTokens`.
+// other chain reports that chain, and only sends on that network
+// count. Each amount is the token's whole amount for the run: its
+// fixed sends, whether or not the simulation reached them, plus what
+// the simulation sent from each workflow node whose amount is not
+// fixed. When the simulation did not reach one of those nodes, for
+// example on a branch it didn't take, the token has no amount and is
+// listed in `perRunUnsizedTokens`. ETH follows the same rule. A
+// self-funded `MAX` transfer counts the value it sends, not the
+// network fee it reserves.
 type SessionAuthorization struct {
 	Detail         *string          `json:"detail,omitempty"`
 	MissingActions *[]AllowedAction `json:"missingActions,omitempty"`
