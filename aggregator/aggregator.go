@@ -387,6 +387,7 @@ func (agg *Aggregator) Start(ctx context.Context, opts ...StartOption) error {
 		agg.backup.StopPeriodicBackup()
 	}
 
+	agg.waitForFlatten()
 	agg.db.Close()
 
 	// Ensure Sentry flushes any buffered events on shutdown

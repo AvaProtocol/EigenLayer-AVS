@@ -9,12 +9,57 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
 var (
 	repListener net.Listener
+
+	// flattenRunning admits one REPL flatten at a time; flattenWG lets
+	// shutdown wait for it, since closing Badger mid-compaction is unsafe.
+	flattenRunning atomic.Bool
+	flattenWG      sync.WaitGroup
 )
+
+// flattenWorkers is 1: each worker holds one compaction's output on disk
+// before its inputs are freed, and the gateway volume may be nearly full when
+// a flatten is needed. It also keeps the I/O off the live gateway's path.
+const flattenWorkers = 1
+
+// startFlatten runs storage Flatten in the background and reports whether it
+// started. A full compaction of a large DB takes many minutes, longer than a
+// REPL session over `railway ssh` should be held open.
+func (agg *Aggregator) startFlatten() bool {
+	if !flattenRunning.CompareAndSwap(false, true) {
+		return false
+	}
+	flattenWG.Add(1)
+	go func() {
+		defer flattenWG.Done()
+		defer flattenRunning.Store(false)
+		start := time.Now()
+		agg.logger.Info("Flatten started", "workers", flattenWorkers)
+		if err := agg.db.Flatten(flattenWorkers); err != nil {
+			agg.logger.Error("Flatten failed", "duration", time.Since(start).String(), "error", err)
+			return
+		}
+		agg.logger.Info("Flatten finished", "duration", time.Since(start).String())
+	}()
+	return true
+}
+
+// waitForFlatten blocks until a running flatten finishes. If shutdown's grace
+// period runs out first, the process is killed mid-compaction, which Badger
+// recovers from at the next open like any crash; closing the DB under it is
+// what must not happen.
+func (agg *Aggregator) waitForFlatten() {
+	if flattenRunning.Load() {
+		agg.logger.Info("Waiting for flatten to finish before closing the DB")
+	}
+	flattenWG.Wait()
+}
 
 func (agg *Aggregator) stopRepl() {
 	if repListener != nil {
@@ -141,6 +186,13 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 				fmt.Fprintln(conn, "gc success. still have more to run")
 			} else {
 				fmt.Fprintln(conn, "gc is done. no more log file to be removed")
+			}
+
+		case "flatten":
+			if agg.startFlatten() {
+				fmt.Fprintln(conn, "flatten started in the background; watch the gateway log for \"Flatten finished\"")
+			} else {
+				fmt.Fprintln(conn, "flatten is already running; watch the gateway log")
 			}
 
 		case "exit":

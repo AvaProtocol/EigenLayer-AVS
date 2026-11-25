@@ -1,8 +1,8 @@
 # Block Trigger Runtime Floor, Base 0.2s Blocks, maxExecution Ceiling, Execution History Retention
 
 - **Date**: 2026-11-24
-- **Status**: Proposed
-- **Branch**: fix/block-trigger-floor-and-execution-retention
+- **Status**: Implemented (v6.7.0, deployed 2026-11-25)
+- **Branch**: shipped via PRs #935 and #938, released in #937
 - **Related**: avs-infra `support/issues/20261109-gateway-volume-and-auth-admission.md` (cleanup step 5: execution-history retention); the 2026-07-28 limits in `core/taskengine/limits.go`
 
 ## Problem
@@ -31,7 +31,7 @@ This holds every block task to about one run a minute, whatever the block-time t
 - A record is kept if its execution is still in flight: a `pending:` key, a durable `wake:` subscription, or a `ckpt:` checkpoint. Kept records do not count toward the sweep's delete limit, so they cannot fill a sweep and stall pruning of the tasks after them.
 - A pruned run's `trigger:` status key is deleted too; otherwise `GetExecutionStatus` would fall back to it and report the run as PENDING.
 - At most 50,000 deletes per sweep, in transactions of 1,000, so a backlog drains over a few hours rather than in one burst.
-- Each sweep then runs value-log GC (`Vacuum`, up to 10 rounds). A delete only writes a tombstone; disk is reclaimed when GC rewrites the value-log files.
+- Each sweep then runs value-log GC (`Vacuum`, up to 10 rounds). A delete only writes a tombstone. Value-log GC does not reclaim these records on this database; see the correction below.
 
 ## Alternatives considered
 
@@ -56,4 +56,18 @@ This holds every block task to about one run a minute, whatever the block-time t
 - After deploy, watch the gateway logs:
   - "Block trigger fires faster than the floor" should appear about once a minute for the 6s task.
   - "Pruned execution history" should report about 50,000 deletes per hour until the backlog drains.
-  - Volume usage should fall once value-log GC reclaims files, and the next backup should be much smaller than 13 GB.
+  - The next backup should be much smaller than 13 GB.
+
+## After deploy (2026-11-25)
+
+- v6.7.0 reached the gateway at 08:52 UTC. Badger took about 4 minutes to open its 1,038 tables, and the engine started at 08:56:42.
+- The 6s task then ran every ~54s. Each admitted run logged "dropped the early ones" with 8 or 9 dropped. 54s rather than 60s is the gate's 6s jitter allowance at a 6s trigger cadence.
+- The first sweep, at 09:07, deleted 50,000 records and hit the per-sweep limit.
+
+## Correction: value-log GC does not reclaim the space
+
+This entry said the sweep's value-log GC would return the disk. It does not on this database. Badger v4's default `ValueThreshold` is 1 MB, so the ~366 KB execution records are stored inline in the LSM tables, not in the value log. On 2026-11-25 the gateway had 1,035 tables totalling 18 GB and a 104 MB value log. Disk for a deleted record returns only when a compaction rewrites the table holding it. The tombstones from a large delete are too small to trigger the compactions that would reach the bottom level, where most of this data sits.
+
+Backups shrink right away regardless, because a backup copies only live keys.
+
+To reclaim the live database, the gateway REPL gained a `flatten` command that runs Badger's `Flatten` with one worker in the background. Run it after the sweep backlog has drained, so that one pass drops all of it.
