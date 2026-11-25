@@ -1,7 +1,9 @@
 package taskengine
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -87,6 +89,71 @@ func TestPruneExecutionHistorySkipsProtectedWithoutSpendingLimit(t *testing.T) {
 	}
 	for _, id := range stuckIDs {
 		assert.True(t, existsKey(db, TaskExecutionKey(stuck, id)), "in-flight records are kept")
+	}
+}
+
+// failingExistStorage fails Exist for keys under failPrefix, as a transient
+// read error would.
+type failingExistStorage struct {
+	storage.Storage
+	failPrefix string
+}
+
+func (s failingExistStorage) Exist(key []byte) (bool, error) {
+	if bytes.HasPrefix(key, []byte(s.failPrefix)) {
+		return false, errors.New("transient read error")
+	}
+	return s.Storage.Exist(key)
+}
+
+// A failed in-flight lookup keeps the record: it cannot tell a live run from
+// a finished one.
+func TestPruneExecutionHistoryKeepsRecordWhenLookupFails(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	task := &model.Workflow{Task: &avsproto.Task{Id: model.GenerateID()}}
+	ids := writeExecutions(t, db, task, 4)
+
+	deleted, err := pruneExecutionHistory(context.Background(), failingExistStorage{db, "pending:"}, 1, 100)
+	require.NoError(t, err)
+	assert.Equal(t, 0, deleted)
+	for i, id := range ids {
+		assert.True(t, existsKey(db, TaskExecutionKey(task, id)), "record %d", i)
+	}
+}
+
+// A cancelled sweep stops before deleting: Stop() cancels it ahead of the
+// aggregator closing the DB.
+func TestPruneExecutionHistoryStopsWhenCancelled(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	task := &model.Workflow{Task: &avsproto.Task{Id: model.GenerateID()}}
+	ids := writeExecutions(t, db, task, 4)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	deleted, err := pruneExecutionHistory(ctx, db, 1, 100)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 0, deleted)
+	for i, id := range ids {
+		assert.True(t, existsKey(db, TaskExecutionKey(task, id)), "record %d", i)
+	}
+}
+
+func TestEngineStopWaitsForRetentionLoop(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	engine := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+	require.NoError(t, engine.MustStart())
+	engine.Stop()
+
+	select {
+	case <-engine.executionRetentionDone:
+	default:
+		t.Fatal("Stop returned while the retention loop was still running")
 	}
 }
 

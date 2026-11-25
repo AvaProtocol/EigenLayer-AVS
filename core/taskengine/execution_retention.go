@@ -48,7 +48,11 @@ type batchDeleter interface {
 	AtomicWrite(map[string][]byte, [][]byte) error
 }
 
-func (n *Engine) runExecutionRetentionLoop(ctx context.Context) {
+// runExecutionRetentionLoop closes done on return. Stop() waits for it, since
+// the aggregator closes the database right after: a sweep still scanning or
+// deleting would run against a closed DB.
+func (n *Engine) runExecutionRetentionLoop(ctx context.Context, done chan<- struct{}) {
+	defer close(done)
 	timer := time.NewTimer(executionRetentionFirstRun)
 	defer timer.Stop()
 	for {
@@ -94,6 +98,9 @@ func pruneExecutionHistory(ctx context.Context, db storage.Storage, keep, maxDel
 	// contiguous group.
 	counts := make(map[string]int)
 	err := db.IterateKeysOnly(prefix, func(key []byte) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if group, ok := executionHistoryGroup(key); ok {
 			counts[string(group)]++
 		}
@@ -112,6 +119,9 @@ func pruneExecutionHistory(ctx context.Context, db storage.Storage, keep, maxDel
 	selected := 0
 	taken := make(map[string]int)
 	err = db.IterateKeysOnly(prefix, func(key []byte) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if selected >= maxDeletes {
 			return errRetentionSweepFull
 		}
@@ -130,9 +140,7 @@ func pruneExecutionHistory(ctx context.Context, db storage.Storage, keep, maxDel
 			return nil
 		}
 		stub := &model.Workflow{Task: &avsproto.Task{Id: parsed.TaskID}}
-		if existsKey(db, PendingExecutionKey(stub, parsed.ExecutionID)) ||
-			existsKey(db, wakeSubscriptionKey(parsed.ExecutionID)) ||
-			existsKey(db, checkpointKey(parsed.ExecutionID)) {
+		if executionInFlight(db, stub, parsed.ExecutionID) {
 			return nil
 		}
 		selected++
@@ -177,6 +185,24 @@ func executionHistoryGroup(key []byte) ([]byte, bool) {
 	return key[:cut+1], true
 }
 
+// executionInFlight reports whether an execution is queued or is a durable
+// run waiting on a wake. A failed lookup counts as in flight: keeping a record
+// the sweep could have deleted costs nothing, deleting a live one loses it.
+func executionInFlight(db storage.Storage, task *model.Workflow, executionID string) bool {
+	for _, marker := range [][]byte{
+		PendingExecutionKey(task, executionID),
+		wakeSubscriptionKey(executionID),
+		checkpointKey(executionID),
+	} {
+		if exists, err := db.Exist(marker); exists || err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// existsKey is false when the lookup fails. Use it only where a false
+// negative is harmless, as for the leftover status key.
 func existsKey(db storage.Storage, key []byte) bool {
 	exists, _ := db.Exist(key)
 	return exists
