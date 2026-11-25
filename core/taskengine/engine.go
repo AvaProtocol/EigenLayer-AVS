@@ -2046,6 +2046,32 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				continue
 			}
 
+			// An operator claims only what it can monitor, so both checks run
+			// before the reclaim below. They used to run after it: on
+			// 2026-11-25 operator-sepolia reconnected first, claimed a Base
+			// mainnet task it cannot watch, then skipped streaming it, and
+			// operator-ethereum skipped it as assigned elsewhere. No operator
+			// monitored the task until the next restart.
+			if !n.supportsTaskTrigger(address, task) {
+				n.logger.Info("⚠️ Skipping task - operator doesn't support trigger type",
+					"task_id", task.Id,
+					"operator", address,
+					"trigger_type", task.Trigger.String())
+				continue
+			}
+
+			// Skip tasks for chains this operator is not configured to monitor.
+			// Pre-multi-chain operators (empty SupportedChainIDs) accept all
+			// tasks for backward compatibility; tasks with chain_id=0 are
+			// treated as chain-agnostic and assigned regardless.
+			if !n.supportsTaskChain(address, task) {
+				n.logger.Debug("⏭️ Skipping task - operator does not monitor this chain",
+					"task_id", task.Id,
+					"operator", address,
+					"trigger_chain_id", triggerMonitoringChainID(task.Trigger, 0))
+				continue
+			}
+
 			// CRITICAL FIX: Check for orphaned tasks (assigned to empty string) and reclaim them
 			n.assignmentMutex.RLock()
 			currentAssignment, isAssigned := n.taskAssignments[task.Id]
@@ -2107,27 +2133,6 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			}
 			if !isReclaimed {
 				newAssignments = append(newAssignments, task.Id)
-			}
-
-			// Check if operator supports this trigger type
-			if !n.supportsTaskTrigger(address, task) {
-				n.logger.Info("⚠️ Skipping task - operator doesn't support trigger type",
-					"task_id", task.Id,
-					"operator", address,
-					"trigger_type", task.Trigger.String())
-				continue
-			}
-
-			// Skip tasks for chains this operator is not configured to monitor.
-			// Pre-multi-chain operators (empty SupportedChainIDs) accept all
-			// tasks for backward compatibility; tasks with chain_id=0 are
-			// treated as chain-agnostic and assigned regardless.
-			if !n.supportsTaskChain(address, task) {
-				n.logger.Debug("⏭️ Skipping task - operator does not monitor this chain",
-					"task_id", task.Id,
-					"operator", address,
-					"trigger_chain_id", triggerMonitoringChainID(task.Trigger, 0))
-				continue
 			}
 
 			tasksToStream = append(tasksToStream, task)
@@ -5173,14 +5178,16 @@ func (n *Engine) supportsTaskTrigger(operatorAddr string, task *model.Workflow) 
 	return true
 }
 
-// getEligibleOperators returns operators that support the given task's trigger type
+// getEligibleOperators returns operators that support the given task's trigger
+// type and monitor its chain. Without the chain check, assignTaskToOperator kept
+// a task assigned to an operator that never streamed it.
 func (n *Engine) getEligibleOperators(task *model.Workflow) []string {
 	n.streamsMutex.RLock()
 	defer n.streamsMutex.RUnlock()
 
 	var eligible []string
 	for operatorAddr := range n.operatorStreams {
-		if n.CanStreamCheck(operatorAddr) && n.supportsTaskTrigger(operatorAddr, task) {
+		if n.CanStreamCheck(operatorAddr) && n.supportsTaskTrigger(operatorAddr, task) && n.supportsTaskChain(operatorAddr, task) {
 			eligible = append(eligible, operatorAddr)
 		}
 	}
