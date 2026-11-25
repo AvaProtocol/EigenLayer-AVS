@@ -67,6 +67,9 @@ type Storage interface {
 	IncCounter(key []byte, defaultValue ...uint64) (uint64, error)
 	SetCounter(key []byte, value uint64) error
 	Vacuum() error
+	// Flatten compacts every LSM level into one, dropping deleted and
+	// overwritten versions. Heavy; see BadgerStorage.Flatten.
+	Flatten(workers int) error
 
 	Backup(ctx context.Context, w io.Writer, since uint64) (uint64, error)
 	Load(ctx context.Context, r io.Reader) error
@@ -440,6 +443,19 @@ func (a *BadgerStorage) ListKeysMulti(prefixes []string) ([]string, error) {
 
 func (a *BadgerStorage) Vacuum() error {
 	return a.db.RunValueLogGC(0.7)
+}
+
+// Flatten forces compaction until every table sits on one level. A deleted
+// key only frees disk when a compaction drops it, and values under Badger's
+// 1 MB default ValueThreshold live inline in the tables rather than the value
+// log, so Vacuum cannot reclaim them. After a large delete, the tombstones
+// are too small to trigger the compactions that would.
+//
+// Background compactions pause while it runs; reads and writes continue.
+// Extra disk is bounded by one compaction's output per worker, since each
+// step replaces its input tables when it finishes.
+func (a *BadgerStorage) Flatten(workers int) error {
+	return a.db.Flatten(workers)
 }
 
 func (a *BadgerStorage) DbPath() string {

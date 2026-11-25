@@ -83,6 +83,9 @@ type Aggregator struct {
 	config *config.Config
 	db     storage.Storage
 
+	// flatten gates the REPL `flatten` command against shutdown (repl.go).
+	flatten flattenGate
+
 	ethRpcClient *ethclient.Client
 	chainID      *big.Int
 
@@ -387,6 +390,7 @@ func (agg *Aggregator) Start(ctx context.Context, opts ...StartOption) error {
 		agg.backup.StopPeriodicBackup()
 	}
 
+	agg.waitForFlatten()
 	agg.db.Close()
 
 	// Ensure Sentry flushes any buffered events on shutdown
