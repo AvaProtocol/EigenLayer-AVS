@@ -21,6 +21,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	badger "github.com/dgraph-io/badger/v4"
 )
 
 const (
@@ -34,9 +35,11 @@ const (
 	executionRetentionMaxDeletes = 50_000
 	executionRetentionBatch      = 1000
 
-	// executionRetentionVacuumRounds bounds value-log GC per sweep. A delete
-	// only writes a tombstone; the record bodies stay in Badger's value log
-	// until GC rewrites the file they sit in, one file per round.
+	// executionRetentionVacuumRounds bounds value-log GC per sweep, one file
+	// per round. GC reclaims only values stored in the value log, which with
+	// Badger's 1 MB default ValueThreshold means records over 1 MB. Smaller
+	// records sit inline in the LSM tables, and their space comes back only
+	// when compaction drops the deleted keys (or the REPL's flatten).
 	executionRetentionVacuumRounds = 10
 )
 
@@ -80,9 +83,16 @@ func (n *Engine) sweepExecutionHistory(ctx context.Context) {
 	// Every sweep, not only one that deleted: GC can only reclaim a file once
 	// compaction has recorded its discards, which lags the deletes.
 	for i := 0; i < executionRetentionVacuumRounds && ctx.Err() == nil; i++ {
-		if err := n.db.Vacuum(); err != nil {
-			break // badger.ErrNoRewrite: nothing left worth rewriting
+		err := n.db.Vacuum()
+		if err == nil {
+			continue
 		}
+		// ErrNoRewrite: nothing left worth rewriting. ErrRejected: another GC,
+		// such as the REPL's gc, is already running.
+		if !errors.Is(err, badger.ErrNoRewrite) && !errors.Is(err, badger.ErrRejected) {
+			n.logger.Warn("Value log GC failed", "round", i+1, "error", err)
+		}
+		break
 	}
 }
 

@@ -487,6 +487,28 @@ func TestAdmitBlockTrigger(t *testing.T) {
 	}
 }
 
+// A task that stops firing (deleted, disabled, completed) loses its gate once
+// it has been idle long enough, instead of keeping it until a restart.
+func TestAdmitBlockTriggerEvictsIdleGates(t *testing.T) {
+	engine := New(testutil.TestMustDB(), testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
+
+	t0 := time.Now()
+	engine.admitBlockTrigger("stopped", t0, false)
+	engine.admitBlockTrigger("running", t0.Add(blockTriggerGateIdle), false)
+	if _, ok := engine.blockTriggerGates["stopped"]; !ok {
+		t.Fatal("a gate idle for exactly blockTriggerGateIdle should be kept")
+	}
+
+	engine.admitBlockTrigger("running", t0.Add(blockTriggerGateIdle+MinBlockTriggerGap), false)
+	if _, ok := engine.blockTriggerGates["stopped"]; ok {
+		t.Error("the idle task's gate should be evicted")
+	}
+	if _, ok := engine.blockTriggerGates["running"]; !ok {
+		t.Error("the firing task's gate should be kept")
+	}
+}
+
 // backdateBlockTriggerGate makes the next block trigger for taskID arrive past
 // the floor, for tests that send several notifications in quick succession.
 func backdateBlockTriggerGate(engine *Engine, taskID string) {

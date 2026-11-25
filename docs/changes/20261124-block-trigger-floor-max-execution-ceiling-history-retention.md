@@ -17,7 +17,7 @@ Most of the growth came from one Base block-trigger workflow whose execution rec
 
 ## Decision
 
-**Block-trigger floor at runtime** (`limits.go` `admitBlockTrigger`, called from `AggregateChecksResultWithState`). For a task whose stored trigger is a block trigger, a notification that arrives less than `MinBlockTriggerGap` (60s floor minus 6s for delivery jitter) after the last admitted one is dropped. The response is `rate_limited` with `TaskStillEnabled = true` and a positive `RemainingExecutions`, so the operator keeps monitoring. The gate is keyed on the stored trigger, not on `payload.TriggerType`, which the operator sets. A notification arriving while the task has a pending execution (a non-blocking `TriggerWorkflow`, whose operator notification is sent once) is always admitted, and the next scheduled trigger is measured from it. State is in memory; after a restart each task's first trigger is admitted. Throttled tasks log one Info line per admitted run with the number dropped since the previous one.
+**Block-trigger floor at runtime** (`limits.go` `admitBlockTrigger`, called from `AggregateChecksResultWithState`). For a task whose stored trigger is a block trigger, a notification that arrives less than `MinBlockTriggerGap` (60s floor minus 6s for delivery jitter) after the last admitted one is dropped. The response is `rate_limited` with `TaskStillEnabled = true` and a positive `RemainingExecutions`, so the operator keeps monitoring. The gate is keyed on the stored trigger, not on `payload.TriggerType`, which the operator sets. A notification arriving while the task has a pending execution (a non-blocking `TriggerWorkflow`, whose operator notification is sent once) is always admitted, and the next scheduled trigger is measured from it. State is in memory; after a restart each task's first trigger is admitted. A task's gate is evicted after 10 minutes without an admitted trigger, so deleted, disabled and completed tasks do not keep one until the next restart. Throttled tasks log one Info line per admitted run with the number dropped since the previous one.
 
 This holds every block task to about one run a minute, whatever the block-time table says, including tasks created before the floor existed (2026-07-28). Cron is unaffected: its rate comes from the expression, so it cannot drift.
 
@@ -31,7 +31,7 @@ This holds every block task to about one run a minute, whatever the block-time t
 - A record is kept if its execution is still in flight: a `pending:` key, a durable `wake:` subscription, or a `ckpt:` checkpoint. Kept records do not count toward the sweep's delete limit, so they cannot fill a sweep and stall pruning of the tasks after them.
 - A pruned run's `trigger:` status key is deleted too; otherwise `GetExecutionStatus` would fall back to it and report the run as PENDING.
 - At most 50,000 deletes per sweep, in transactions of 1,000, so a backlog drains over a few hours rather than in one burst.
-- Each sweep then runs value-log GC (`Vacuum`, up to 10 rounds). A delete only writes a tombstone. Value-log GC does not reclaim these records on this database; see the correction below.
+- Each sweep then runs value-log GC (`Vacuum`, up to 10 rounds). A GC error other than Badger's "nothing to rewrite" or "GC already running" is logged as a warning. A delete only writes a tombstone. Value-log GC does not reclaim these records on this database; see the correction below.
 
 ## Alternatives considered
 

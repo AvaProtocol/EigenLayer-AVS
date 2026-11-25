@@ -289,6 +289,13 @@ type blockTriggerGate struct {
 	dropped    int
 }
 
+// blockTriggerGateIdle is how long a gate outlives its task's last admitted
+// trigger. A gate older than MinBlockTriggerGap admits the next trigger
+// anyway, so evicting it loses only a pending "dropped" count. Without the
+// eviction, a deleted, disabled or completed block task keeps its gate until
+// the gateway restarts.
+const blockTriggerGateIdle = 10 * time.Minute
+
 // admitBlockTrigger reports whether a block trigger for taskID arriving at now
 // is at least MinBlockTriggerGap after the last admitted one, and records it
 // when it is. force admits it regardless and still records it, so the next
@@ -298,6 +305,13 @@ type blockTriggerGate struct {
 func (n *Engine) admitBlockTrigger(taskID string, now time.Time, force bool) bool {
 	n.triggerDedupLock.Lock()
 	defer n.triggerDedupLock.Unlock()
+
+	// Evict gates of tasks that stopped firing, as processedTriggerIDs does.
+	for id, g := range n.blockTriggerGates {
+		if now.Sub(g.admittedAt) > blockTriggerGateIdle {
+			delete(n.blockTriggerGates, id)
+		}
+	}
 
 	gate, ok := n.blockTriggerGates[taskID]
 	if !ok {
