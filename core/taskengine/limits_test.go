@@ -117,10 +117,15 @@ func TestValidateTriggerFrequencyBlock(t *testing.T) {
 		{"every block on Ethereum is rejected", blockTrigger(1, 1), true},
 		{"4 blocks on Ethereum is just under the floor", blockTrigger(4, 1), true},
 		{"5 blocks on Ethereum clears the floor", blockTrigger(5, 1), false},
-		// Base produces blocks 6x faster, so the same interval costs 6x as
-		// much — which is why the floor is wall-clock and not a block count.
+		// Base produces blocks 60x faster, so the same interval costs 60x as
+		// much, which is why the floor is wall-clock and not a block count.
 		{"5 blocks on Base is rejected", blockTrigger(5, 8453), true},
-		{"30 blocks on Base clears the floor", blockTrigger(30, 8453), false},
+		// 30 blocks was 60s at Base's old 2s blocks and is 6s since
+		// 2026-11-05: the "minute" task that filled the gateway volume.
+		{"30 blocks on Base is rejected", blockTrigger(30, 8453), true},
+		{"299 blocks on Base is just under the floor", blockTrigger(299, 8453), true},
+		{"300 blocks on Base clears the floor", blockTrigger(300, 8453), false},
+		{"30 blocks on Base Sepolia is rejected", blockTrigger(30, 84532), true},
 		// An unlisted chain falls back to the strict 1s default.
 		{"unknown chain is gated strictly", blockTrigger(30, 999999), true},
 		{"unknown chain clears at 60 blocks", blockTrigger(60, 999999), false},
@@ -303,6 +308,12 @@ func TestBlockTimeForChain(t *testing.T) {
 	if got := blockTimeForChain(56); got != 750*time.Millisecond {
 		t.Errorf("BNB block time = %v, want 750ms", got)
 	}
+	if got := blockTimeForChain(8453); got != 200*time.Millisecond {
+		t.Errorf("Base block time = %v, want 200ms (2s until 2026-11-05)", got)
+	}
+	if got := blockTimeForChain(84532); got != 200*time.Millisecond {
+		t.Errorf("Base Sepolia block time = %v, want 200ms", got)
+	}
 	if got := blockTimeForChain(10); got != 2*time.Second {
 		t.Errorf("Optimism block time = %v, want 2s", got)
 	}
@@ -403,6 +414,124 @@ func TestCreateWorkflowDefaultsNonPositiveMaxExecution(t *testing.T) {
 	}
 	if created.MaxExecution != 7 {
 		t.Errorf("explicit maxExecution 7 became %d", created.MaxExecution)
+	}
+}
+
+// An explicit max_execution is bounded too. The default alone let a task be
+// created with 1,000,000,000, which at its rate was ~190 years from its cap.
+func TestCreateWorkflowRejectsMaxExecutionAboveCeiling(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	engine := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+	user := testutil.TestUser1()
+
+	for _, given := range []int64{MaxExecutionCeiling + 1, 1_000_000_000} {
+		task := testutil.RestTask()
+		task.MaxExecution = given
+		_, err := engine.CreateWorkflow(user, task)
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("maxExecution %d: got %v, want InvalidArgument", given, err)
+		}
+	}
+
+	task := testutil.RestTask()
+	task.MaxExecution = MaxExecutionCeiling
+	created, err := engine.CreateWorkflow(user, task)
+	if err != nil {
+		t.Fatalf("maxExecution at the ceiling should be accepted, got %v", err)
+	}
+	if created.MaxExecution != MaxExecutionCeiling {
+		t.Errorf("maxExecution %d became %d", MaxExecutionCeiling, created.MaxExecution)
+	}
+}
+
+func TestAdmitBlockTrigger(t *testing.T) {
+	engine := New(testutil.TestMustDB(), testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
+
+	t0 := time.Now()
+	steps := []struct {
+		name  string
+		at    time.Duration
+		admit bool
+	}{
+		{"first trigger runs", 0, true},
+		// The Base "minute" task: 30 blocks at 0.2s.
+		{"6s later is dropped", 6 * time.Second, false},
+		{"just under the gap is dropped", MinBlockTriggerGap - time.Millisecond, false},
+		{"at the gap runs", MinBlockTriggerGap, true},
+		// A task configured at exactly the floor keeps every run when a
+		// notification lands a few seconds early.
+		{"floor minus jitter runs", MinBlockTriggerGap + MinBlockTriggerInterval - 3*time.Second, true},
+	}
+	for _, s := range steps {
+		if got := engine.admitBlockTrigger("task-a", t0.Add(s.at)); got != s.admit {
+			t.Errorf("%s: admitted=%v, want %v", s.name, got, s.admit)
+		}
+	}
+
+	// The gate is per task.
+	if !engine.admitBlockTrigger("task-b", t0.Add(7*time.Second)) {
+		t.Error("another task's first trigger should run")
+	}
+}
+
+// backdateBlockTriggerGate makes the next block trigger for taskID arrive past
+// the floor, for tests that send several notifications in quick succession.
+func backdateBlockTriggerGate(engine *Engine, taskID string) {
+	engine.triggerDedupLock.Lock()
+	defer engine.triggerDedupLock.Unlock()
+	if gate, ok := engine.blockTriggerGates[taskID]; ok {
+		gate.admittedAt = gate.admittedAt.Add(-MinBlockTriggerInterval)
+	}
+}
+
+// An early block trigger is dropped without telling the operator to stop:
+// worker_loop stops monitoring on TaskStillEnabled=false or remaining == 0.
+func TestAggregateChecksResultDropsEarlyBlockTrigger(t *testing.T) {
+	engine, db := newTestEngineWithQueue(t)
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	user := testutil.TestUser1()
+	taskReq := testutil.RestTask() // block trigger
+	testutil.SetTaskSettings(taskReq, "rest_task", user.SmartAccountAddress.Hex())
+	taskReq.MaxExecution = 100
+	task, err := engine.CreateWorkflow(user, taskReq)
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	const operatorAddr = "0x1234567890123456789012345678901234567890"
+	notify := func(block int) *ExecutionState {
+		t.Helper()
+		state, err := engine.AggregateChecksResultWithState(operatorAddr, &avsproto.NotifyTriggersReq{
+			Address:          operatorAddr,
+			TaskId:           task.Id,
+			TriggerType:      avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			TriggerRequestId: fmt.Sprintf("%s:%d", task.Id, block),
+		})
+		if err != nil {
+			t.Fatalf("block %d: %v", block, err)
+		}
+		return state
+	}
+
+	if state := notify(100); state.Status != "enabled" {
+		t.Fatalf("first trigger: status %q, want enabled", state.Status)
+	}
+	state := notify(130)
+	if state.Status != "rate_limited" {
+		t.Fatalf("trigger 30 blocks later: status %q, want rate_limited", state.Status)
+	}
+	if !state.TaskStillEnabled || state.RemainingExecutions <= 0 {
+		t.Errorf("a dropped trigger must keep the operator monitoring, got enabled=%v remaining=%d",
+			state.TaskStillEnabled, state.RemainingExecutions)
+	}
+
+	backdateBlockTriggerGate(engine, task.Id)
+	if state := notify(400); state.Status != "enabled" {
+		t.Errorf("trigger past the floor: status %q, want enabled", state.Status)
 	}
 }
 

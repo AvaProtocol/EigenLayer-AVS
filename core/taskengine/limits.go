@@ -55,6 +55,19 @@ const (
 	// that still permits the rate you just paid for is hard to justify.
 	MinBlockTriggerInterval = time.Minute
 
+	// MinBlockTriggerGap is the floor above, enforced when a trigger arrives
+	// rather than at create. The create-time check converts blocks to
+	// wall-clock through chainBlockTime, which goes stale when a chain speeds
+	// up: Base moved from 2s to 0.2s blocks on 2026-11-05, and a task created
+	// as "30 blocks = 60s" fired every 6s from then on (14,400 runs/day). The
+	// gap between arrivals holds the floor whatever the table says, and for
+	// tasks created before the floor existed.
+	//
+	// 6s under the floor absorbs delivery jitter (operators batch notifications
+	// every 3s), so a task configured at exactly 60s does not lose every other
+	// run to a notification that landed a second early.
+	MinBlockTriggerGap = MinBlockTriggerInterval - 6*time.Second
+
 	// DefaultMaxExecution is applied when a create request omits
 	// `max_execution`. The field was already enforced (executor.go), but an
 	// omitted value meant 0, and 0 means unlimited — so the default was
@@ -70,6 +83,24 @@ const (
 	// constant cannot give both floors the same wall-clock lifetime while the
 	// floors differ 5x, and the shorter bound is the safer place to land.
 	DefaultMaxExecution int64 = (24 * 60 / 5) * 180
+
+	// MaxExecutionCeiling bounds an explicit `max_execution`. The default above
+	// only bounds callers who omit the field: a Base block task created with
+	// max_execution=1,000,000,000 was, at its rate, ~190 years from its cap.
+	//
+	// One year at the block floor (1,440/day). Rejected at create rather than
+	// clamped, like the retry ceilings, so the caller learns the bound exists.
+	// Stored tasks keep their value: clamping them would complete running
+	// workflows that are already past the new bound.
+	MaxExecutionCeiling int64 = 24 * 60 * 365
+
+	// MaxExecutionHistoryPerTask is how many execution records the retention
+	// sweep keeps per task (execution_retention.go). Records had no expiry,
+	// and they are not small: sampled records from a polling workflow were
+	// ~366 KB each. A count rather than an age, because only a count bounds a
+	// fast task: at the block floor 30 days is 43,200 records, ~15 GB at that
+	// size, where 1,000 records stay under ~400 MB.
+	MaxExecutionHistoryPerTask = 1000
 
 	// MaxActiveWorkflowsPerOwner bounds the per-account case that per-task
 	// ceilings structurally cannot reach: N leaked tasks cost N times the
@@ -166,8 +197,8 @@ var limitsCronParser = cron.NewParser(
 var chainBlockTime = map[int64]time.Duration{
 	1:        12 * time.Second,       // Ethereum mainnet
 	11155111: 12 * time.Second,       // Sepolia
-	8453:     2 * time.Second,        // Base
-	84532:    2 * time.Second,        // Base Sepolia
+	8453:     200 * time.Millisecond, // Base (2s until 2026-11-05, block ~53,556,123)
+	84532:    200 * time.Millisecond, // Base Sepolia (moved with Base)
 	56:       750 * time.Millisecond, // BNB Smart Chain (post-Maxwell sub-second blocks)
 	42161:    250 * time.Millisecond, // Arbitrum One (~250ms; under-estimate vs typical 200–300ms)
 	10:       2 * time.Second,        // OP Mainnet (OP-stack, same family as Base)
@@ -249,6 +280,44 @@ func (n *Engine) checkActiveWorkflowQuota(owner string) error {
 			active, MaxActiveWorkflowsPerOwner)
 	}
 	return nil
+}
+
+// blockTriggerGate is the last admitted block trigger of one task, and how
+// many arrived too soon since.
+type blockTriggerGate struct {
+	admittedAt time.Time
+	dropped    int
+}
+
+// admitBlockTrigger reports whether a block trigger for taskID arriving at now
+// is at least MinBlockTriggerGap after the last admitted one, and records it
+// when it is. State is in memory: after a restart the first trigger of each
+// task is admitted, which costs at most one extra run per task.
+func (n *Engine) admitBlockTrigger(taskID string, now time.Time) bool {
+	n.triggerDedupLock.Lock()
+	defer n.triggerDedupLock.Unlock()
+
+	gate, ok := n.blockTriggerGates[taskID]
+	if !ok {
+		n.blockTriggerGates[taskID] = &blockTriggerGate{admittedAt: now}
+		return true
+	}
+	if now.Sub(gate.admittedAt) < MinBlockTriggerGap {
+		gate.dropped++
+		return false
+	}
+	// One line per admitted run of a throttled task, not one per drop: a task
+	// firing every 6s would otherwise log ten times a minute.
+	if gate.dropped > 0 {
+		n.logger.Info("Block trigger fires faster than the floor; dropped the early ones",
+			"task_id", taskID,
+			"dropped", gate.dropped,
+			"since", gate.admittedAt.UTC().Format(time.RFC3339),
+			"floor", MinBlockTriggerInterval)
+	}
+	gate.admittedAt = now
+	gate.dropped = 0
+	return true
 }
 
 // validateTriggerFrequency rejects a trigger that would fire faster than its

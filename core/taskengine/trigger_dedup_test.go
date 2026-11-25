@@ -122,9 +122,11 @@ func TestTriggerRequestIdDedup_DifferentIdsNotDeduplicated(t *testing.T) {
 	assert.NotEqual(t, "deduplicated", state1.Status,
 		"First trigger event should not be deduplicated")
 
+	// payload2 is 3 minutes later; let the block-trigger floor see that.
+	backdateBlockTriggerGate(engine, task.Id)
 	state2, err := engine.AggregateChecksResultWithState(operatorAddr, payload2)
 	require.NoError(t, err)
-	assert.NotEqual(t, "deduplicated", state2.Status,
+	assert.Equal(t, "enabled", state2.Status,
 		"Second trigger event with different ID should not be deduplicated")
 }
 
@@ -163,9 +165,11 @@ func TestTriggerRequestIdDedup_EmptyIdSkipsDedup(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, "deduplicated", state1.Status)
 
-	// Second call also should not be deduplicated when ID is empty
+	// Second call also should not be deduplicated when ID is empty. Arrives
+	// past the block-trigger floor so only dedup is under test.
+	backdateBlockTriggerGate(engine, task.Id)
 	state2, err := engine.AggregateChecksResultWithState(operatorAddr, payload)
 	require.NoError(t, err)
-	assert.NotEqual(t, "deduplicated", state2.Status,
+	assert.Equal(t, "enabled", state2.Status,
 		"Empty trigger_request_id should bypass dedup entirely")
 }
