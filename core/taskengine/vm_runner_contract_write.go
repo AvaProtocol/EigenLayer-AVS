@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -63,7 +64,7 @@ func NewContractWriteProcessor(vm *VM, client ChainStateReader, smartWalletConfi
 		client:            client,
 		smartWalletConfig: smartWalletConfig,
 		owner:             owner,
-		sendUserOpFunc:    preset.SendUserOpAuto, // Default to the real implementation
+		sendUserOpFunc:    sendUserOpAuto,
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
@@ -684,17 +685,13 @@ func (r *ContractWriteProcessor) executeMethodCall(
 // AA factory/entrypoint, resolves the paymaster request and sender/salt overrides from VM vars,
 // runs pre-send diagnostics, sends the pre-packed smart-wallet calldata as ONE UserOp, increments
 // the per-owner tx counter, and maps bundler/AA errors to a concise user-facing message.
-//
-// On send failure it returns a non-empty userErrorMsg (the caller turns it into failed
-// MethodResult(s)). On success it returns the userOp and receipt (receipt may be nil = pending)
-// with an empty userErrorMsg. logLabel/logTarget are used only for log lines.
 func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 	ctx context.Context,
 	smartWalletCallData []byte,
 	logLabel string,
 	logTarget string,
 	executionLogBuilder *strings.Builder,
-) (*preset.SentUserOp, *types.Receipt, string) {
+) (*preset.SentUserOp, *types.Receipt, error) {
 	// The API/executor validates the exact registered runner and salt. The VM
 	// materializes it on this node's network before entering this processor;
 	// comparing every valid non-zero salt against salt 0 is not an ownership check.
@@ -858,6 +855,11 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 				"solution", "Fund the smart wallet with ETH for gas fees")
 		}
 
+		// The signer rechecks authority after preflight. A budget revoked
+		// between these checks must retain its typed refusal.
+		if refusal, ok := IsStructuredError(err); ok {
+			return userOp, receipt, refusal
+		}
 		// Create simplified user-facing error message
 		var userErrorMsg string
 		errLower := strings.ToLower(err.Error())
@@ -902,10 +904,10 @@ func (r *ContractWriteProcessor) submitSmartWalletUserOp(
 			userErrorMsg = "Transaction failed"
 		}
 
-		return userOp, receipt, userErrorMsg
+		return userOp, receipt, errors.New(userErrorMsg)
 	}
 
-	return userOp, receipt, ""
+	return userOp, receipt, nil
 }
 
 func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Context, contractAddress common.Address, callData string, methodName string, parsedABI *abi.ABI, node *avsproto.ContractWriteNode, startTime time.Time) *avsproto.ContractWriteNode_MethodResult {
@@ -1005,16 +1007,14 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Submit the packed calldata as a single UserOp via the shared send path (paymaster + sender/
 	// salt resolution, send, tx-counter increment, bundler/AA error mapping). Shared with the
 	// atomic batch path so both routes have identical send semantics.
-	userOp, receipt, userErrorMsg := r.submitSmartWalletUserOp(ctx, smartWalletCallData, methodName, contractAddress.Hex(), &executionLogBuilder)
-	if userErrorMsg != "" {
-		// Return error result with simplified user message
-		// Detailed execution log is available in server logs for debugging
-		return &avsproto.ContractWriteNode_MethodResult{
-			Success:    false,
-			Error:      userErrorMsg,
-			MethodName: methodName,
-			Receipt:    failedReceiptWithInnerCalls(smartWalletCallData),
+	userOp, receipt, sendErr := r.submitSmartWalletUserOp(ctx, smartWalletCallData, methodName, contractAddress.Hex(), &executionLogBuilder)
+	if sendErr != nil {
+		result := &avsproto.ContractWriteNode_MethodResult{MethodName: methodName, Error: sendErr.Error()}
+		if refusal, ok := IsStructuredError(sendErr); ok {
+			result = contractMethodRefusal(methodName, refusal)
 		}
+		result.Receipt = failedReceiptWithInnerCalls(smartWalletCallData)
+		return result
 	}
 
 	// Add success information to execution log
@@ -1080,8 +1080,11 @@ func (r *ContractWriteProcessor) preflightSessionGrantError(planned []PlannedCal
 		report.observeCalls(planned)
 		report.observeRunCalls(chainID, r.vm.workflowNodeOf(r.GetTaskNode()), planned)
 	}
-	policy, err := ActiveSessionPolicyForWallet(r.vm.db, chainID, r.owner, *sender)
+	policy, err := sessionPolicyForRun(r.vm.db, chainID, r.owner, *sender, report)
 	if err != nil {
+		if _, ok := IsStructuredError(err); ok {
+			return err
+		}
 		// Storage / multi-grant errors should fail closed with a clear message.
 		// Report mode does not swallow a lookup failure.
 		return fmt.Errorf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
@@ -1413,9 +1416,14 @@ func (r *ContractWriteProcessor) executeAtomicBatch(
 
 	var executionLogBuilder strings.Builder
 	executionLogBuilder.WriteString(fmt.Sprintf("Atomic batch UserOp for %d calls (executeBatch)\n", n))
-	userOp, receipt, userErrorMsg := r.submitSmartWalletUserOp(ctx, smartWalletCallData, logLabel, logTarget, &executionLogBuilder)
-	if userErrorMsg != "" {
-		out := failAll(userErrorMsg, nil)
+	userOp, receipt, sendErr := r.submitSmartWalletUserOp(ctx, smartWalletCallData, logLabel, logTarget, &executionLogBuilder)
+	if sendErr != nil {
+		out := failAll(sendErr.Error(), nil)
+		if refusal, ok := IsStructuredError(sendErr); ok {
+			for i := range out {
+				out[i] = contractMethodRefusal(methodNames[i], refusal)
+			}
+		}
 		attachFailedInnerCalls(out, smartWalletCallData)
 		return out
 	}
@@ -2621,7 +2629,7 @@ func isBudgetMethodRefusal(result *avsproto.ContractWriteNode_MethodResult) bool
 		return false
 	}
 	switch result.ErrorCode {
-	case avsproto.ErrorCode_BUDGET_USED_UP, avsproto.ErrorCode_BUDGET_ENDED, avsproto.ErrorCode_BUDGET_CHANGING:
+	case avsproto.ErrorCode_BUDGET_USED_UP, avsproto.ErrorCode_BUDGET_ENDED, avsproto.ErrorCode_BUDGET_CHANGING, avsproto.ErrorCode_BUDGET_REVOKED:
 		return true
 	case avsproto.ErrorCode_RPC_NODE_ERROR:
 		return strings.HasPrefix(result.Error, BudgetReadUnavailableCode+":")

@@ -156,6 +156,10 @@ func NewBudgetEndedError(validUntil int64) *StructuredError {
 		map[string]interface{}{"validUntil": validUntil})
 }
 
+func newBudgetRevokedError() *StructuredError {
+	return NewStructuredError(avsproto.ErrorCode_BUDGET_REVOKED, "The wallet budget was revoked. Set up a new budget to continue.")
+}
+
 // GetErrorCodeForProtobuf extracts error code for protobuf responses
 func GetErrorCodeForProtobuf(err error) avsproto.ErrorCode {
 	return GetErrorCode(err)

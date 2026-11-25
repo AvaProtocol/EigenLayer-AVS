@@ -483,8 +483,11 @@ func (p *ETHTransferProcessor) sessionPolicy() (*model.SessionPolicy, bool, erro
 	if chainID <= 0 {
 		chainID = p.vm.vmDefaultChainID()
 	}
-	policy, err := ActiveSessionPolicyForWallet(p.vm.db, chainID, *p.taskOwner, *sender)
+	policy, err := sessionPolicyForRun(p.vm.db, chainID, *p.taskOwner, *sender, p.vm.sessionGrantReport)
 	if err != nil {
+		if _, ok := IsStructuredError(err); ok {
+			return nil, true, err
+		}
 		return nil, true, fmt.Errorf("SESSION_POLICY_LOOKUP_FAILED: %v", err)
 	}
 	return policy, true, nil

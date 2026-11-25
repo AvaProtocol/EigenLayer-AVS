@@ -1185,7 +1185,12 @@ type ExecutionStep struct {
 	Inputs  *[]string `json:"inputs,omitempty"`
 	Log     *string   `json:"log,omitempty"`
 
-	// Metadata Optional structured metadata for testing/debugging.
+	// Metadata Loop steps with failed iterations may include `iterationFailures`, ordered by
+	// zero-based index in `output.data`. Each entry carries `index`, symbolic `errorCode`,
+	// `error`, and optional `errorDetails`. For `BUDGET_USED_UP`, the details identify the
+	// exhausted budget's token and give `needed` and `remaining` as decimal base-unit strings.
+	// `BUDGET_REVOKED` identifies a revoked wallet budget. A late confirmation removes the
+	// successful index from the list.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 	Name     *string                 `json:"name,omitempty"`
 

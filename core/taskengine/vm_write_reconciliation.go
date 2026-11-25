@@ -241,6 +241,7 @@ func (v *VM) reconcileLoopWrite(ctx context.Context, parent *avsproto.Execution_
 	}
 	outcomes, _ := meta["confirmationOutcomes"].([]interface{})
 	changed, allSuccess := false, true
+	reconciled := make(map[int]*avsproto.Execution_Step)
 	var selected *avsproto.Execution_Step
 	var results []interface{}
 	if data := parent.GetLoop().GetData(); data != nil {
@@ -258,8 +259,14 @@ func (v *VM) reconcileLoopWrite(ctx context.Context, parent *avsproto.Execution_
 			allSuccess = false
 			continue
 		}
+		suffix, isIteration := strings.CutPrefix(iteration.Id, parent.Id+"_iter_")
+		index, indexErr := strconv.Atoi(suffix)
+		validIndex := isIteration && indexErr == nil && index >= 0 && index < len(results)
 		if v.reconcileWriteContext(ctx, iteration) {
 			changed = true
+			if validIndex {
+				reconciled[index] = iteration
+			}
 		}
 		outcome["error"], outcome["errorCode"] = iteration.Error, iteration.ErrorCode.String()
 		outcome["metadata"] = iteration.Metadata.AsInterface()
@@ -269,12 +276,34 @@ func (v *VM) reconcileLoopWrite(ctx context.Context, parent *avsproto.Execution_
 			if selected == nil || iteration.ErrorCode == avsproto.ErrorCode_USER_OP_CONFIRMATION_UNRESOLVED {
 				selected = iteration
 			}
-		} else if index, err := strconv.Atoi(strings.TrimPrefix(iteration.Id, parent.Id+"_iter_")); err == nil && index >= 0 && index < len(results) {
+		} else if validIndex {
 			results[index] = (&ExecutionQueue{}).extractResultData(iteration)
 		}
 	}
 	if !changed {
 		return false
+	}
+	// Older checkpoints have only confirmationOutcomes. Update the published
+	// failures when present, retaining unrelated entries and their order.
+	if failures, ok := meta["iterationFailures"].([]any); ok {
+		remaining := failures[:0]
+		for _, raw := range failures {
+			failure, _ := raw.(map[string]any)
+			index, ok := failure["index"].(float64) // structpb numbers
+			step := reconciled[int(index)]
+			if !ok || index != float64(int(index)) || step == nil {
+				remaining = append(remaining, raw)
+				continue
+			}
+			if !step.Success {
+				remaining = append(remaining, loopIterationFailure(int(index), step, nil))
+			}
+		}
+		if len(remaining) == 0 {
+			delete(meta, "iterationFailures")
+		} else {
+			meta["iterationFailures"] = remaining
+		}
 	}
 	if selected != nil {
 		parent.Error = fmt.Sprintf("Loop iteration %s: %s", selected.Id, selected.Error)

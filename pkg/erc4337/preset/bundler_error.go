@@ -1,12 +1,14 @@
 package preset
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 // sessionERC20OnchainCapExceeded counts AllowlistModule ExceededTokenLimit
@@ -54,7 +56,7 @@ func IsUserOpRevert(err error) bool {
 // debugging; Error is reserved for true infra (bundler down, RPC, unexpected
 // panic paths).
 //
-// Classification is substring-based because these errors are already
+// Legacy classification is substring-based because these errors are already
 // fmt.Errorf-wrapped at several layers (send_v07, RequestSponsorshipV07,
 // LogBundlerError callers). Prefer adding a new marker constant here when
 // introducing a new client-facing failure class.
@@ -73,6 +75,12 @@ func IsUserOpRevert(err error) bool {
 func IsClientUserOpFailure(err error) bool {
 	if err == nil {
 		return false
+	}
+	// A revoke after preflight is an owner action. The resolver preserves
+	// its code through the send wrappers even when the message changes.
+	var refusal interface{ GetCode() avsproto.ErrorCode }
+	if errors.As(err, &refusal) && refusal.GetCode() == avsproto.ErrorCode_BUDGET_REVOKED {
+		return true
 	}
 	s := err.Error()
 	switch {
