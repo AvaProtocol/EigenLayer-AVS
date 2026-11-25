@@ -123,22 +123,60 @@ func TestPruneExecutionHistoryKeepsRecordWhenLookupFails(t *testing.T) {
 	}
 }
 
-// A cancelled sweep stops before deleting: Stop() cancels it ahead of the
-// aggregator closing the DB.
-func TestPruneExecutionHistoryStopsWhenCancelled(t *testing.T) {
-	db := testutil.TestMustDB()
-	defer storage.Destroy(db.(*storage.BadgerStorage))
+// cancellingScanStorage cancels a context after the first key of one key
+// scan (1 = counting pass, 2 = selection pass) and records how many keys each
+// scan visited.
+type cancellingScanStorage struct {
+	storage.Storage
+	cancel     context.CancelFunc
+	cancelScan int
+	visited    []int
+}
 
-	task := &model.Workflow{Task: &avsproto.Task{Id: model.GenerateID()}}
-	ids := writeExecutions(t, db, task, 4)
+func (s *cancellingScanStorage) IterateKeysOnly(prefix []byte, visit func(key []byte) error) error {
+	s.visited = append(s.visited, 0)
+	scan := len(s.visited)
+	return s.Storage.IterateKeysOnly(prefix, func(key []byte) error {
+		s.visited[scan-1]++
+		err := visit(key)
+		if scan == s.cancelScan && s.visited[scan-1] == 1 {
+			s.cancel()
+		}
+		return err
+	})
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	deleted, err := pruneExecutionHistory(ctx, db, 1, 100)
-	assert.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, 0, deleted)
-	for i, id := range ids {
-		assert.True(t, existsKey(db, TaskExecutionKey(task, id)), "record %d", i)
+// Cancelled mid-scan, either pass stops at its next key and nothing is
+// deleted: Stop() waits for the sweep before the aggregator closes the DB, so
+// a scan that ran to the end would hold up shutdown for a full keyspace walk.
+func TestPruneExecutionHistoryStopsWhenCancelledMidScan(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		scan int
+	}{
+		{"counting pass", 1},
+		{"selection pass", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.TestMustDB()
+			defer storage.Destroy(db.(*storage.BadgerStorage))
+
+			task := &model.Workflow{Task: &avsproto.Task{Id: model.GenerateID()}}
+			ids := writeExecutions(t, db, task, 10)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			wrapped := &cancellingScanStorage{Storage: db, cancel: cancel, cancelScan: tc.scan}
+
+			deleted, err := pruneExecutionHistory(ctx, wrapped, 1, 100)
+			assert.ErrorIs(t, err, context.Canceled)
+			assert.Equal(t, 0, deleted)
+			assert.Len(t, wrapped.visited, tc.scan, "no scan should start after the cancelled one")
+			assert.Equal(t, 2, wrapped.visited[tc.scan-1], "the cancelled scan should stop at its next key")
+			for i, id := range ids {
+				assert.True(t, existsKey(db, TaskExecutionKey(task, id)), "record %d", i)
+			}
+		})
 	}
 }
 
