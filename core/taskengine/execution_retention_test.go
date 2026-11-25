@@ -10,6 +10,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	badger "github.com/dgraph-io/badger/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -175,6 +176,50 @@ func TestPruneExecutionHistoryStopsWhenCancelledMidScan(t *testing.T) {
 			assert.Equal(t, 2, wrapped.visited[tc.scan-1], "the cancelled scan should stop at its next key")
 			for i, id := range ids {
 				assert.True(t, existsKey(db, TaskExecutionKey(task, id)), "record %d", i)
+			}
+		})
+	}
+}
+
+// vacuumErrorStorage fails every Vacuum with err and counts the calls.
+type vacuumErrorStorage struct {
+	storage.Storage
+	err   error
+	calls *int
+}
+
+func (s vacuumErrorStorage) Vacuum() error {
+	*s.calls++
+	return s.err
+}
+
+// A GC failure is logged, but Badger's "nothing to rewrite" and "GC already
+// running" answers are not: they are the normal end of a sweep's GC rounds.
+func TestSweepExecutionHistoryLogsVacuumFailure(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	cases := []struct {
+		name   string
+		err    error
+		logged bool
+	}{
+		{"nothing to rewrite", badger.ErrNoRewrite, false},
+		{"another GC running", badger.ErrRejected, false},
+		{"real failure", errors.New("input/output error"), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			calls := 0
+			logger := &warnCapturingLogger{}
+			engine := New(vacuumErrorStorage{db, c.err, &calls}, testutil.GetAggregatorConfig(), nil, logger)
+			engine.sweepExecutionHistory(context.Background())
+
+			assert.Equal(t, 1, calls, "GC stops after the first error")
+			if c.logged {
+				assert.Contains(t, logger.warns, "Value log GC failed")
+			} else {
+				assert.NotContains(t, logger.warns, "Value log GC failed")
 			}
 		})
 	}
