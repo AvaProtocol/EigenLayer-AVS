@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/rest/mapping"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -25,6 +26,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// Price a send above JavaScript's safe integer range in the REST and report fixtures.
+const sweepGasTipWei = 10_000_000_001
 
 // Serve the production allowance and fee reads. A nil token remainder
 // represents an unreadable allowance, distinct from a successful read of zero.
@@ -49,7 +53,8 @@ func (s *sweepBudgetRPC) Call(call struct {
 	}
 	return common.LeftPadBytes(left.Bytes(), 32), nil
 }
-func (*sweepBudgetRPC) MaxPriorityFeePerGas() hexutil.Uint64 { return 1 }
+
+func (*sweepBudgetRPC) MaxPriorityFeePerGas() hexutil.Uint64 { return sweepGasTipWei }
 func (*sweepBudgetRPC) GetBlockByNumber(string, bool) *types.Header {
 	return &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(0), BaseFee: big.NewInt(0)}
 }
@@ -127,10 +132,13 @@ func TestSweepPublishesIterationFailures(t *testing.T) {
 	tokens := []common.Address{common.HexToAddress("0x11"), common.HexToAddress("0x22"), common.HexToAddress("0x33")}
 	const amount = "10000000000000001"
 	const remaining = "10000000000000000"
-	for _, scenario := range []string{"token cap", "gas cap and unreadable token", "revoked budget", "revoked at signing"} {
+	for _, scenario := range []string{"token cap", "gas cap and unreadable token", "expired replacement", "revoked budget", "revoked at signing"} {
 		t.Run(scenario, func(t *testing.T) {
-			policy := spPolicy("budget", spWallet, 1, model.SessionPolicyActive)
-			policy.Sizing, policy.ChainID, policy.Grant.AppliedAt = model.BudgetSizingBudget, skillSepolia, 1
+			policy := spPolicy("02-budget", spWallet, 2, model.SessionPolicyActive)
+			policy.Sizing, policy.ChainID, policy.Grant.AppliedAt = model.BudgetSizingBudget, skillSepolia, 2
+			if scenario == "expired replacement" {
+				policy.ValidUntil = time.Now().Add(-time.Hour).UnixMilli()
+			}
 			chain := &sweepBudgetRPC{tokens: map[common.Address]*big.Int{}}
 			for _, token := range tokens {
 				policy.AllowedActions = append(policy.AllowedActions, model.AllowedAction{Target: &token, Selectors: []string{selectorTransfer}})
@@ -139,11 +147,14 @@ func TestSweepPublishesIterationFailures(t *testing.T) {
 			}
 			chain.tokens[tokens[1]], _ = new(big.Int).SetString(remaining, 10)
 			if scenario == "gas cap and unreadable token" {
-				policy.NativeSpendCap = &model.NativeSpendCap{Amount: "1"}
-				chain.native, chain.tokens[tokens[1]] = big.NewInt(1), nil
+				chain.native, chain.tokens[tokens[1]] = big.NewInt(10_000_000_000_000_001), nil
+				policy.NativeSpendCap = &model.NativeSpendCap{Amount: chain.native.String()}
 			}
 			db := testutil.TestMustDB()
 			t.Cleanup(func() { storage.Destroy(db.(*storage.BadgerStorage)) })
+			previousBudget := spPolicy("01-budget", spWallet, 1, model.SessionPolicyRevoked)
+			previousBudget.Sizing, previousBudget.Grant.AppliedAt = model.BudgetSizingBudget, 1
+			require.NoError(t, StoreSessionPolicy(db, previousBudget))
 			require.NoError(t, StoreSessionPolicy(db, policy))
 			if scenario == "revoked budget" {
 				_, _, err := RevokeSessionGrant(db, policy)
@@ -208,6 +219,9 @@ func TestSweepPublishesIterationFailures(t *testing.T) {
 				require.EqualValues(t, i, failure["index"])
 				require.NotEmpty(t, failure["error"])
 				switch {
+				case scenario == "expired replacement":
+					require.Equal(t, "BUDGET_ENDED", failure["errorCode"])
+					require.Equal(t, map[string]any{"validUntil": float64(policy.ValidUntil)}, failure["errorDetails"])
 				case scenario == "revoked budget" || scenario == "revoked at signing":
 					require.Equal(t, "BUDGET_REVOKED", failure["errorCode"])
 				case i == 1:
@@ -215,7 +229,9 @@ func TestSweepPublishesIterationFailures(t *testing.T) {
 					require.Contains(t, failure["error"], BudgetReadUnavailableCode)
 				default:
 					require.Equal(t, "BUDGET_USED_UP", failure["errorCode"])
-					require.Equal(t, map[string]any{"token": budgetNativeToken.Hex(), "needed": big.NewInt(nativePreflightGasUnitsFor(NativeValue, policy)).String(), "remaining": "1"}, failure["errorDetails"])
+					gasUnits := big.NewInt(nativePreflightGasUnitsFor(NativeValue, policy))
+					needed := new(big.Int).Mul(gasUnits, big.NewInt(sweepGasTipWei))
+					require.Equal(t, map[string]any{"token": budgetNativeToken.Hex(), "needed": needed.String(), "remaining": chain.native.String()}, failure["errorDetails"])
 				}
 			}
 		})
@@ -288,6 +304,10 @@ func TestRevokedBudgetResolverAndReplacement(t *testing.T) {
 	replacement := spPolicy("02-installed", spWallet, 2, model.SessionPolicyActive)
 	replacement.Sizing, replacement.Grant.AppliedAt = model.BudgetSizingBudget, 2
 	require.NoError(t, StoreSessionPolicy(db, replacement))
+	// A later revoked grant on another entity cannot displace this usable one.
+	retired := spPolicy("04-retired", spWallet, 4, model.SessionPolicyRevoked)
+	retired.Sizing, retired.Grant.AppliedAt = model.BudgetSizingBudget, 4
+	require.NoError(t, StoreSessionPolicy(db, retired))
 	auth, err = resolve(spChain, spOwner, spWallet)
 	require.NoError(t, err)
 	require.NotNil(t, auth)
@@ -317,8 +337,10 @@ func TestLoopIterationFailureAfterLateReceipt(t *testing.T) {
 			require.False(t, parent.Success)
 			failures := metadata["iterationFailures"].([]any)
 			require.Len(t, failures, 1)
-			require.Equal(t, "USER_OP_EXECUTION_REVERTED", failures[0].(map[string]any)["errorCode"])
-			require.Equal(t, float64(0), failures[0].(map[string]any)["index"])
+			failure := failures[0].(map[string]any)
+			require.Equal(t, "USER_OP_EXECUTION_REVERTED", failure["errorCode"])
+			require.Equal(t, "UserOperation execution reverted after confirmation", failure["error"])
+			require.Equal(t, float64(0), failure["index"])
 		})
 	}
 }
