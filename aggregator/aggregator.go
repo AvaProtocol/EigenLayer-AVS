@@ -83,6 +83,9 @@ type Aggregator struct {
 	config *config.Config
 	db     storage.Storage
 
+	// flatten gates the REPL `flatten` command against shutdown (repl.go).
+	flatten flattenGate
+
 	ethRpcClient *ethclient.Client
 	chainID      *big.Int
 

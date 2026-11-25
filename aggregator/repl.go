@@ -3,6 +3,7 @@ package aggregator
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -10,17 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 var (
 	repListener net.Listener
-
-	// flattenRunning admits one REPL flatten at a time; flattenWG lets
-	// shutdown wait for it, since closing Badger mid-compaction is unsafe.
-	flattenRunning atomic.Bool
-	flattenWG      sync.WaitGroup
 )
 
 // flattenWorkers is 1: each worker holds one compaction's output on disk
@@ -28,17 +23,47 @@ var (
 // a flatten is needed. It also keeps the I/O off the live gateway's path.
 const flattenWorkers = 1
 
-// startFlatten runs storage Flatten in the background and reports whether it
-// started. A full compaction of a large DB takes many minutes, longer than a
-// REPL session over `railway ssh` should be held open.
-func (agg *Aggregator) startFlatten() bool {
-	if !flattenRunning.CompareAndSwap(false, true) {
-		return false
+var (
+	errFlattenRunning      = errors.New("flatten is already running; watch the gateway log")
+	errFlattenShuttingDown = errors.New("gateway is shutting down; flatten not started")
+)
+
+// flattenGate admits one REPL flatten at a time and lets shutdown wait for it,
+// since closing Badger mid-compaction is unsafe. Admission and shutdown share
+// one mutex: a REPL connection accepted before stopRepl stays open, so without
+// it a flatten could register after shutdown's Wait had already seen none.
+type flattenGate struct {
+	mu      sync.Mutex
+	running bool
+	closed  bool
+	wg      sync.WaitGroup
+}
+
+// startFlatten runs storage Flatten in the background. A full compaction of a
+// large DB takes many minutes, longer than a REPL session over `railway ssh`
+// should be held open.
+func (agg *Aggregator) startFlatten() error {
+	g := &agg.flatten
+	g.mu.Lock()
+	if g.closed {
+		g.mu.Unlock()
+		return errFlattenShuttingDown
 	}
-	flattenWG.Add(1)
+	if g.running {
+		g.mu.Unlock()
+		return errFlattenRunning
+	}
+	g.running = true
+	g.wg.Add(1)
+	g.mu.Unlock()
+
 	go func() {
-		defer flattenWG.Done()
-		defer flattenRunning.Store(false)
+		defer g.wg.Done()
+		defer func() {
+			g.mu.Lock()
+			g.running = false
+			g.mu.Unlock()
+		}()
 		start := time.Now()
 		agg.logger.Info("Flatten started", "workers", flattenWorkers)
 		if err := agg.db.Flatten(flattenWorkers); err != nil {
@@ -47,21 +72,33 @@ func (agg *Aggregator) startFlatten() bool {
 		}
 		agg.logger.Info("Flatten finished", "duration", time.Since(start).String())
 	}()
-	return true
+	return nil
 }
 
-// waitForFlatten blocks until a running flatten finishes. If shutdown's grace
-// period runs out first, the process is killed mid-compaction, which Badger
-// recovers from at the next open like any crash; closing the DB under it is
-// what must not happen.
+// closeFlatten stops admitting flattens and reports whether one is running.
+func (agg *Aggregator) closeFlatten() bool {
+	g := &agg.flatten
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.closed = true
+	return g.running
+}
+
+// waitForFlatten closes admission, then blocks until a running flatten
+// finishes. If shutdown's grace period runs out first, the process is killed
+// mid-compaction, which Badger recovers from at the next open like any crash;
+// closing the DB under it is what must not happen.
 func (agg *Aggregator) waitForFlatten() {
-	if flattenRunning.Load() {
+	if agg.closeFlatten() {
 		agg.logger.Info("Waiting for flatten to finish before closing the DB")
 	}
-	flattenWG.Wait()
+	agg.flatten.wg.Wait()
 }
 
 func (agg *Aggregator) stopRepl() {
+	// Connections already accepted outlive the listener; no flatten may start
+	// from one once shutdown has begun.
+	agg.closeFlatten()
 	if repListener != nil {
 		repListener.Close()
 	}
@@ -189,10 +226,10 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 			}
 
 		case "flatten":
-			if agg.startFlatten() {
-				fmt.Fprintln(conn, "flatten started in the background; watch the gateway log for \"Flatten finished\"")
+			if err := agg.startFlatten(); err != nil {
+				fmt.Fprintln(conn, err.Error())
 			} else {
-				fmt.Fprintln(conn, "flatten is already running; watch the gateway log")
+				fmt.Fprintln(conn, "flatten started in the background; watch the gateway log for \"Flatten finished\"")
 			}
 
 		case "exit":
