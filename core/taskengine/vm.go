@@ -5199,10 +5199,32 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			v.iterationWrites.Delete(fmt.Sprintf("%s_iter_%d", stepID, i))
 		}
 	}()
-	iterationSteps := make([]*avsproto.Execution_Step, 0, len(inputArray)) // Collect iteration steps for gas aggregation
+	iterationSteps := make([]*avsproto.Execution_Step, len(inputArray))
+	iterationErrors := make([]error, len(inputArray))
 	success := true
 	infraFailure := false
 	var firstError error
+
+	collect := func(i int, ch <-chan *ExecutionResult, cancel context.CancelFunc) {
+		result, timedOut := v.waitForLoopIterationResult(fmt.Sprintf("%s_iter_%d", stepID, i), ch, iterationTimeout)
+		cancel()
+		iterationSteps[i] = result.Step
+		switch {
+		case timedOut:
+			success = false
+			infraFailure = true
+			iterationErrors[i] = fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
+			log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
+		case result.Error != nil:
+			iterationErrors[i] = result.Error
+			log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", i, result.Error))
+		default:
+			results[i] = result.Data
+		}
+		if firstError == nil {
+			firstError = iterationErrors[i]
+		}
+	}
 
 	if concurrent {
 		log.WriteString(fmt.Sprintf("\nExecuting loop iterations in %s with %d workers", executionModeLog, workers))
@@ -5263,6 +5285,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				if err := eq.Submit(task); err != nil {
 					cancel()
 					cancels[iterationIndex] = nil
+					iterationErrors[iterationIndex] = err
 					log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", iterationIndex, err.Error()))
 					success = false
 					infraFailure = true
@@ -5275,37 +5298,8 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 
 		// Collect results
 		for i, resultChannel := range resultChannels {
-			result, timedOut := v.waitForLoopIterationResult(fmt.Sprintf("%s_iter_%d", stepID, i), resultChannel, iterationTimeout)
 			if cancels[i] != nil {
-				cancels[i]()
-			}
-			if !timedOut {
-				if result.Error != nil {
-					if firstError == nil {
-						firstError = result.Error
-					}
-					log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", i, result.Error.Error()))
-					// Per-iteration runner failure: leave results[i] = nil as a
-					// partial-success placeholder. Do NOT mark the loop as failed —
-					// the per-iteration outcome is reflected in the data array.
-				} else {
-					results[i] = result.Data
-				}
-			} else {
-				success = false
-				infraFailure = true
-				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
-				if firstError == nil {
-					firstError = err
-				}
-				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
-				// Do NOT close the channel here — the worker goroutine may still
-				// send to it. The buffered channel will be GC'd once both sides
-				// drop their references. Cancelling the iteration ctx stops
-				// retry backoffs so the worker can pick up later iterations.
-			}
-			if result.Step != nil {
-				iterationSteps = append(iterationSteps, result.Step)
+				collect(i, resultChannel, cancels[i])
 			}
 		}
 	} else {
@@ -5336,6 +5330,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 			}
 
 			if err := eq.Submit(task); err != nil {
+				iterationErrors[i] = err
 				cancel()
 				success = false
 				infraFailure = true
@@ -5346,36 +5341,7 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 				continue
 			}
 
-			// Wait for result
-			result, timedOut := v.waitForLoopIterationResult(iterationStepID, resultChannel, iterationTimeout)
-			cancel()
-			if !timedOut {
-				if result.Error != nil {
-					if firstError == nil {
-						firstError = result.Error
-					}
-					log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", i, result.Error.Error()))
-					// Per-iteration runner failure: leave results[i] = nil as a
-					// partial-success placeholder. Do NOT mark the loop as failed.
-				} else {
-					results[i] = result.Data
-				}
-			} else {
-				success = false
-				infraFailure = true
-				err := fmt.Errorf("iteration %d timed out after %s", i, iterationTimeout)
-				if firstError == nil {
-					firstError = err
-				}
-				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
-				// Do NOT close the channel here — the worker goroutine may still
-				// send to it. The buffered channel will be GC'd once both sides
-				// drop their references. Cancelling the iteration ctx stops
-				// retry backoffs so the single worker can pick up the next item.
-			}
-			if result.Step != nil {
-				iterationSteps = append(iterationSteps, result.Step)
-			}
+			collect(i, resultChannel, cancel)
 		}
 	}
 
@@ -5413,24 +5379,27 @@ func (v *VM) executeLoopWithQueue(stepID string, taskNode *avsproto.TaskNode, no
 		Loop: loopOutput,
 	}
 
+	// Keep the existing null placeholders (#511). The parent carries a sparse,
+	// ordered list because the child steps are not published independently.
+	var failures []any
+	for i, result := range results {
+		if result == nil {
+			failures = append(failures, loopIterationFailure(i, iterationSteps[i], iterationErrors[i]))
+		}
+	}
+	iterationFailCount := len(failures)
+	if iterationFailCount > 0 {
+		metadata := loopMetadata(s)
+		metadata["iterationFailures"] = failures
+		s.Metadata, _ = structpb.NewValue(metadata)
+	}
+
 	// Only treat infrastructure failures (queue submit errors, iteration timeouts)
 	// as a hard step failure.
 	if infraFailure && firstError != nil {
 		finalizeStep(s, false, nil, firstError.Error(), log.String())
 		propagateLoopConfirmationFailure(s, iterationSteps)
 		return s, firstError
-	}
-
-	// Count successful vs failed iterations to determine step status.
-	// Per-iteration runner errors (e.g. a contract call reverting) are reflected
-	// as nil entries in the results array. The loop ran to completion, so we
-	// always preserve OutputData for the client to inspect partial results.
-	// See AvaProtocol/EigenLayer-AVS#511.
-	iterationFailCount := 0
-	for _, result := range results {
-		if result == nil {
-			iterationFailCount++
-		}
 	}
 
 	if iterationFailCount > 0 {

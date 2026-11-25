@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -290,6 +291,10 @@ func activeSessionPolicyLocked(db storage.Storage, chainID int64, owner, wallet 
 	if err != nil {
 		return nil, err
 	}
+	return usableRunnerPolicy(policies, wallet)
+}
+
+func usableRunnerPolicy(policies []*model.SessionPolicy, wallet common.Address) (*model.SessionPolicy, error) {
 	var found *model.SessionPolicy
 	for _, p := range policies {
 		if p.Runner == nil || *p.Runner != wallet || !p.Usable() {
@@ -314,6 +319,10 @@ func latestRunnerSessionPolicyLocked(db storage.Storage, chainID int64, owner, w
 	if err != nil {
 		return nil, err
 	}
+	return latestRunnerPolicy(policies, wallet), nil
+}
+
+func latestRunnerPolicy(policies []*model.SessionPolicy, wallet common.Address) *model.SessionPolicy {
 	var latest *model.SessionPolicy
 	for _, p := range policies {
 		if p == nil || p.ID == "" || p.Runner == nil || *p.Runner != wallet {
@@ -323,7 +332,31 @@ func latestRunnerSessionPolicyLocked(db storage.Storage, chainID int64, owner, w
 			latest = p
 		}
 	}
-	return latest, nil
+	return latest
+}
+
+// Look at the current grant and its history under the same authority lock.
+// Discovery still treats a revoked budget as an opportunity to set up a new one.
+func sessionPolicyForRun(db storage.Storage, chainID int64, owner, wallet common.Address, report *SessionGrantReport) (*model.SessionPolicy, error) {
+	lock := sessionAuthorityLock(chainID, owner, wallet)
+	lock.RLock()
+	defer lock.RUnlock()
+	policies, err := ListSessionPolicies(db, chainID, owner)
+	if err != nil {
+		return nil, err
+	}
+	policy, err := usableRunnerPolicy(policies, wallet)
+	if err != nil || policy != nil || report != nil {
+		return policy, err
+	}
+	// A canceled or reverted budget proposal is stored as revoked but never
+	// authorized the wallet. It cannot explain a send refusal.
+	policies = slices.DeleteFunc(policies, func(p *model.SessionPolicy) bool { return p.AwaitingBudgetActivation })
+	latest := latestRunnerPolicy(policies, wallet)
+	if isWalletBudget(latest) && latest.Status == model.SessionPolicyRevoked {
+		return nil, newBudgetRevokedError()
+	}
+	return nil, nil
 }
 
 // priorDelegatedMergeOption carries acknowledgements from the newest stored
@@ -738,7 +771,7 @@ func newSessionResolver(
 	verifyWindow WindowVerifier,
 ) preset.SessionResolver {
 	return func(chainID int64, owner, wallet common.Address) (*preset.SessionAuthorization, error) {
-		policy, err := ActiveSessionPolicyForWallet(db, chainID, owner, wallet)
+		policy, err := sessionPolicyForRun(db, chainID, owner, wallet, nil)
 		if err != nil {
 			return nil, err
 		}

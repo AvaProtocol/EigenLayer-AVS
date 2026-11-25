@@ -362,6 +362,7 @@ const (
 	ErrorCode_BUDGET_USED_UP                  ErrorCode = 4010 // error_details: token, needed, remaining
 	ErrorCode_BUDGET_CHANGING                 ErrorCode = 4012 // Wallet/chain paused for an owner budget change
 	ErrorCode_BUDGET_ENDED                    ErrorCode = 4011 // error_details: validUntil (unix milliseconds)
+	ErrorCode_BUDGET_REVOKED                  ErrorCode = 4013 // The runner's wallet budget was revoked
 	// 5000-5999: External Service errors
 	ErrorCode_RPC_NODE_ERROR     ErrorCode = 5000 // Blockchain RPC node error
 	ErrorCode_TENDERLY_API_ERROR ErrorCode = 5001 // Tenderly simulation error
@@ -418,6 +419,7 @@ var (
 		4010: "BUDGET_USED_UP",
 		4012: "BUDGET_CHANGING",
 		4011: "BUDGET_ENDED",
+		4013: "BUDGET_REVOKED",
 		5000: "RPC_NODE_ERROR",
 		5001: "TENDERLY_API_ERROR",
 		5002: "TOKEN_LOOKUP_ERROR",
@@ -467,6 +469,7 @@ var (
 		"BUDGET_USED_UP":                  4010,
 		"BUDGET_CHANGING":                 4012,
 		"BUDGET_ENDED":                    4011,
+		"BUDGET_REVOKED":                  4013,
 		"RPC_NODE_ERROR":                  5000,
 		"TENDERLY_API_ERROR":              5001,
 		"TOKEN_LOOKUP_ERROR":              5002,
@@ -11087,7 +11090,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fLANG_JAVASCRIPT\x10\x01\x12\r\n" +
 	"\tLANG_JSON\x10\x02\x12\x10\n" +
 	"\fLANG_GRAPHQL\x10\x03\x12\x13\n" +
-	"\x0fLANG_HANDLEBARS\x10\x04*\xd2\t\n" +
+	"\x0fLANG_HANDLEBARS\x10\x04*\xe7\t\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\fUNAUTHORIZED\x10\xe8\a\x12\x0e\n" +
@@ -11119,6 +11122,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x0eBUDGET_USED_UP\x10\xaa\x1f\x12\x14\n" +
 	"\x0fBUDGET_CHANGING\x10\xac\x1f\x12\x11\n" +
 	"\fBUDGET_ENDED\x10\xab\x1f\x12\x13\n" +
+	"\x0eBUDGET_REVOKED\x10\xad\x1f\x12\x13\n" +
 	"\x0eRPC_NODE_ERROR\x10\x88'\x12\x17\n" +
 	"\x12TENDERLY_API_ERROR\x10\x89'\x12\x17\n" +
 	"\x12TOKEN_LOOKUP_ERROR\x10\x8a'\x12\x15\n" +
