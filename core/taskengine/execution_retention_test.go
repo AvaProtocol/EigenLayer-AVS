@@ -63,6 +63,33 @@ func TestPruneExecutionHistory(t *testing.T) {
 	assert.Equal(t, 0, deleted)
 }
 
+// Protected records do not count toward a sweep's limit. Otherwise old
+// in-flight records at the front of the keyspace would fill every sweep and
+// no task after them would ever be pruned.
+func TestPruneExecutionHistorySkipsProtectedWithoutSpendingLimit(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	// Task ids are ULIDs too, so stuck sorts before later.
+	stuck := &model.Workflow{Task: &avsproto.Task{Id: model.GenerateID()}}
+	later := &model.Workflow{Task: &avsproto.Task{Id: model.GenerateID()}}
+	stuckIDs := writeExecutions(t, db, stuck, 5)
+	laterIDs := writeExecutions(t, db, later, 5)
+	for _, id := range stuckIDs {
+		require.NoError(t, db.Set(PendingExecutionKey(stuck, id), []byte("0")))
+	}
+
+	deleted, err := pruneExecutionHistory(context.Background(), db, 1, 2)
+	require.NoError(t, err)
+	assert.Equal(t, 2, deleted)
+	for i, id := range laterIDs {
+		assert.Equal(t, i >= 2, existsKey(db, TaskExecutionKey(later, id)), "later record %d", i)
+	}
+	for _, id := range stuckIDs {
+		assert.True(t, existsKey(db, TaskExecutionKey(stuck, id)), "in-flight records are kept")
+	}
+}
+
 // A backlog drains over several sweeps, oldest first.
 func TestPruneExecutionHistoryStopsAtLimit(t *testing.T) {
 	db := testutil.TestMustDB()

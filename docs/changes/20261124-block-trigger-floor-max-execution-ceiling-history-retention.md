@@ -17,7 +17,7 @@ Most of the growth came from one Base block-trigger workflow whose execution rec
 
 ## Decision
 
-**Block-trigger floor at runtime** (`limits.go` `admitBlockTrigger`, called from `AggregateChecksResultWithState`). For a task whose stored trigger is a block trigger, a notification that arrives less than `MinBlockTriggerGap` (60s floor minus 6s for delivery jitter) after the last admitted one is dropped. The response is `rate_limited` with `TaskStillEnabled = true` and a positive `RemainingExecutions`, so the operator keeps monitoring. The gate is keyed on the stored trigger, not on `payload.TriggerType`, which the operator sets. State is in memory; after a restart each task's first trigger is admitted. Throttled tasks log one Info line per admitted run with the number dropped since the previous one.
+**Block-trigger floor at runtime** (`limits.go` `admitBlockTrigger`, called from `AggregateChecksResultWithState`). For a task whose stored trigger is a block trigger, a notification that arrives less than `MinBlockTriggerGap` (60s floor minus 6s for delivery jitter) after the last admitted one is dropped. The response is `rate_limited` with `TaskStillEnabled = true` and a positive `RemainingExecutions`, so the operator keeps monitoring. The gate is keyed on the stored trigger, not on `payload.TriggerType`, which the operator sets. A notification arriving while the task has a pending execution (a non-blocking `TriggerWorkflow`, whose operator notification is sent once) is always admitted, and the next scheduled trigger is measured from it. State is in memory; after a restart each task's first trigger is admitted. Throttled tasks log one Info line per admitted run with the number dropped since the previous one.
 
 This holds every block task to about one run a minute, whatever the block-time table says, including tasks created before the floor existed (2026-07-28). Cron is unaffected: its rate comes from the expression, so it cannot drift.
 
@@ -28,7 +28,7 @@ This holds every block task to about one run a minute, whatever the block-time t
 **Execution history retention** (`execution_retention.go`). An hourly sweep (first run 10 minutes after start, every mode) keeps the newest `MaxExecutionHistoryPerTask` = 1,000 records per task and deletes the rest:
 
 - Execution ids are ULIDs, so key order under a task's prefix is creation order. Both passes iterate keys only: pass 1 counts records per task, and pass 2 takes the first `count - 1000` of each over-cap task.
-- A record is kept if its execution is still in flight: a `pending:` key, a durable `wake:` subscription, or a `ckpt:` checkpoint.
+- A record is kept if its execution is still in flight: a `pending:` key, a durable `wake:` subscription, or a `ckpt:` checkpoint. Kept records do not count toward the sweep's delete limit, so they cannot fill a sweep and stall pruning of the tasks after them.
 - A pruned run's `trigger:` status key is deleted too; otherwise `GetExecutionStatus` would fall back to it and report the run as PENDING.
 - At most 50,000 deletes per sweep, in transactions of 1,000, so a backlog drains over a few hours rather than in one burst.
 - Each sweep then runs value-log GC (`Vacuum`, up to 10 rounds). A delete only writes a tombstone; disk is reclaimed when GC rewrites the value-log files.
@@ -50,7 +50,7 @@ This holds every block task to about one run a minute, whatever the block-time t
 
 ## Verification
 
-- Unit tests: `TestAdmitBlockTrigger` (6s dropped, gap boundary, jitter at the floor, per-task), `TestAggregateChecksResultDropsEarlyBlockTrigger` (rate_limited keeps the operator monitoring), `TestCreateWorkflowRejectsMaxExecutionAboveCeiling`, `TestValidateTriggerFrequencyBlock` and `TestBlockTimeForChain` (Base 30 blocks rejected, 300 accepted), `TestPruneExecutionHistory` (cap, in-flight kept, trigger key removed, non-record keys ignored), `TestPruneExecutionHistoryStopsAtLimit`.
+- Unit tests: `TestAdmitBlockTrigger` (6s dropped, gap boundary, jitter at the floor, per-task, forced admission), `TestAggregateChecksResultDropsEarlyBlockTrigger` (rate_limited keeps the operator monitoring; a pending manual run is admitted inside the gap), `TestCreateWorkflowRejectsMaxExecutionAboveCeiling`, `TestValidateTriggerFrequencyBlock` and `TestBlockTimeForChain` (Base 30 blocks rejected, 300 accepted), `TestPruneExecutionHistory` (cap, in-flight kept, trigger key removed, non-record keys ignored), `TestPruneExecutionHistorySkipsProtectedWithoutSpendingLimit`, `TestPruneExecutionHistoryStopsAtLimit`.
 - The dedup tests that send two block notifications in quick succession now backdate the gate, so they still test dedup alone.
 - `go run scripts/compare_storage_structure.go origin/staging`: no storage key or model changes.
 - After deploy, watch the gateway logs:

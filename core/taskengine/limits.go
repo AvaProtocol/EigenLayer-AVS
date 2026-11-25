@@ -291,9 +291,11 @@ type blockTriggerGate struct {
 
 // admitBlockTrigger reports whether a block trigger for taskID arriving at now
 // is at least MinBlockTriggerGap after the last admitted one, and records it
-// when it is. State is in memory: after a restart the first trigger of each
-// task is admitted, which costs at most one extra run per task.
-func (n *Engine) admitBlockTrigger(taskID string, now time.Time) bool {
+// when it is. force admits it regardless and still records it, so the next
+// scheduled trigger is measured from this run. State is in memory: after a
+// restart the first trigger of each task is admitted, which costs at most one
+// extra run per task.
+func (n *Engine) admitBlockTrigger(taskID string, now time.Time, force bool) bool {
 	n.triggerDedupLock.Lock()
 	defer n.triggerDedupLock.Unlock()
 
@@ -302,7 +304,7 @@ func (n *Engine) admitBlockTrigger(taskID string, now time.Time) bool {
 		n.blockTriggerGates[taskID] = &blockTriggerGate{admittedAt: now}
 		return true
 	}
-	if now.Sub(gate.admittedAt) < MinBlockTriggerGap {
+	if !force && now.Sub(gate.admittedAt) < MinBlockTriggerGap {
 		gate.dropped++
 		return false
 	}

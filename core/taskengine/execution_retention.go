@@ -105,10 +105,14 @@ func pruneExecutionHistory(ctx context.Context, db storage.Storage, keep, maxDel
 
 	// Pass 2: the first count-keep keys of each over-cap group are its oldest.
 	// Records written since pass 1 sort after them, so they are never taken.
-	var candidates [][]byte
+	// An in-flight record is kept but still uses its group's slot, and only
+	// records to delete count toward maxDeletes: protected records must not
+	// fill a sweep and stall pruning of every task after them.
+	var doomed [][]byte
+	selected := 0
 	taken := make(map[string]int)
 	err = db.IterateKeysOnly(prefix, func(key []byte) error {
-		if len(candidates) >= maxDeletes {
+		if selected >= maxDeletes {
 			return errRetentionSweepFull
 		}
 		group, ok := executionHistoryGroup(key)
@@ -120,31 +124,28 @@ func pruneExecutionHistory(ctx context.Context, db storage.Storage, keep, maxDel
 			return nil
 		}
 		taken[g]++
-		candidates = append(candidates, append([]byte(nil), key...))
-		return nil
-	})
-	if err != nil && !errors.Is(err, errRetentionSweepFull) {
-		return 0, err
-	}
 
-	var doomed [][]byte
-	for _, key := range candidates {
 		parsed, perr := ParseExecutionKey(key)
 		if perr != nil && !errors.Is(perr, ErrLegacyKey) {
-			continue
+			return nil
 		}
 		stub := &model.Workflow{Task: &avsproto.Task{Id: parsed.TaskID}}
 		if existsKey(db, PendingExecutionKey(stub, parsed.ExecutionID)) ||
 			existsKey(db, wakeSubscriptionKey(parsed.ExecutionID)) ||
 			existsKey(db, checkpointKey(parsed.ExecutionID)) {
-			continue
+			return nil
 		}
-		doomed = append(doomed, key)
+		selected++
+		doomed = append(doomed, append([]byte(nil), key...))
 		// A run that failed leaves its PENDING status key behind, and
 		// GetExecutionStatus falls back to it once the record is gone.
 		if trigger := TaskTriggerKey(stub, parsed.ExecutionID); existsKey(db, trigger) {
 			doomed = append(doomed, trigger)
 		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errRetentionSweepFull) {
+		return 0, err
 	}
 
 	deleted := 0

@@ -2689,11 +2689,19 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		}, nil
 	}
 
+	// Execution ids pre-created by a non-blocking TriggerWorkflow, consumed
+	// FIFO below.
+	pendingKeys, _ := n.db.GetKeyHasPrefix(PendingExecutionPrefix(task.Id))
+
 	// Block-trigger floor, checked on arrival (limits.go MinBlockTriggerGap).
 	// The task stays enabled and the operator keeps monitoring it; the early
 	// trigger is dropped and the next one that clears the gap runs. Keyed on
 	// the stored trigger, not payload.TriggerType, which the operator sets.
-	if task.GetTrigger().GetBlock() != nil && !n.admitBlockTrigger(task.Id, time.Now()) {
+	//
+	// A notification that would fulfil a pending manual run is admitted: the
+	// operator sends it once, so dropping it would leave that execution
+	// PENDING until the next scheduled trigger, hours away on a slow task.
+	if task.GetTrigger().GetBlock() != nil && !n.admitBlockTrigger(task.Id, time.Now(), len(pendingKeys) > 0) {
 		remaining := int64(-1) // MaxExecution 0 is a legacy unlimited task
 		if task.MaxExecution > 0 {
 			remaining = task.MaxExecution - task.ExecutionCount
@@ -2756,7 +2764,6 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	// If there is a pre-created pending execution id for this task, consume it FIFO; otherwise create new
 	// Only for operator-driven notifications path
 	{
-		pendingKeys, _ := n.db.GetKeyHasPrefix(PendingExecutionPrefix(task.Id))
 		n.logger.Debug("🔍 Checking for pending execution IDs", "task_id", task.Id, "pending_keys_found", len(pendingKeys))
 		var pickedID string
 		for _, k := range pendingKeys {

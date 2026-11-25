@@ -466,14 +466,24 @@ func TestAdmitBlockTrigger(t *testing.T) {
 		{"floor minus jitter runs", MinBlockTriggerGap + MinBlockTriggerInterval - 3*time.Second, true},
 	}
 	for _, s := range steps {
-		if got := engine.admitBlockTrigger("task-a", t0.Add(s.at)); got != s.admit {
+		if got := engine.admitBlockTrigger("task-a", t0.Add(s.at), false); got != s.admit {
 			t.Errorf("%s: admitted=%v, want %v", s.name, got, s.admit)
 		}
 	}
 
 	// The gate is per task.
-	if !engine.admitBlockTrigger("task-b", t0.Add(7*time.Second)) {
+	if !engine.admitBlockTrigger("task-b", t0.Add(7*time.Second), false) {
 		t.Error("another task's first trigger should run")
+	}
+
+	// force (a pending manual run) is admitted inside the gap, and the next
+	// scheduled trigger is measured from it.
+	t1 := t0.Add(10 * time.Second)
+	if !engine.admitBlockTrigger("task-b", t1, true) {
+		t.Error("a forced trigger inside the gap should run")
+	}
+	if engine.admitBlockTrigger("task-b", t1.Add(MinBlockTriggerGap-time.Millisecond), false) {
+		t.Error("a scheduled trigger just after a forced run should be dropped")
 	}
 }
 
@@ -532,6 +542,16 @@ func TestAggregateChecksResultDropsEarlyBlockTrigger(t *testing.T) {
 	backdateBlockTriggerGate(engine, task.Id)
 	if state := notify(400); state.Status != "enabled" {
 		t.Errorf("trigger past the floor: status %q, want enabled", state.Status)
+	}
+
+	// A non-blocking TriggerWorkflow pre-creates a pending execution and the
+	// operator sends one immediate notification for it. Inside the gap it
+	// must still run, or the execution stays PENDING until a later trigger.
+	if err := db.Set(PendingExecutionKey(task, model.GenerateID()), []byte("1")); err != nil {
+		t.Fatal(err)
+	}
+	if state := notify(410); state.Status != "enabled" {
+		t.Errorf("trigger fulfilling a pending manual run: status %q, want enabled", state.Status)
 	}
 }
 
