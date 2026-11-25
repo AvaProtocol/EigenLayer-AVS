@@ -43,6 +43,40 @@ func (v *VM) waitForLoopIterationResult(id string, ch <-chan *ExecutionResult, t
 	}
 }
 
+func loopMetadata(step *avsproto.Execution_Step) map[string]any {
+	if fields, ok := step.GetMetadata().AsInterface().(map[string]any); ok {
+		return fields
+	}
+	return map[string]any{}
+}
+
+// The queue sometimes has only a Go error (submit/timeout), or no data
+// from an otherwise successful runner. Both produce a legacy null result.
+func loopIterationFailure(index int, step *avsproto.Execution_Step, cause error) map[string]any {
+	code, message, details := step.GetErrorCode(), step.GetError(), step.GetErrorDetails()
+	if cause != nil {
+		if message == "" {
+			message = cause.Error()
+		}
+		if typed, ok := IsStructuredError(cause); ok {
+			if code == avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+				code = typed.Code
+			}
+			if details == nil && code == typed.Code {
+				details = structuredErrorDetails(typed)
+			}
+		}
+	}
+	if message == "" {
+		message = "Iteration returned no result"
+	}
+	entry := map[string]any{"index": index, "errorCode": code.String(), "error": message}
+	if details != nil {
+		entry["errorDetails"] = details.AsMap()
+	}
+	return entry
+}
+
 // Iteration steps are not published separately. Carry their confirmation
 // outcome on the loop, so clients can distinguish an unknown on-chain outcome
 // from a confirmed revert or an ordinary iteration error. Unresolved wins
@@ -72,12 +106,7 @@ func propagateLoopConfirmationFailure(parent *avsproto.Execution_Step, iteration
 	parent.Success = false
 	parent.ErrorCode = selected.ErrorCode
 	parent.Error = fmt.Sprintf("Loop iteration %s: %s", selected.Id, selected.Error)
-	metadata := map[string]interface{}{}
-	if parent.Metadata != nil {
-		if current, ok := parent.Metadata.AsInterface().(map[string]interface{}); ok {
-			metadata = current
-		}
-	}
+	metadata := loopMetadata(parent)
 	metadata["confirmationOutcomes"] = outcomes
 	// Only clear a loop failure after reconciliation when every missing result
 	// belongs to a retained confirmation failure (not a submit/RPC/other error).
@@ -449,7 +478,7 @@ func aggregateIterationGasCosts(parentStep *avsproto.Execution_Step, iterSteps [
 	iterationsWithGas := 0
 
 	for _, step := range iterSteps {
-		if step.TotalGasCost == "" || step.TotalGasCost == "0" {
+		if step.GetTotalGasCost() == "" || step.TotalGasCost == "0" {
 			continue
 		}
 		stepCost, ok := new(big.Int).SetString(step.TotalGasCost, 10)

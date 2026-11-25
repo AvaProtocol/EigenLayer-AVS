@@ -323,6 +323,7 @@ enum ErrorCode {
   BUDGET_USED_UP = 4010;                 // error_details: token, needed, remaining
   BUDGET_CHANGING = 4012;              // Wallet/chain paused for an owner budget change
   BUDGET_ENDED = 4011;                   // error_details: validUntil (unix milliseconds)
+  BUDGET_REVOKED = 4013;                 // The runner's wallet budget was revoked
   
   // 5000-5999: External Service errors
   RPC_NODE_ERROR = 5000;            // Blockchain RPC node error
