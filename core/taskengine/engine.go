@@ -257,6 +257,10 @@ type Engine struct {
 	orphanScanCtx    context.Context
 	orphanScanCancel context.CancelFunc
 
+	// executionRetentionCancel stops the execution-history sweep started in
+	// MustStart (execution_retention.go).
+	executionRetentionCancel context.CancelFunc
+
 	// operator stream management for real-time notifications
 	operatorStreams map[string]avsproto.Node_SyncMessagesServer
 	streamsMutex    *sync.RWMutex
@@ -302,6 +306,10 @@ type Engine struct {
 	// Maps trigger_request_id -> time when it was processed (for TTL cleanup)
 	processedTriggerIDs map[string]time.Time
 	triggerDedupLock    *sync.Mutex
+
+	// Runtime block-trigger floor (limits.go admitBlockTrigger), keyed by task
+	// id. Guarded by triggerDedupLock.
+	blockTriggerGates map[string]*blockTriggerGate
 
 	// Batched operator notifications
 	pendingNotifications map[string][]PendingNotification // operatorAddr -> list of notifications
@@ -379,6 +387,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		approvalLogMutex:    &sync.RWMutex{},
 		processedTriggerIDs: make(map[string]time.Time),
 		triggerDedupLock:    &sync.Mutex{},
+		blockTriggerGates:   make(map[string]*blockTriggerGate),
 		smartWalletConfig:   config.SmartWallet,
 		chainConfigs:        buildChainConfigMap(config),
 		shutdown:            false,
@@ -757,6 +766,9 @@ func (n *Engine) Stop() {
 	if n.orphanScanCancel != nil {
 		n.orphanScanCancel()
 	}
+	if n.executionRetentionCancel != nil {
+		n.executionRetentionCancel()
+	}
 
 	// wait for all StreamCheckToOperator goroutines to exit
 	n.streamsWG.Wait()
@@ -1062,6 +1074,13 @@ func (n *Engine) MustStart() error {
 		n.orphanScanCtx, n.orphanScanCancel = context.WithCancel(context.Background())
 		go n.runOrphanScanLoop(n.orphanScanCtx)
 	}
+
+	// Execution history has no TTL; this keeps the newest
+	// MaxExecutionHistoryPerTask records of each task. Every mode, since every
+	// mode stores history.
+	var retentionCtx context.Context
+	retentionCtx, n.executionRetentionCancel = context.WithCancel(context.Background())
+	go n.runExecutionRetentionLoop(retentionCtx)
 
 	return nil
 }
@@ -1489,6 +1508,11 @@ func (n *Engine) CreateWorkflow(user *model.User, taskPayload *avsproto.CreateTa
 	// backstop for every other caller, so no path can store an uncapped task.
 	if taskPayload.MaxExecution <= 0 {
 		taskPayload.MaxExecution = DefaultMaxExecution
+	}
+	if taskPayload.MaxExecution > MaxExecutionCeiling {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"maxExecution %d is above the maximum of %d (one year at the 1-minute block-trigger floor): every run spends metered provider quota, so a workflow's lifetime is bounded; omit the field to take the default of %d",
+			taskPayload.MaxExecution, MaxExecutionCeiling, DefaultMaxExecution)
 	}
 
 	if err := n.checkActiveWorkflowQuota(userAddr); err != nil {
@@ -2568,6 +2592,7 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 					delete(n.processedTriggerIDs, id)
 				}
 			}
+			delete(n.blockTriggerGates, payload.TaskId)
 			n.triggerDedupLock.Unlock()
 
 			return &ExecutionState{
@@ -2664,6 +2689,31 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		}, nil
 	}
 
+	// Execution ids pre-created by a non-blocking TriggerWorkflow, consumed
+	// FIFO below.
+	pendingKeys, _ := n.db.GetKeyHasPrefix(PendingExecutionPrefix(task.Id))
+
+	// Block-trigger floor, checked on arrival (limits.go MinBlockTriggerGap).
+	// The task stays enabled and the operator keeps monitoring it; the early
+	// trigger is dropped and the next one that clears the gap runs. Keyed on
+	// the stored trigger, not payload.TriggerType, which the operator sets.
+	//
+	// A notification that would fulfil a pending manual run is admitted: the
+	// operator sends it once, so dropping it would leave that execution
+	// PENDING until the next scheduled trigger, hours away on a slow task.
+	if task.GetTrigger().GetBlock() != nil && !n.admitBlockTrigger(task.Id, time.Now(), len(pendingKeys) > 0) {
+		remaining := int64(-1) // MaxExecution 0 is a legacy unlimited task
+		if task.MaxExecution > 0 {
+			remaining = task.MaxExecution - task.ExecutionCount
+		}
+		return &ExecutionState{
+			RemainingExecutions: remaining,
+			TaskStillEnabled:    true,
+			Status:              "rate_limited",
+			Message:             fmt.Sprintf("Block trigger arrived within %s of the last run; dropped", MinBlockTriggerGap),
+		}, nil
+	}
+
 	// Task is still active, process the trigger
 	// Create trigger data
 	triggerData := &TriggerData{
@@ -2714,7 +2764,6 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	// If there is a pre-created pending execution id for this task, consume it FIFO; otherwise create new
 	// Only for operator-driven notifications path
 	{
-		pendingKeys, _ := n.db.GetKeyHasPrefix(PendingExecutionPrefix(task.Id))
 		n.logger.Debug("🔍 Checking for pending execution IDs", "task_id", task.Id, "pending_keys_found", len(pendingKeys))
 		var pickedID string
 		for _, k := range pendingKeys {
