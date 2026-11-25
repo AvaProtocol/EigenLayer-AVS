@@ -258,8 +258,10 @@ type Engine struct {
 	orphanScanCancel context.CancelFunc
 
 	// executionRetentionCancel stops the execution-history sweep started in
-	// MustStart (execution_retention.go).
+	// MustStart (execution_retention.go); executionRetentionDone closes once
+	// it has returned.
 	executionRetentionCancel context.CancelFunc
+	executionRetentionDone   chan struct{}
 
 	// operator stream management for real-time notifications
 	operatorStreams map[string]avsproto.Node_SyncMessagesServer
@@ -769,6 +771,11 @@ func (n *Engine) Stop() {
 	if n.executionRetentionCancel != nil {
 		n.executionRetentionCancel()
 	}
+	// The aggregator closes the DB right after Stop returns. A sweep stops at
+	// its next key or batch, or after the value-log GC round in progress.
+	if n.executionRetentionDone != nil {
+		<-n.executionRetentionDone
+	}
 
 	// wait for all StreamCheckToOperator goroutines to exit
 	n.streamsWG.Wait()
@@ -1080,7 +1087,8 @@ func (n *Engine) MustStart() error {
 	// mode stores history.
 	var retentionCtx context.Context
 	retentionCtx, n.executionRetentionCancel = context.WithCancel(context.Background())
-	go n.runExecutionRetentionLoop(retentionCtx)
+	n.executionRetentionDone = make(chan struct{})
+	go n.runExecutionRetentionLoop(retentionCtx, n.executionRetentionDone)
 
 	return nil
 }
