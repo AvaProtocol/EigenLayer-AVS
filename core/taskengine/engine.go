@@ -5113,8 +5113,10 @@ func (n *Engine) shouldLogApprovalMessage(address string) bool {
 // supportsTaskTrigger checks if an operator supports a specific trigger type
 // supportsTaskChain reports whether an operator's advertised
 // supported_chain_ids match a task's chain_id. Pre-multi-chain operators
-// (empty list) accept everything for back-compat; tasks with chain_id=0
-// are chain-agnostic and accepted by every operator.
+// (empty list, never advertised) accept everything for back-compat; an
+// operator that explicitly reported no live chains covers only chain-agnostic
+// tasks, as in operatorsCoveringChain. Tasks with chain_id=0 are
+// chain-agnostic and accepted by every operator.
 func (n *Engine) supportsTaskChain(operatorAddr string, task *model.Workflow) bool {
 	n.lock.Lock()
 	defer n.lock.Unlock()
@@ -5123,7 +5125,7 @@ func (n *Engine) supportsTaskChain(operatorAddr string, task *model.Workflow) bo
 	if !exists {
 		return true
 	}
-	if len(state.SupportedChainIDs) == 0 {
+	if len(state.SupportedChainIDs) == 0 && !state.SupportedChainsExplicit {
 		return true
 	}
 	// Capability is judged on the trigger's monitoring chain (G2) — the chain

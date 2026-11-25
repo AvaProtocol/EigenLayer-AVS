@@ -146,3 +146,38 @@ func TestStaleAssignmentMovesToOperatorCoveringTheChain(t *testing.T) {
 	require.Equal(t, []string{ethereumOperator}, engine.getEligibleOperators(task))
 	require.Equal(t, ethereumOperator, engine.assignTaskToOperator(task))
 }
+
+// An operator whose Ping reported no live chains covers only chain-agnostic
+// tasks. A Base task assigned to it moves to an operator that covers Base,
+// while a cron task it holds stays put.
+func TestAssignmentLeavesOperatorReportingNoLiveChains(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+	engine := New(db, testutil.GetAggregatorConfig(), nil, testutil.GetLogger())
+
+	seedOperator(engine, ethereumOperator, []int64{1, 8453})
+	seedOperator(engine, sepoliaOperator, []int64{1, 8453})
+	engine.UpdateOperatorSupportedChains(ethereumOperator, nil) // every chain worker down
+	engine.streamsMutex.Lock()
+	engine.operatorStreams[sepoliaOperator] = newRecordingStream()
+	engine.operatorStreams[ethereumOperator] = newRecordingStream()
+	engine.streamsMutex.Unlock()
+
+	baseTask := baseBlockTask()
+	cronTask := &model.Workflow{Task: &avsproto.Task{
+		Id:     model.GenerateID(),
+		Status: avsproto.TaskStatus_Enabled,
+		Trigger: &avsproto.TaskTrigger{
+			Id:          "trigger",
+			Type:        avsproto.TriggerType_TRIGGER_TYPE_CRON,
+			TriggerType: &avsproto.TaskTrigger_Cron{Cron: &avsproto.CronTrigger{Config: &avsproto.CronTrigger_Config{Schedules: []string{"0 * * * *"}}}},
+		},
+	}}
+	engine.assignmentMutex.Lock()
+	engine.taskAssignments[baseTask.Id] = ethereumOperator
+	engine.taskAssignments[cronTask.Id] = ethereumOperator
+	engine.assignmentMutex.Unlock()
+
+	require.Equal(t, sepoliaOperator, engine.assignTaskToOperator(baseTask))
+	require.Equal(t, ethereumOperator, engine.assignTaskToOperator(cronTask))
+}
