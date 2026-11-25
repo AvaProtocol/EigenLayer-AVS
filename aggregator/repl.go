@@ -95,6 +95,22 @@ func (agg *Aggregator) waitForFlatten() {
 	agg.flatten.wg.Wait()
 }
 
+// disableTask runs the REPL `disable` command and returns its reply.
+func (agg *Aggregator) disableTask(taskID string) string {
+	if agg.engine == nil {
+		return "task engine is not running"
+	}
+	disabled, err := agg.engine.DisableWorkflow(taskID)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("disable failed: %v", err)
+	case disabled:
+		return fmt.Sprintf("disabled %s; operators are told to stop monitoring it", taskID)
+	default:
+		return fmt.Sprintf("%s was not disabled: it is not an active task", taskID)
+	}
+}
+
 func (agg *Aggregator) stopRepl() {
 	// Connections already accepted outlive the listener; no flatten may start
 	// from one once shutdown has begun.
@@ -231,6 +247,17 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 			} else {
 				fmt.Fprintln(conn, "flatten started in the background; watch the gateway log for \"Flatten finished\"")
 			}
+
+		case "disable":
+			// Pauses a workflow without its owner's credentials, through the
+			// same path as an operator overload alert: status Disabled (the
+			// owner can re-enable it), dropped from the active set, and
+			// operators told to stop monitoring it.
+			if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+				fmt.Fprintln(conn, "Usage: disable <taskID>")
+				break
+			}
+			fmt.Fprintln(conn, agg.disableTask(strings.TrimSpace(parts[1])))
 
 		case "exit":
 			fmt.Fprintln(conn, "Exiting...")
